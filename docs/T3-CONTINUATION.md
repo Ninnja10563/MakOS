@@ -8,7 +8,8 @@ Original specification source:
 
 `/Users/marcushuang/.codex/attachments/4ef18f50-cd19-419b-93ed-d509edff0836/pasted-text.txt`
 
-Host: macOS Apple Silicon M3. Workspace is not a Git repository. Preserve existing files and changes.
+Host: macOS Apple Silicon M3. Workspace is a Git repository on `main`, tracking
+`https://github.com/Ninnja10563/MakOS.git`. Preserve existing files and changes.
 
 ## User priorities
 
@@ -22,12 +23,20 @@ Host: macOS Apple Silicon M3. Workspace is not a Git repository. Preserve existi
 
 ## Current verified state
 
-- Latest visible milestone QEMU is running at login. PID `19919`; exec session `87711`; data clone `build/makos-visible-data-1787604571.img`; QMP `build/makos-visible-1787604571.qmp`. It uses `build/makos-aarch64.img` plus verified integrated package `a9c604254f094de2`. Preserve it for user testing. Check process state before every runtime gate; never start concurrent QEMU.
+- No QEMU/test process was running at the 2026-08-25 handoff. Stale visible-test
+  clone `build/makos-visible-data-1787604571.img` remains available, but PID
+  `19919` and its QMP/session are gone. Check process state before every runtime
+  gate; never start concurrent QEMU.
+- Repository import commit `346b0df` is pushed to GitHub `main`. Generated
+  `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
+  Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
   `cursor=virtio-gpu-plane move=cursorq scanout_damage=none host-cursor=hidden`
 - Focused cursor runtime harness: `scripts/boot_test_aarch64_cursor.py`
 - Make target: `test-aarch64-cursor-runtime`
 - Focused cursor runtime passes on current image after 100 Hz timer input polling: seven QMP positions, zero changed scanout pixels, virtio-GPU cursor plane, host cursor hidden.
+- Fresh 2026-08-25 cursor rerun passes:
+  `MAKOS_AARCH64_CURSOR_RUNTIME_OK accel=hvf positions=7 changed_scanout_pixels=0 backend=virtio-gpu-plane host_cursor=hidden`.
 - Clean integrated data image:
   `build/makos-integrated-a9c604254f094de2.img`
 - Image SHA-256:
@@ -41,6 +50,12 @@ Host: macOS Apple Silicon M3. Workspace is not a Git repository. Preserve existi
 - Package `1b55d512904b8c2a` contains Firefox patch `0054` for held mouse-button dispatch plus patch `0055` and kernel raw key 136 for Ctrl-L. Strict runtime now drags over rendered IANA document text, proves changed selection pixels, copies through MakOS clipboard, selects the URL bar through Ctrl-L, composes exact `https://example.com`, reloads with built-in-root TLS/HTTP 200, and preserves the exact key sequence. Latest pass: paint 164388 ms, Ctrl-A 9373 ms, first character 110 ms, mouse link 25496 ms, document selection 34400 ms, survival 329 seconds. `test-aarch64-firefox-runtime` enables this proof by default.
 - Package `a9c604254f094de2` adds Firefox patch `0056`, defining MakOS wheel events as line-mode deltas instead of the invalid fallback `deltaMode=-1`. Sustained Gate 3 proves down/up wheel dispatch with 65,599 changed pixels and recovery to 13,270 differing pixels, types `makos42` into the real httpbin Customer field, pointer-selects/copies it, composes exact `https://example.com/?customer=makos42`, and completes two cycles/four repeated top-level `example.com`/IANA navigations. Final Make-target pass: paint 169697 ms, Ctrl-A 5727 ms, first character 111 ms, host CPU ratio 1.053, host RSS 325140480 bytes, guest Firefox resident pages 54254, survival 531 seconds.
 - AArch64 `ps` now reports actual mapped user resident pages/KiB by scanning user L3 descriptors. `test-aarch64-firefox-runtime` enables sustained interaction with two cycles by default. Full post-change `make unit && make check`, binary/package verification, and focused cursor runtime pass. Firefox packaging unconditionally refreshes Mozilla `stage-package`. Make/package defaults use verified `a9c604254f094de2`.
+- Latest 2026-08-25 Firefox reruns reached verified browser paint in 248584 ms and
+  255543 ms but failed unchanged Ctrl-A limit at 10971 ms and 14363 ms versus
+  10000 ms. Host evidence at failure: load average 7.66, 163 MiB free RAM,
+  6.6 GiB compressed, with Zen/WindowServer consuming multiple cores. Prior
+  current-package strict pass remains valid evidence, but latest Gate 3 is not
+  green. Do not relax thresholds. Rerun unchanged only after host pressure clears.
 - AArch64 installer now uses shared `makos-installer` fresh/resume core through a virtio-blk adapter. Exact `install disk1 resume-disk1` accepts only blank MBR plus zero/source-identical partial sectors; committed or conflicting media fail closed. Source snapshot begins with a serialized flush/write-freeze; all disk0 writes are denied until error thaw or successful shutdown while disk1 remains writable. Full HVF gate guest-tests both resume refusals, hard-kills QEMU after first progress, proves LBA0 blank plus two source-identical partial blocks, resumes to exact SHA-256 equality, detaches live source, and passes two installed-only persistence boots. Marker: `MAKOS_AARCH64_INSTALL_BOOT_OK ... conflict_resume_refusal=1 ... power_interrupt=pre-mbr ... partial_blocks=2 resume=1 source_digest_match=1 ...`.
 - Final post-freeze `make unit && make check`, AArch64 release/image artifact build, and current visible login boot pass. Active clone is recorded above.
 - Sparse anonymous VM decommit now has fresh upstream-musl guest proof. Probe writes pages, calls `MADV_DONTNEED` and MakOS immediate-decommit `MADV_FREE`, verifies zero refault after each, then unmaps. Fresh 1,350-object static musl build, structural guard, release embed, and full AArch64 runtime pass.
@@ -59,6 +74,15 @@ Host: macOS Apple Silicon M3. Workspace is not a Git repository. Preserve existi
 - MakOS clang now adds `-fstack-protector-strong` by default for C/C++ target builds while preserving explicit musl-bootstrap opt-out. Toolchain gate proves protected/unprotected object symbol behavior; musl exports guard/failure runtime and SysV startup supplies RNG-backed `AT_RANDOM`. Rebuilt deployed musl CRT probe performs a real 32-byte overwrite of a protected 16-byte stack buffer. Full two-boot HVF runtime proves `__stack_chk_fail`, lower-EL data-abort containment as process-group status 139, parent wait/reap, shell survival, and continued guest tests. Broader deployed-app rebuild remains pending.
 - x86 installer supports ATA disk0/disk1, exact admin confirmation, blank install, source-matching resume, and MBR-last commit. Six host tests pass. QEMU runtime uses a prepared source plus per-boot qcow2 overlays, SIGKILLs after the first verified 4 KiB payload block, proves LBA0 blank plus every nonzero partial block source-identical, resumes through `resume-disk1`, verifies final SHA-256 equality, detaches source, and passes two installed-only persistence boots. Marker: `MAKOS_X86_INSTALL_BOOT_OK ... power_interrupt=pre-mbr mbr_blank_after_interrupt=1 partial_blocks=1 resume=1 source_digest_match=1 ...`.
 - Package manager has disk-backed A/B store, signed `MAKDEP1` dependency metadata, graph checks, live read-only `/packages/<name>/payload`, install/remove/rollback refresh, Settings status, AArch64/x86 syscalls and SDK wrappers. Host tests, kernel checks, and five-boot guest fault-injection runtime pass.
+- Queued typed native IPC is implemented on both syscall paths while preserving
+  legacy scalar channels/events. Versioned 64-byte messages stamp kernel-owned
+  sender PID/UID, bounded FIFO channels atomically transfer generation-tagged
+  channel handles with attenuated rights, and unreachable queued-transfer cycles
+  are collected. Service routes require `CAP_IPC`, publishing/accept additionally
+  require `CAP_SERVICE_PUBLISH`, and routes are limited to matching UID/session.
+  Process exit closes routes/handles before reap. Fresh evidence: 12/12 IPC unit
+  tests, `test_aarch64_typed_ipc.py`, full `make unit && make check`, and isolated
+  full HVF boot marker `MAKOS_AARCH64_TYPED_IPC_RUNTIME_OK service=same-domain fifo=1 transfer=attenuated cleanup=process-exit-before-reap`.
 
 ## Important files
 
@@ -71,8 +95,14 @@ Host: macOS Apple Silicon M3. Workspace is not a Git repository. Preserve existi
 
 ## Next actions
 
-1. Add queued typed native IPC with generation-safe handle transfer and capability-gated secure service routing; preserve legacy scalar channels.
-2. Continue highest-impact Partial/Missing original-spec rows; preserve real implementation requirement—no fake/spoofed apps.
+1. When no visible QEMU runs and host load/memory pressure is low, rerun unchanged
+   `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A still
+   exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds.
+2. Boot a current visible login milestone for user testing after the next verified
+   behavior change; record PID/session/data clone/QMP before handoff.
+3. Continue highest-impact Partial/Missing original-spec rows. Strong candidates:
+   AArch64 userspace SMP scheduling or first genuine guest self-hosting step.
+   Preserve real implementation requirement—no fake/spoofed apps.
 
 ## Operating constraints
 

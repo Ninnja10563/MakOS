@@ -4,6 +4,25 @@ Last updated: 2026-08-25.
 
 ## Implemented
 
+- 2026-08-25 repository imported and pushed to
+  `https://github.com/Ninnja10563/MakOS.git` on `main` at commit `346b0df`.
+  Source, docs, scripts, ports, SDK, tests, and manifests are tracked. Generated
+  build/target/output images, logs, QEMU variable stores, and caches remain
+  intentionally ignored.
+- 2026-08-25 queued typed native IPC passes 12 core unit tests, structural ABI
+  guard, full unit/check suite, and isolated full AArch64 HVF runtime. Versioned
+  messages are FIFO and kernel-stamp sender PID/UID; channel-handle transfer is
+  generation-safe, rights-attenuated, lifetime-retained, and cycle-collected.
+  Capability-gated service routes enforce same UID/session. Provider/process exit
+  unregisters services and closes handles before reap. Runtime marker:
+  `MAKOS_AARCH64_TYPED_IPC_RUNTIME_OK service=same-domain fifo=1 transfer=attenuated cleanup=process-exit-before-reap`.
+- 2026-08-25 fresh cursor rerun passes seven HVF QMP positions with zero scanout
+  changes, virtio-GPU cursor plane, and hidden host cursor. Two latest unchanged
+  Firefox Gate 3 reruns painted real browser chrome in 248,584/255,543 ms but
+  failed strict Ctrl-A latency at 10,971/14,363 ms against 10,000 ms. Host was
+  unsuitable for performance qualification: load 7.66, 163 MiB free, 6.6 GiB
+  compressed, multiple browser/WindowServer cores busy. Thresholds remain
+  unchanged; rerun on an idle host before calling latest Gate 3 green.
 - 2026-08-25 AArch64 installer now shares the fail-closed installer core with
   x86 and supports exact `install disk1 resume-disk1`. Full HVF gate SIGKILLs
   QEMU after first verified payload progress. Installer serializes a source
@@ -17,8 +36,8 @@ Last updated: 2026-08-25.
   `a9c604254f094de2` (SHA-256
   `a9c604254f094de24ed2668da74cbcd48f48ae0f111e8b182a7b3dedfeda2824`).
   Focused cursor runtime moves through seven positions with zero changed
-  scanout pixels, virtio-GPU cursor plane, and hidden host cursor. Visible HVF
-  PID 19919 boots a cloned latest package image to login for user testing.
+  scanout pixels, virtio-GPU cursor plane, and hidden host cursor. Prior visible
+  HVF PID 19919 has exited; no visible QEMU remained at handoff.
 - 2026-08-25 sustained Firefox Gate 3 passes exact Make-target defaults on
   package `a9c604254f094de2`. Patch `0056` gives MakOS wheel input valid line
   delta mode; down/up dispatch changes 65,599 document pixels then recovers to
