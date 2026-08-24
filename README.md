@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/makos-icon.svg" width="96" height="96" alt="MakOS icon">
+</p>
+
 # MakOS
 
 MakOS is a from-scratch operating-system project. Current implementation boots
