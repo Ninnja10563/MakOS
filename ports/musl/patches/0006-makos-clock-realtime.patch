@@ -1,0 +1,28 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -78,3 +78,4 @@ enum makos_syscall {
+ 	M_futex = 82,
+ 	M_getrandom = 83,
++	M_clock_realtime = 84,
+ };
+@@ -247,8 +248,15 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_sched_yield:
+ 		return makos_raw(M_yield, 0, 0, 0, 0, 0, 0);
+ 	case L_clock_gettime:
+-		if (a != CLOCK_MONOTONIC) return -ENOTSUP;
+-		result = makos_raw(M_clock_monotonic, 0, 0, 0, 0, 0, 0);
+-		((struct timespec *)b)->tv_sec = result / 100;
+-		((struct timespec *)b)->tv_nsec = result % 100 * 10000000;
++		if (a == CLOCK_MONOTONIC) {
++			result = makos_raw(M_clock_monotonic, 0, 0, 0, 0, 0, 0);
++			((struct timespec *)b)->tv_sec = result / 100;
++			((struct timespec *)b)->tv_nsec = result % 100 * 10000000;
++		} else if (a == CLOCK_REALTIME) {
++			((struct timespec *)b)->tv_sec =
++				makos_raw(M_clock_realtime, 0, 0, 0, 0, 0, 0);
++			((struct timespec *)b)->tv_nsec = 0;
++		} else {
++			return -ENOTSUP;
++		}
+ 		return 0;

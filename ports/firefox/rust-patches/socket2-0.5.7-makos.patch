@@ -1,0 +1,11 @@
+diff --git a/src/sys/unix.rs b/src/sys/unix.rs
+--- a/src/sys/unix.rs
++++ b/src/sys/unix.rs
+@@ -339,6 +339,7 @@ type IovLen = usize;
+     target_os = "hurd",
+     target_os = "illumos",
+     target_os = "ios",
++    target_os = "makos",
+     target_os = "macos",
+     target_os = "netbsd",
+     target_os = "nto",

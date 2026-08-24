@@ -1,0 +1,68 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -10,2 +10,3 @@
+ #include <fcntl.h>
++#include <limits.h>
+ #include <poll.h>
+@@ -48,3 +49,4 @@ enum linux_aarch64_syscall {
+ 	L_write = 64,
+ 	L_set_tid_address = 96,
++	L_nanosleep = 101,
+ 	L_futex = 98,
+@@ -53,2 +55,4 @@ enum linux_aarch64_syscall {
+ 	L_clock_gettime = 113,
++	L_clock_getres = 114,
++	L_clock_nanosleep = 115,
+ 	L_sched_yield = 124,
+@@ -126,5 +130,7 @@ enum makos_syscall {
+ 	M_pread = 100,
+ 	M_pwrite = 101,
++	M_clock_resolution = 102,
++	M_sleep_until = 103,
+ };
+ 
+ struct makos_metadata {
+@@ -185,5 +191,20 @@ static long makos_bool_result(long result, int error)
+ {
+ 	return result == 1 ? 0 : -error;
+ }
+ 
++static long makos_sleep_deadline(const struct timespec *request, int absolute)
++{
++	long ticks;
++	if (!request || request->tv_sec < 0 || request->tv_nsec < 0 ||
++	    request->tv_nsec >= 1000000000L || request->tv_sec > LONG_MAX / 100)
++		return -EINVAL;
++	ticks = request->tv_sec * 100 + (request->tv_nsec + 9999999L) / 10000000L;
++	if (!absolute) {
++		long now = makos_raw(M_clock_monotonic, 0, 0, 0, 0, 0, 0);
++		if (ticks > LONG_MAX - now) return -EINVAL;
++		ticks += now;
++	}
++	return makos_raw(M_sleep_until, ticks, 0, 0, 0, 0, 0);
++}
++
+ static void metadata_to_kstat(struct kstat *to,
+@@ -487,3 +507,21 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		}
+ 		return 0;
++	case L_clock_getres:
++		result = makos_raw(M_clock_resolution, a, 0, 0, 0, 0, 0);
++		if (result < 0 || !b) return result;
++		((struct timespec *)b)->tv_sec = result / 1000000000L;
++		((struct timespec *)b)->tv_nsec = result % 1000000000L;
++		return 0;
++	case L_nanosleep:
++		result = makos_sleep_deadline((const struct timespec *)a, 0);
++		if (result < 0 && b) *(struct timespec *)b = *(const struct timespec *)a;
++		return result;
++	case L_clock_nanosleep:
++		if (a != CLOCK_MONOTONIC && a != CLOCK_REALTIME) return -ENOTSUP;
++		if (b & ~TIMER_ABSTIME || (b == TIMER_ABSTIME && a != CLOCK_MONOTONIC))
++			return -ENOTSUP;
++		result = makos_sleep_deadline((const struct timespec *)c, b == TIMER_ABSTIME);
++		if (result < 0 && d && b != TIMER_ABSTIME)
++			*(struct timespec *)d = *(const struct timespec *)c;
++		return result;
+ 	case L_rt_sigaction:

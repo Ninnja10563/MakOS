@@ -1,0 +1,214 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] gfx: add native MakOS FreeType platform
+
+Wire MakOS to bundled FreeType, image surfaces, software vsync, MakOS font
+directories, and platform-specific font IPC without Android runtime APIs.
+
+diff --git a/dom/ipc/PContent.ipdl b/dom/ipc/PContent.ipdl
+--- a/dom/ipc/PContent.ipdl
++++ b/dom/ipc/PContent.ipdl
+@@ -191,7 +191,7 @@ namespace dom {
+ // SetXPCOMProcessAttributes passes an array of font data to the child,
+ // but each platform needs different details so we have platform-specific
+ // versions of the SystemFontListEntry type:
+-#if defined(ANDROID)
++#if defined(ANDROID) || defined(XP_MAKOS)
+ // Used on Android to pass the list of fonts on the device
+ // to the child process
+ struct SystemFontListEntry {
+diff --git a/gfx/thebes/gfxPlatform.cpp b/gfx/thebes/gfxPlatform.cpp
+--- a/gfx/thebes/gfxPlatform.cpp
++++ b/gfx/thebes/gfxPlatform.cpp
+@@ -86,6 +86,8 @@
+ #  include "gfxPlatformGtk.h"
+ #elif defined(ANDROID)
+ #  include "gfxAndroidPlatform.h"
++#elif defined(XP_MAKOS)
++#  include "gfxMakOSPlatform.h"
+ #endif
+ #if defined(MOZ_WIDGET_ANDROID)
+ #  include "mozilla/jni/Utils.h"  // for IsFennec
+@@ -795,6 +797,8 @@ bool gfxPlatform::HasVariationFontSupport() {
+     sHasVariationFontSupport = gfxPlatformGtk::CheckVariationFontSupport();
+ #elif defined(ANDROID)
+     sHasVariationFontSupport = gfxAndroidPlatform::CheckVariationFontSupport();
++#elif defined(XP_MAKOS)
++    sHasVariationFontSupport = gfxMakOSPlatform::CheckVariationFontSupport();
+ #else
+ #  error "No gfxPlatform implementation available"
+ #endif
+@@ -916,6 +920,8 @@ void gfxPlatform::Init() {
+   gPlatform = new gfxPlatformGtk;
+ #elif defined(ANDROID)
+   gPlatform = new gfxAndroidPlatform;
++#elif defined(XP_MAKOS)
++  gPlatform = new gfxMakOSPlatform;
+ #else
+ #  error "No gfxPlatform implementation available"
+ #endif
+diff --git a/gfx/thebes/moz.build b/gfx/thebes/moz.build
+--- a/gfx/thebes/moz.build
++++ b/gfx/thebes/moz.build
+@@ -79,7 +79,25 @@ EXPORTS.mozilla.gfx += [
+ 
+ EXPORTS.mozilla.gfx += ["SkMemoryReporter.h"]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
++if CONFIG["MOZ_WIDGET_TOOLKIT"] == "makos":
++    LOCAL_INCLUDES += ["/modules/freetype2/include"]
++    EXPORTS += [
++        "gfxFT2FontBase.h",
++        "gfxFT2Fonts.h",
++        "gfxMakOSPlatform.h",
++    ]
++    EXPORTS.mozilla.gfx += [
++        "PrintTargetPDF.h",
++    ]
++    SOURCES += [
++        "gfxFT2FontBase.cpp",
++        "gfxFT2FontList.cpp",
++        "gfxFT2Fonts.cpp",
++        "gfxFT2Utils.cpp",
++        "gfxMakOSPlatform.cpp",
++        "PrintTargetPDF.cpp",
++    ]
++elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
+     EXPORTS += [
+         "gfxAndroidPlatform.h",
+         "gfxFT2FontBase.h",
+diff --git a/gfx/thebes/gfxFT2FontList.cpp b/gfx/thebes/gfxFT2FontList.cpp
+--- a/gfx/thebes/gfxFT2FontList.cpp
++++ b/gfx/thebes/gfxFT2FontList.cpp
+@@ -8,7 +8,9 @@
+ #include "mozilla/MemoryReporting.h"
+ 
+ #include "mozilla/dom/ContentChild.h"
+-#include "gfxAndroidPlatform.h"
++#ifdef MOZ_WIDGET_ANDROID
++#  include "gfxAndroidPlatform.h"
++#endif
+ #include "mozilla/Omnijar.h"
+ #include "mozilla/UniquePtr.h"
+ #include "mozilla/UniquePtrExtensions.h"
+@@ -16,9 +18,6 @@
+ 
+ #include "nsXULAppAPI.h"
+ #include <dirent.h>
+-#include <android/log.h>
+-#define ALOG(args...) __android_log_print(ANDROID_LOG_INFO, "Gecko", ##args)
+-
+ #include "ft2build.h"
+ #include FT_FREETYPE_H
+ #include FT_TRUETYPE_TAGS_H
+@@ -1594,7 +1593,12 @@ void gfxFT2FontList::FindFonts() {
+     root.AppendLiteral("/fonts");
+     return root;
+   }();
++#else
++  // MakOS installer/runtime owns bundled system fonts under /fonts.
++  nsAutoCString androidFontsRoot("/fonts"_ns);
++#endif
+ 
++#if defined(MOZ_WIDGET_ANDROID)
+   bool useSystemFontAPI = !gfxAndroidPlatform::IsFontAPIDisabled();
+ 
+   if (useSystemFontAPI) {
+diff --git a/gfx/thebes/gfxMakOSPlatform.h b/gfx/thebes/gfxMakOSPlatform.h
+new file mode 100644
+--- /dev/null
++++ b/gfx/thebes/gfxMakOSPlatform.h
+@@ -0,0 +1,25 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef GFX_PLATFORM_MAKOS_H
++#define GFX_PLATFORM_MAKOS_H
++
++#include "gfxPlatform.h"
++
++class gfxMakOSPlatform final : public gfxPlatform {
++ public:
++  gfxMakOSPlatform();
++  ~gfxMakOSPlatform() override;
++
++  already_AddRefed<gfxASurface> CreateOffscreenSurface(
++      const IntSize&, gfxImageFormat) override;
++  bool CreatePlatformFontList() override;
++  void ReadSystemFontList(mozilla::dom::SystemFontList*) override;
++  already_AddRefed<mozilla::gfx::VsyncSource>
++  CreateGlobalHardwareVsyncSource() override;
++
++  static bool CheckVariationFontSupport();
++};
++
++#endif
+diff --git a/gfx/thebes/gfxMakOSPlatform.cpp b/gfx/thebes/gfxMakOSPlatform.cpp
+new file mode 100644
+--- /dev/null
++++ b/gfx/thebes/gfxMakOSPlatform.cpp
+@@ -0,0 +1,64 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "gfxMakOSPlatform.h"
++
++#include "gfxFT2FontList.h"
++#include "gfxImageSurface.h"
++#include "gfxPlatformFontList.h"
++#include "mozilla/gfx/2D.h"
++
++#include "ft2build.h"
++#include FT_FREETYPE_H
++
++using namespace mozilla;
++using namespace mozilla::gfx;
++
++static FT_Library sMakOSFreeType;
++
++gfxMakOSPlatform::gfxMakOSPlatform() {
++  if (FT_Init_FreeType(&sMakOSFreeType) == 0) {
++    Factory::SetFTLibrary(sMakOSFreeType);
++  }
++}
++
++gfxMakOSPlatform::~gfxMakOSPlatform() {
++  if (sMakOSFreeType) {
++    FT_Done_FreeType(sMakOSFreeType);
++    sMakOSFreeType = nullptr;
++  }
++}
++
++already_AddRefed<gfxASurface> gfxMakOSPlatform::CreateOffscreenSurface(
++    const IntSize& aSize, gfxImageFormat aFormat) {
++  if (!Factory::AllowedSurfaceSize(aSize)) {
++    return nullptr;
++  }
++  RefPtr<gfxASurface> surface = new gfxImageSurface(aSize, aFormat);
++  return surface.forget();
++}
++
++bool gfxMakOSPlatform::CreatePlatformFontList() {
++  return gfxPlatformFontList::Initialize(new gfxFT2FontList);
++}
++
++void gfxMakOSPlatform::ReadSystemFontList(dom::SystemFontList* aFontList) {
++  gfxFT2FontList::PlatformFontList()->ReadSystemFontList(aFontList);
++}
++
++already_AddRefed<VsyncSource>
++gfxMakOSPlatform::CreateGlobalHardwareVsyncSource() {
++  return GetSoftwareVsyncSource();
++}
++
++bool gfxMakOSPlatform::CheckVariationFontSupport() {
++  if (!sMakOSFreeType) {
++    return false;
++  }
++  FT_Int major = 0;
++  FT_Int minor = 0;
++  FT_Int patch = 0;
++  FT_Library_Version(sMakOSFreeType, &major, &minor, &patch);
++  return major > 2 || (major == 2 && minor >= 7);
++}

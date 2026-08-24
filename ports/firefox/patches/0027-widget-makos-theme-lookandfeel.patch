@@ -1,0 +1,176 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget: add MakOS theme and look-and-feel backend
+
+Use Gecko's portable painted scrollbar, expose deterministic MakOS system
+colors/fonts, and give platform GfxInfo access to generated IPDL headers.
+
+diff --git a/widget/Theme.cpp b/widget/Theme.cpp
+--- a/widget/Theme.cpp
++++ b/widget/Theme.cpp
+@@ -1519,7 +1519,7 @@ UniquePtr<ScrollbarDrawing> Theme::ScrollbarStyle() {
+   return MakeUnique<ScrollbarDrawingCocoa>();
+ #elif MOZ_WIDGET_GTK
+   return MakeUnique<ScrollbarDrawingGTK>();
+-#elif ANDROID
++#elif defined(ANDROID) || defined(MOZ_WIDGET_MAKOS)
+   return MakeUnique<ScrollbarDrawingAndroid>();
+ #else
+ #  error "Unknown platform, need scrollbar implementation."
+diff --git a/widget/makos/nsLookAndFeel.h b/widget/makos/nsLookAndFeel.h
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsLookAndFeel.h
+@@ -0,0 +1,23 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_makos_nsLookAndFeel_h
++#define widget_makos_nsLookAndFeel_h
++
++#include "nsXPLookAndFeel.h"
++
++class nsLookAndFeel final : public nsXPLookAndFeel {
++ public:
++  nsLookAndFeel() = default;
++  ~nsLookAndFeel() override = default;
++
++  void NativeInit() final;
++  nsresult NativeGetInt(IntID, int32_t&) override;
++  nsresult NativeGetFloat(FloatID, float&) override;
++  nsresult NativeGetColor(ColorID, ColorScheme, nscolor&) override;
++  bool NativeGetFont(FontID, nsString&, gfxFontStyle&) override;
++  char16_t GetPasswordCharacterImpl() override { return 0x2022; }
++};
++
++#endif
+diff --git a/widget/makos/nsLookAndFeel.cpp b/widget/makos/nsLookAndFeel.cpp
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsLookAndFeel.cpp
+@@ -0,0 +1,125 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsLookAndFeel.h"
++
++#include "mozilla/FontPropertyTypes.h"
++#include "gfxFont.h"
++#include "nsStyleConsts.h"
++
++using namespace mozilla;
++
++void nsLookAndFeel::NativeInit() { RecordTelemetry(); }
++
++nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme,
++                                       nscolor& aResult) {
++  aResult = GetStandinForNativeColor(aID, aScheme);
++  return NS_OK;
++}
++
++nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
++  switch (aID) {
++    case IntID::CaretBlinkTime:
++      aResult = 567;
++      break;
++    case IntID::CaretWidth:
++    case IntID::SelectTextfieldsOnKeyFocus:
++    case IntID::SkipNavigatingDisabledMenuItem:
++    case IntID::ChosenMenuItemsShouldBlink:
++      aResult = 1;
++      break;
++    case IntID::SubmenuDelay:
++      aResult = 200;
++      break;
++    case IntID::DragThresholdX:
++    case IntID::DragThresholdY:
++      aResult = 4;
++      break;
++    case IntID::ScrollButtonMiddleMouseButtonAction:
++    case IntID::ScrollButtonRightMouseButtonAction:
++      aResult = 3;
++      break;
++    case IntID::TreeOpenDelay:
++    case IntID::TreeCloseDelay:
++      aResult = 1000;
++      break;
++    case IntID::TreeLazyScrollDelay:
++      aResult = 150;
++      break;
++    case IntID::TreeScrollDelay:
++      aResult = 100;
++      break;
++    case IntID::TreeScrollLinesMax:
++      aResult = 3;
++      break;
++    case IntID::AlertNotificationOrigin:
++      aResult = NS_ALERT_TOP;
++      break;
++    case IntID::IMERawInputUnderlineStyle:
++    case IntID::IMESelectedRawTextUnderlineStyle:
++    case IntID::IMEConvertedTextUnderlineStyle:
++    case IntID::IMESelectedConvertedTextUnderline:
++      aResult = static_cast<int32_t>(StyleTextDecorationStyle::Solid);
++      break;
++    case IntID::SpellCheckerUnderlineStyle:
++      aResult = static_cast<int32_t>(StyleTextDecorationStyle::Dotted);
++      break;
++    case IntID::ScrollArrowStyle:
++      aResult = eScrollArrow_None;
++      break;
++    case IntID::ScrollButtonLeftMouseButtonAction:
++    case IntID::MenusCanOverlapOSBar:
++    case IntID::UseOverlayScrollbars:
++    case IntID::AllowOverlayScrollbarsOverlap:
++    case IntID::UseAccessibilityTheme:
++    case IntID::ScrollToClick:
++    case IntID::MenuBarDrag:
++    case IntID::ScrollbarButtonAutoRepeatBehavior:
++    case IntID::SwipeAnimationEnabled:
++    case IntID::ScrollbarDisplayOnMouseMove:
++    case IntID::ScrollbarFadeBeginDelay:
++    case IntID::ScrollbarFadeDuration:
++    case IntID::SystemUsesDarkTheme:
++    case IntID::PrefersReducedMotion:
++    case IntID::PrefersReducedTransparency:
++    case IntID::InvertedColors:
++    case IntID::PrimaryPointerCapabilities:
++    case IntID::AllPointerCapabilities:
++      aResult = 0;
++      break;
++    case IntID::ContextMenuOffsetVertical:
++      aResult = -6;
++      break;
++    case IntID::ContextMenuOffsetHorizontal:
++      aResult = 1;
++      break;
++    default:
++      aResult = 0;
++      return NS_ERROR_FAILURE;
++  }
++  return NS_OK;
++}
++
++nsresult nsLookAndFeel::NativeGetFloat(FloatID aID, float& aResult) {
++  switch (aID) {
++    case FloatID::IMEUnderlineRelativeSize:
++    case FloatID::SpellCheckerUnderlineRelativeSize:
++      aResult = 1.0f;
++      return NS_OK;
++    default:
++      aResult = -1.0f;
++      return NS_ERROR_FAILURE;
++  }
++}
++
++bool nsLookAndFeel::NativeGetFont(FontID, nsString& aName,
++                                  gfxFontStyle& aStyle) {
++  aStyle.style = FontSlantStyle::NORMAL;
++  aStyle.weight = FontWeight::NORMAL;
++  aStyle.stretch = FontStretch::NORMAL;
++  aStyle.size = 14;
++  aStyle.systemFont = true;
++  aName.AssignLiteral("sans-serif");
++  return true;
++}

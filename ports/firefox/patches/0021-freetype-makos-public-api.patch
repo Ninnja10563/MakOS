@@ -1,0 +1,65 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] gfx: expose raw FreeType APIs to MakOS consumers
+
+MakOS uses Gecko's raw FreeType backend without Android or Fontconfig. Make
+the public FreeType declarations and WebRender font reconstruction select that
+backend consistently.
+
+diff --git a/gfx/2d/2D.h b/gfx/2d/2D.h
+--- a/gfx/2d/2D.h
++++ b/gfx/2d/2D.h
+@@ -38,7 +38,8 @@
+ 
+ #include "nsRegionFwd.h"
+ 
+-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK)
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GTK) || \
++    defined(MOZ_WIDGET_MAKOS)
+ #  ifndef MOZ_ENABLE_FREETYPE
+ #    define MOZ_ENABLE_FREETYPE
+ #  endif
+@@ -2204,7 +2205,7 @@ class GFX2D_API Factory {
+       RefPtr<SharedFTFace> aFace, FcPattern* aPattern);
+ #endif
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+   static already_AddRefed<ScaledFont> CreateScaledFontForFreeTypeFont(
+       const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
+       RefPtr<SharedFTFace> aFace, bool aApplySyntheticBold = false);
+diff --git a/gfx/2d/NativeFontResourceFreeType.h b/gfx/2d/NativeFontResourceFreeType.h
+--- a/gfx/2d/NativeFontResourceFreeType.h
++++ b/gfx/2d/NativeFontResourceFreeType.h
+@@ -21,7 +21,7 @@ class NativeFontResourceFreeType
+  public:
+   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(NativeFontResourceFreeType, override)
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+   static already_AddRefed<NativeFontResourceFreeType> Create(
+       uint8_t* aFontData, uint32_t aDataLength,
+       FT_Library aFTLibrary = nullptr);
+diff --git a/gfx/2d/NativeFontResourceFreeType.cpp b/gfx/2d/NativeFontResourceFreeType.cpp
+--- a/gfx/2d/NativeFontResourceFreeType.cpp
++++ b/gfx/2d/NativeFontResourceFreeType.cpp
+@@ -35,7 +35,7 @@ already_AddRefed<T> NativeFontResourceFreeType::CreateInternal(
+   return resource.forget();
+ }
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+ already_AddRefed<NativeFontResourceFreeType> NativeFontResourceFreeType::Create(
+     uint8_t* aFontData, uint32_t aDataLength, FT_Library aFTLibrary) {
+   return CreateInternal<NativeFontResourceFreeType>(aFontData, aDataLength,
+diff --git a/gfx/webrender_bindings/Moz2DImageRenderer.cpp b/gfx/webrender_bindings/Moz2DImageRenderer.cpp
+--- a/gfx/webrender_bindings/Moz2DImageRenderer.cpp
++++ b/gfx/webrender_bindings/Moz2DImageRenderer.cpp
+@@ -180,7 +180,7 @@ void AddFontData(WrFontKey aKey, const uint8_t* aData, size_t aLength,
+ #elif defined(XP_WIN)
+     font.mUnscaledFont = new UnscaledFontDWrite(
+         reinterpret_cast<IDWriteFontFace*>(aHandle), nullptr);
+-#elif defined(ANDROID)
++#elif defined(ANDROID) || defined(MOZ_WIDGET_MAKOS)
+     font.mUnscaledFont = new UnscaledFontFreeType(
+         reinterpret_cast<const char*>(aHandle), aIndex);
+ #else

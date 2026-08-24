@@ -1,0 +1,69 @@
+diff --git a/widget/makos/MakOSSurface.h b/widget/makos/MakOSSurface.h
+--- a/widget/makos/MakOSSurface.h
++++ b/widget/makos/MakOSSurface.h
+@@ -23,6 +23,7 @@
+   Pointer = 2,
+   Resize = 3,
+   Close = 4,
++  Scroll = 5,
+ };
+ 
+ struct SurfaceEvent {
+@@ -35,6 +36,9 @@
+   uint32_t height;
+ };
+ 
++// Scroll events keep pointer-local x/y and encode signed horizontal/vertical
++// wheel deltas in modifiers/key. Other event kinds retain their normal fields.
++
+ static_assert(sizeof(SurfaceEvent) == 28,
+               "MakOS kernel surface-event ABI changed");
+ 
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -256,15 +256,20 @@
+         (void)SynthesizeNativeMouseEvent(
+             point, NativeMouseMessage::Move, MouseButton::eNotPressed,
+             nsIWidget::Modifiers::NO_MODIFIERS, nullptr);
+-        bool wasDown = (mPointerButtons & 1) != 0;
+-        bool isDown = (event.key & 1) != 0;
+-        if (wasDown != isDown) {
+-          (void)SynthesizeNativeMouseEvent(
+-              point,
+-              isDown ? NativeMouseMessage::ButtonDown
+-                     : NativeMouseMessage::ButtonUp,
+-              MouseButton::ePrimary, nsIWidget::Modifiers::NO_MODIFIERS,
+-              nullptr);
++        constexpr uint32_t buttonMasks[] = {1, 2, 4};
++        constexpr MouseButton buttons[] = {
++            MouseButton::ePrimary, MouseButton::eSecondary,
++            MouseButton::eMiddle};
++        for (size_t i = 0; i < 3; ++i) {
++          bool wasDown = (mPointerButtons & buttonMasks[i]) != 0;
++          bool isDown = (event.key & buttonMasks[i]) != 0;
++          if (wasDown != isDown) {
++            (void)SynthesizeNativeMouseEvent(
++                point,
++                isDown ? NativeMouseMessage::ButtonDown
++                       : NativeMouseMessage::ButtonUp,
++                buttons[i], nsIWidget::Modifiers::NO_MODIFIERS, nullptr);
++          }
+         }
+         mPointerButtons = event.key;
+         break;
+@@ -278,6 +283,14 @@
+           (void)mWidgetListener->RequestWindowClose(this);
+         }
+         break;
++      case makos::SurfaceEventKind::Scroll: {
++        LayoutDeviceIntPoint offset = WidgetToScreenOffset();
++        LayoutDeviceIntPoint point(offset.x + event.x, offset.y + event.y);
++        (void)SynthesizeNativeMouseScrollEvent(
++            point, 0, static_cast<int32_t>(event.modifiers),
++            static_cast<int32_t>(event.key), 0.0, 0, 0, nullptr);
++        break;
++      }
+       case makos::SurfaceEventKind::Key:
+         DispatchMakOSKey(this, event.key);
+         break;

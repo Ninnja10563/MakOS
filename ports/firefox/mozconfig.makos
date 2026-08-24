@@ -1,0 +1,34 @@
+# Target contract. Not usable until Gecko recognizes MakOS and widget/multimedia
+# backends listed in ABI.md exist.
+mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/../obj-aarch64-makos
+
+ac_add_options --target=aarch64-unknown-makos
+ac_add_options --host=aarch64-apple-darwin
+ac_add_options --enable-application=browser
+ac_add_options --enable-default-toolkit=cairo-makos
+ac_add_options --disable-tests
+ac_add_options --disable-crashreporter
+ac_add_options --disable-updater
+ac_add_options --disable-audio-backends
+# wasm2c sandboxes reserve large guarded address ranges that MakOS cannot yet
+# provide. Use RLBox's native no-op backend until sparse VM reservations land;
+# otherwise Expat fails every XML/XUL parse with NS_ERROR_OUT_OF_MEMORY.
+ac_add_options --without-wasm-sandboxed-libraries
+ac_add_options --with-libclang-path=${MAKOS_BINDGEN_LIBDIR:-/opt/homebrew/opt/llvm@18/lib}
+export MAKOS_PROFILER_BINDGEN_LIBDIR="${MAKOS_PROFILER_BINDGEN_LIBDIR:-/opt/homebrew/opt/llvm/lib}"
+export MAKOS_MODERN_BINDGEN_LIBDIR="${MAKOS_MODERN_BINDGEN_LIBDIR:-/opt/homebrew/opt/llvm/lib}"
+export MAKOS_NSS_BINDGEN_LIBCXX22=1
+
+export CC="${MAKOS_CC:-clang} --target=aarch64-unknown-makos --sysroot=$MAKOS_SYSROOT -D__makos__ -D__unix__=1 -D_GNU_SOURCE"
+export CXX="${MAKOS_CXX:-clang++} --target=aarch64-unknown-makos --sysroot=$MAKOS_SYSROOT -D__makos__ -D__unix__=1 -D_GNU_SOURCE -D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS"
+export CARGOFLAGS="${MAKOS_CARGOFLAGS:--Zjson-target-spec}"
+export HOST_CC="${MAKOS_HOST_CC:-/usr/bin/clang}"
+export HOST_CXX="${MAKOS_HOST_CXX:-/usr/bin/clang++}"
+# Mozilla configures AR for every target. NM exists only for Linux-kernel
+# targets in this ESR and RANLIB/STRIP are not user options, so exporting them
+# makes a distinct MakOS target fail before compiler probing.  Do not claim
+# those Linux-only configure variables for MakOS.
+export AR="${MAKOS_AR:-/opt/homebrew/opt/llvm/bin/llvm-ar}"
+export READELF="${MAKOS_READELF:-/opt/homebrew/opt/llvm/bin/llvm-readelf}"
+export OBJCOPY="${MAKOS_OBJCOPY:-/opt/homebrew/opt/llvm/bin/llvm-objcopy}"
+export LLVM_PROFDATA="${MAKOS_LLVM_PROFDATA:-/opt/homebrew/opt/llvm/bin/llvm-profdata}"

@@ -1,0 +1,11 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -10,6 +10,7 @@
+ #include <dirent.h>
+ #include <fcntl.h>
+ #include <limits.h>
++#include <netinet/in.h>
+ #include <netinet/tcp.h>
+ #include <poll.h>
+ #include <stddef.h>

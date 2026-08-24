@@ -1,0 +1,27 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] netwerk: omit moz-icon URI without MakOS icon channel
+
+MakOS has no native file-icon channel yet. Keep network URI construction
+buildable without pretending another platform's native icon backend exists.
+
+diff --git a/netwerk/base/nsNetUtil.cpp b/netwerk/base/nsNetUtil.cpp
+--- a/netwerk/base/nsNetUtil.cpp
++++ b/netwerk/base/nsNetUtil.cpp
+@@ -96,7 +96,7 @@
+ #include "nsSocketTransportService2.h"
+ #include "nsViewSourceHandler.h"
+ #include "nsJARURI.h"
+-#ifndef XP_IOS
++#if !defined(XP_IOS) && !defined(XP_MAKOS)
+ #  include "nsIconURI.h"
+ #endif
+ #include "nsAboutProtocolHandler.h"
+@@ -1990,7 +1990,7 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
+         .Finalize(aURI);
+   }
+ 
+-#ifndef XP_IOS
++#if !defined(XP_IOS) && !defined(XP_MAKOS)
+   if (scheme.EqualsLiteral("moz-icon")) {
+     return NS_MutateURI(new nsMozIconURI::Mutator())
+         .SetSpec(aSpec)

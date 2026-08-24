@@ -1,0 +1,10 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -365,5 +365,5 @@ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ 	socklen_t name_length;
+ 	size_t capacity = 0, copied = 0;
+ 	long result;
+-	if (!message || message->msg_iovlen > 16 || message->msg_controllen)
++	if (!message || message->msg_iovlen > 16)
+ 		return -ENOTSUP;

@@ -1,0 +1,11 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -625,6 +625,7 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		if (!b || (c & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) ||
+ 		    (c & PROT_WRITE && c & PROT_EXEC) || f & 4095)
+ 			return -EINVAL;
++		d &= ~MAP_NORESERVE;
+ 		if (d != MAP_PRIVATE && d != (MAP_PRIVATE | MAP_FIXED) &&
+ 		    d != (MAP_PRIVATE | MAP_ANONYMOUS) &&
+ 		    d != (MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS))

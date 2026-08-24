@@ -1,0 +1,5 @@
+version=1.28.0
+archive=micropython-1.28.0.tar.xz
+url=https://github.com/micropython/micropython/releases/download/v1.28.0/micropython-1.28.0.tar.xz
+sha256=4e43c59657b8da33b4bc503509a827cc3ea6cb66c446475c57776cf4467ba215
+license=MIT

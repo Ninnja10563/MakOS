@@ -1,0 +1,38 @@
+diff --git a/widget/makos/MakOSSurface.cpp b/widget/makos/MakOSSurface.cpp
+--- a/widget/makos/MakOSSurface.cpp
++++ b/widget/makos/MakOSSurface.cpp
+@@ -18,4 +18,5 @@ enum class Syscall : uint64_t {
+   SurfaceClose = 58,
+   SurfaceReadEvent = 60,
+   SurfaceBlit = 113,
++  SurfaceDestroy = 123,
+ };
+@@ -94,4 +95,8 @@ bool HideSurface(SurfaceHandle aSurface) {
+   return Svc4(Syscall::SurfaceClose, aSurface, 0, 0, 0) == 1;
+ }
+ 
++bool DestroySurface(SurfaceHandle aSurface) {
++  return Svc4(Syscall::SurfaceDestroy, aSurface, 0, 0, 0) == 1;
++}
++
+ bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent) {
+diff --git a/widget/makos/MakOSSurface.h b/widget/makos/MakOSSurface.h
+--- a/widget/makos/MakOSSurface.h
++++ b/widget/makos/MakOSSurface.h
+@@ -52,4 +52,5 @@ bool PresentSurface(SurfaceHandle aSurface);
+ // Current close operation hides a retained surface; it does not destroy the
+ // process or release the handle.
+ bool HideSurface(SurfaceHandle aSurface);
++bool DestroySurface(SurfaceHandle aSurface);
+ bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent);
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -189,6 +189,6 @@ class MakOSWindow final : public HeadlessWidget {
+       gTopLevelWindow = nullptr;
+     }
+     if (mSurface != makos::kInvalidSurface) {
+-      makos::HideSurface(mSurface);
++      makos::DestroySurface(mSurface);
+       mSurface = makos::kInvalidSurface;
+     }

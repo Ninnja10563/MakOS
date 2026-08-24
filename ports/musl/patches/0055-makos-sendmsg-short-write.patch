@@ -1,0 +1,27 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] musl: return sendmsg short writes above bridge cap
+
+Linux stream sendmsg may consume only a prefix of the supplied iovecs. Gather
+the bridge's 64 KiB maximum, pass that prefix to the kernel, and return the
+kernel's actual count instead of rejecting a larger payload with EMSGSIZE.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -359,10 +359,13 @@ static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
+ 		return -EINVAL;
+ 	(void)packed;
+ 	for (size_t i = 0; i < message->msg_iovlen; i++) {
+-		if (message->msg_iov[i].iov_len > sizeof buffer - total) return -EMSGSIZE;
++		size_t amount;
++		if (total == sizeof buffer) break;
++		amount = message->msg_iov[i].iov_len;
++		if (amount > sizeof buffer - total) amount = sizeof buffer - total;
+ 		memcpy(buffer + total, message->msg_iov[i].iov_base,
+-			message->msg_iov[i].iov_len);
+-		total += message->msg_iov[i].iov_len;
++			amount);
++		total += amount;
+ 	}
+ 	if (message->msg_controllen) {
+ 		if (!message->msg_control || message->msg_name ||

@@ -1,0 +1,24 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] js: map MakOS AArch64 signal context registers
+
+MakOS' musl ABI uses the standard AArch64 mcontext layout: x0-x30 in regs,
+plus sp, pc, and pstate. Expose those fields to SpiderMonkey's trap handler.
+
+diff --git a/js/src/wasm/WasmSignalHandlers.cpp b/js/src/wasm/WasmSignalHandlers.cpp
+--- a/js/src/wasm/WasmSignalHandlers.cpp
++++ b/js/src/wasm/WasmSignalHandlers.cpp
+@@ -78,6 +78,14 @@ using namespace js::wasm;
+ #    define RFP_sig(p) ((p)->Fp)
+ #    define R31_sig(p) ((p)->Sp)
+ #    define RLR_sig(p) ((p)->Lr)
++#  elif defined(XP_MAKOS)
++#    if !defined(__aarch64__)
++#      error "MakOS SpiderMonkey context support requires AArch64"
++#    endif
++#    define EPC_sig(p) ((p)->uc_mcontext.pc)
++#    define RFP_sig(p) ((p)->uc_mcontext.regs[29])
++#    define RLR_sig(p) ((p)->uc_mcontext.regs[30])
++#    define R31_sig(p) ((p)->uc_mcontext.sp)
+ #  elif defined(__OpenBSD__)
+ #    define EIP_sig(p) ((p)->sc_eip)
+ #    define EBP_sig(p) ((p)->sc_ebp)

@@ -1,0 +1,116 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -8,5 +8,7 @@
+ #define _GNU_SOURCE
+ #include <errno.h>
++#include <dirent.h>
+ #include <fcntl.h>
+ #include <poll.h>
++#include <stddef.h>
+ #include <sys/ioctl.h>
+@@ -27,6 +29,7 @@ enum linux_aarch64_syscall {
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
+ 	L_pipe2 = 59,
++	L_getdents64 = 61,
+ 	L_lseek = 62,
+ 	L_ppoll = 73,
+ 	L_newfstatat = 79,
+@@ -107,6 +110,7 @@ enum makos_syscall {
+ 	M_pipe2 = 90,
+ 	M_poll = 91,
+ 	M_fstat_metadata = 92,
++	M_read_dir_fd = 93,
+ };
+ 
+ struct makos_metadata {
+@@ -119,6 +123,13 @@ struct makos_metadata {
+ 	unsigned long long inode;
+ };
+ 
++struct makos_directory_entry {
++	unsigned long long inode;
++	unsigned kind;
++	unsigned name_length;
++	unsigned char name[255];
++};
++
+ struct makos_termios {
+ 	unsigned input_flags;
+ 	unsigned output_flags;
+@@ -220,6 +231,32 @@ static long makos_fstatat(long dirfd, const char *path,
+ 	return 0;
+ }
+ 
++static long makos_getdents(long fd, unsigned char *output, long capacity)
++{
++	struct makos_directory_entry entry;
++	long used = 0;
++	if (capacity < 280) return -EINVAL;
++	while (capacity - used >= 280) {
++		long result = makos_raw(M_read_dir_fd, fd, (long)&entry, 0, 0, 0, 0);
++		struct dirent *record;
++		unsigned length, index;
++		if (result < 0) return used ? used : result;
++		if (!result) break;
++		if (entry.name_length > sizeof entry.name) return used ? used : -EIO;
++		length = (offsetof(struct dirent, d_name) + entry.name_length + 1 + 7) & ~7;
++		record = (struct dirent *)(output + used);
++		for (index = 0; index < length; index++) output[used + index] = 0;
++		record->d_ino = entry.inode;
++		record->d_off = result;
++		record->d_reclen = length;
++		record->d_type = entry.kind == 2 ? DT_DIR : DT_REG;
++		for (index = 0; index < entry.name_length; index++)
++			record->d_name[index] = entry.name[index];
++		used += length;
++	}
++	return used;
++}
++
+ static void termios_from_makos(struct termios *to,
+ 	const struct makos_termios *from)
+ {
+@@ -282,7 +318,8 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 	long length, result;
+ 	int access;
+ 	/* O_LARGEFILE is a no-op on this 64-bit-only target. */
+-	long supported = O_ACCMODE | O_CREAT | O_TRUNC | O_LARGEFILE;
++	long supported = O_ACCMODE | O_CREAT | O_TRUNC | O_LARGEFILE |
++		O_DIRECTORY | O_CLOEXEC;
+ 
+ 	if (dirfd != AT_FDCWD) return -ENOTSUP;
+ 	if (flags & ~supported) return -ENOTSUP;
+@@ -296,7 +333,21 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 		(void)makos_raw(M_create, (long)path, length, 0, 0, 0, 0);
+ 	result = makos_raw(M_open, (long)path, length, access == O_WRONLY,
+ 		0, 0, 0);
+-	return makos_path_result(result, access == O_WRONLY ? EACCES : ENOENT);
++	result = makos_path_result(result, access == O_WRONLY ? EACCES : ENOENT);
++	if (result < 0) return result;
++	if (flags & O_DIRECTORY) {
++		struct kstat metadata;
++		if (makos_fstat(result, &metadata) < 0 || !S_ISDIR(metadata.st_mode)) {
++			(void)makos_raw(M_close, result, 0, 0, 0, 0, 0);
++			return -ENOTDIR;
++		}
++	}
++	if ((flags & O_CLOEXEC) &&
++	    makos_raw(M_fd_control, result, 2, FD_CLOEXEC, 0, 0, 0) < 0) {
++		(void)makos_raw(M_close, result, 0, 0, 0, 0, 0);
++		return -EIO;
++	}
++	return result;
+ }
+ 
+ static long makos_ioctl(long fd, long request, long argument)
+@@ -380,6 +431,8 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		if (b & ~(O_NONBLOCK | O_CLOEXEC)) return -EINVAL;
+ 		if (!(b & O_NONBLOCK)) return -ENOTSUP;
+ 		return makos_raw(M_pipe2, a, b, 0, 0, 0, 0);
++	case L_getdents64:
++		return makos_getdents(a, (unsigned char *)b, c);
+ 	case L_ppoll:
+ 		if (d) return -ENOTSUP;
+ 		if (!c) return -ENOTSUP;

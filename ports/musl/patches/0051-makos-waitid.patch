@@ -1,0 +1,64 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] musl: implement waitid P_PID through MakOS process wait
+
+Firefox uses waitid with WNOWAIT to inspect a child, then WNOHANG to reap it.
+Translate that sequence to MakOS so exited children release kernel resources.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -21,6 +21,7 @@
+ #include <sys/stat.h>
+ #include <sys/statfs.h>
+ #include <sys/utsname.h>
++#include <sys/wait.h>
+ #include <termios.h>
+ #include <time.h>
+ #include <unistd.h>
+@@ -70,6 +71,7 @@ enum linux_aarch64_syscall {
+ 	L_futex = 98,
+ 	L_exit = 93,
+ 	L_exit_group = 94,
++	L_waitid = 95,
+ 	L_clock_gettime = 113,
+ 	L_clock_getres = 114,
+ 	L_clock_nanosleep = 115,
+@@ -192,6 +194,7 @@ enum makos_syscall {
+ 	M_uname = 122,
+ 	M_socketpair = 124,
+ 	M_process_fork = 125,
++	M_process_wait_status = 126,
+ };
+ 
+ struct makos_metadata {
+@@ -918,6 +921,30 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		    a != RUSAGE_THREAD)) return -EINVAL;
+ 		memset((void *)b, 0, sizeof(struct rusage));
+ 		return 0;
++	case L_waitid:
++	{
++		siginfo_t *info = (siginfo_t *)c;
++		if (a != P_PID) return -ENOTSUP;
++		if (b <= 0 || !info || e) return -EINVAL;
++		if (!(d & WEXITED) || d & ~(WEXITED | WNOHANG | WNOWAIT))
++			return -EINVAL;
++		do {
++			result = makos_raw(M_process_wait_status, b,
++				!(d & WNOWAIT), 0, 0, 0, 0);
++			if (result || d & WNOHANG) break;
++			makos_raw(M_yield, 0, 0, 0, 0, 0, 0);
++		} while (1);
++		if (result < 0) return result;
++		memset(info, 0, sizeof(*info));
++		if (result) {
++			info->si_signo = SIGCHLD;
++			info->si_code = CLD_EXITED;
++			info->si_pid = b;
++			info->si_uid = makos_raw(M_process_identity, 1, 0, 0, 0, 0, 0);
++			info->si_status = (result - 1) & 0xff;
++		}
++		return 0;
++	}
+ 	case L_umask:
+ 	{
+ 		static unsigned current_mask = 022;

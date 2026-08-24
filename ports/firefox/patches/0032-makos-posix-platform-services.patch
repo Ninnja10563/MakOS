@@ -1,0 +1,175 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] platform: add MakOS POSIX services and AArch64 XPTCall
+
+Use poll/select libevent, AArch64 ELF XPTCall, ICU locale defaults, and an
+honest external-handler backend without Linux desktop service dependencies.
+
+diff --git a/intl/locale/moz.build b/intl/locale/moz.build
+--- a/intl/locale/moz.build
++++ b/intl/locale/moz.build
+@@ -20,6 +20,8 @@ elif toolkit == "gtk":
+     DIRS += ["gtk"]
+ elif toolkit == "android":
+     DIRS += ["android"]
++elif toolkit == "makos":
++    DIRS += ["makos"]
+ 
+ XPIDL_SOURCES += [
+     "mozILocaleService.idl",
+diff --git a/intl/locale/makos/moz.build b/intl/locale/makos/moz.build
+new file mode 100644
+--- /dev/null
++++ b/intl/locale/makos/moz.build
+@@ -0,0 +1,10 @@
++# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++SOURCES += ["OSPreferences_makos.cpp"]
++
++FINAL_LIBRARY = "xul"
++
++LOCAL_INCLUDES += [".."]
+diff --git a/intl/locale/makos/OSPreferences_makos.cpp b/intl/locale/makos/OSPreferences_makos.cpp
+new file mode 100644
+--- /dev/null
++++ b/intl/locale/makos/OSPreferences_makos.cpp
+@@ -0,0 +1,45 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "OSPreferences.h"
++
++#include <locale.h>
++
++#include "mozilla/intl/Locale.h"
++
++using namespace mozilla::intl;
++
++OSPreferences::OSPreferences() = default;
++
++bool OSPreferences::ReadSystemLocales(nsTArray<nsCString>& aLocaleList) {
++  nsAutoCString locale(Locale::GetDefaultLocale());
++  if (!CanonicalizeLanguageTag(locale)) {
++    return false;
++  }
++  aLocaleList.AppendElement(locale);
++  return true;
++}
++
++bool OSPreferences::ReadRegionalPrefsLocales(
++    nsTArray<nsCString>& aLocaleList) {
++  nsAutoCString locale(setlocale(LC_TIME, nullptr));
++  if (!CanonicalizeLanguageTag(locale)) {
++    return ReadSystemLocales(aLocaleList);
++  }
++  aLocaleList.AppendElement(locale);
++  return true;
++}
++
++bool OSPreferences::ReadDateTimePattern(DateTimeFormatStyle aDateStyle,
++                                        DateTimeFormatStyle aTimeStyle,
++                                        const nsACString& aLocale,
++                                        nsACString& aRetVal) {
++  nsAutoCString skeleton;
++  return GetDateTimeSkeletonForStyle(aDateStyle, aTimeStyle, aLocale,
++                                     skeleton) &&
++         GetPatternForSkeleton(skeleton, aLocale, aRetVal);
++}
++
++void OSPreferences::RemoveObservers() {}
+diff --git a/ipc/chromium/src/third_party/libeventcommon.mozbuild b/ipc/chromium/src/third_party/libeventcommon.mozbuild
+--- a/ipc/chromium/src/third_party/libeventcommon.mozbuild
++++ b/ipc/chromium/src/third_party/libeventcommon.mozbuild
+@@ -6,6 +6,8 @@
+ 
+ if CONFIG['TARGET_KERNEL'] == 'Darwin':
+     libevent_include_suffix = 'mac'
++elif CONFIG['TARGET_KERNEL'] == 'MakOS':
++    libevent_include_suffix = 'makos'
+ elif CONFIG['TARGET_KERNEL'] in ('DragonFly', 'FreeBSD', 'NetBSD', 'OpenBSD'):
+     libevent_include_suffix = 'bsd'
+ elif CONFIG['TARGET_KERNEL'] == 'SunOS':
+diff --git a/ipc/chromium/src/third_party/libevent/makos/event2/event-config.h b/ipc/chromium/src/third_party/libevent/makos/event2/event-config.h
+new file mode 100644
+--- /dev/null
++++ b/ipc/chromium/src/third_party/libevent/makos/event2/event-config.h
+@@ -0,0 +1,15 @@
++/* MakOS libevent configuration: POSIX/musl baseline, poll/select backend. */
++#ifndef EVENT2_EVENT_CONFIG_MAKOS_H_INCLUDED_
++#define EVENT2_EVENT_CONFIG_MAKOS_H_INCLUDED_
++
++#include "../../linux/event2/event-config.h"
++
++/* Kernel does not expose Linux epoll/eventfd syscalls. */
++#undef EVENT__HAVE_EPOLL
++#undef EVENT__HAVE_EPOLL_CREATE1
++#undef EVENT__HAVE_EPOLL_CTL
++#undef EVENT__HAVE_EVENTFD
++#undef EVENT__HAVE_SYS_EPOLL_H
++#undef EVENT__HAVE_SYS_EVENTFD_H
++
++#endif
+diff --git a/uriloader/exthandler/moz.build b/uriloader/exthandler/moz.build
+--- a/uriloader/exthandler/moz.build
++++ b/uriloader/exthandler/moz.build
+@@ -89,6 +89,10 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
+         "unix/nsGNOMERegistry.cpp",
+         "unix/nsMIMEInfoUnix.cpp",
+     ]
++elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "makos":
++    UNIFIED_SOURCES += [
++        "unix/nsMIMEInfoMakOS.cpp",
++    ]
+ elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
+     UNIFIED_SOURCES += [
+         "android/nsMIMEInfoAndroid.cpp",
+diff --git a/uriloader/exthandler/unix/nsMIMEInfoMakOS.cpp b/uriloader/exthandler/unix/nsMIMEInfoMakOS.cpp
+new file mode 100644
+--- /dev/null
++++ b/uriloader/exthandler/unix/nsMIMEInfoMakOS.cpp
+@@ -0,0 +1,29 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsMIMEInfoUnix.h"
++
++nsresult nsMIMEInfoUnix::LoadUriInternal(nsIURI*) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP nsMIMEInfoUnix::GetDefaultExecutable(nsIFile**) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP nsMIMEInfoUnix::GetHasDefaultHandler(bool* aResult) {
++  if (GetDefaultApplication()) {
++    return nsMIMEInfoImpl::GetHasDefaultHandler(aResult);
++  }
++  *aResult = false;
++  return NS_OK;
++}
++
++nsresult nsMIMEInfoUnix::LaunchDefaultWithFile(nsIFile* aFile) {
++  if (GetDefaultApplication()) {
++    return nsMIMEInfoImpl::LaunchDefaultWithFile(aFile);
++  }
++  return NS_ERROR_NOT_AVAILABLE;
++}
+diff --git a/xpcom/reflect/xptcall/md/unix/moz.build b/xpcom/reflect/xptcall/md/unix/moz.build
+--- a/xpcom/reflect/xptcall/md/unix/moz.build
++++ b/xpcom/reflect/xptcall/md/unix/moz.build
+@@ -95,7 +95,7 @@ if CONFIG["OS_ARCH"] == "Linux":
+         elif CONFIG["COMPILE_ENVIRONMENT"]:
+             error("Unknown C++ compiler, xptcall assembly will probably be incorrect.")
+ 
+-if CONFIG["OS_ARCH"] in ("Linux", "FreeBSD", "NetBSD", "OpenBSD"):
++if CONFIG["OS_ARCH"] in ("Linux", "FreeBSD", "MakOS", "NetBSD", "OpenBSD"):
+     if CONFIG["TARGET_CPU"] == "aarch64":
+         SOURCES += [
+             "xptcinvoke_aarch64.cpp",

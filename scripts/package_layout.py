@@ -1,0 +1,22 @@
+"""Versioned package-region geometry shared by host image tools."""
+
+SECTOR = 512
+LAYOUT_VERSION = 1
+
+LEGACY_HEADER_LBA = 2_048
+LEGACY_ENTRY_LBA = 2_049
+LEGACY_DATA_LBA = 4_096
+
+# Static package payload owns [LEGACY_DATA_LBA, TRANSACTION_BASE_LBA).
+# Durable package transactions own two equal 64 MiB slots after it.
+TRANSACTION_BASE_LBA = 786_432
+TRANSACTION_SLOT_SECTORS = 131_072
+TRANSACTION_END_LBA = TRANSACTION_BASE_LBA + 2 * TRANSACTION_SLOT_SECTORS
+
+# MakFS4 profile allocation starts immediately after transaction store.
+PROFILE_DATA_LBA = 1_048_576
+IMAGE_BYTES = 1024 * 1024 * 1024
+
+assert TRANSACTION_END_LBA == PROFILE_DATA_LBA
+assert LEGACY_DATA_LBA < TRANSACTION_BASE_LBA < PROFILE_DATA_LBA
+assert PROFILE_DATA_LBA * SECTOR < IMAGE_BYTES

@@ -1,0 +1,20 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -65,6 +65,7 @@
+ 	L_setpgid = 154,
+ 	L_getpgid = 155,
+ 	L_getpid = 172,
++	L_getppid = 173,
+ 	L_getuid = 174,
+ 	L_geteuid = 175,
+ 	L_getgid = 176,
+@@ -725,6 +726,8 @@
+ 		return makos_raw(M_setpgid, a, b, 0, 0, 0, 0);
+ 	case L_getpid:
+ 		return makos_raw(M_process_identity, 0, 0, 0, 0, 0, 0);
++	case L_getppid:
++		return makos_raw(M_process_identity, 3, 0, 0, 0, 0, 0);
+ 	case L_getuid:
+ 	case L_geteuid:
+ 		return makos_raw(M_process_identity, 1, 0, 0, 0, 0, 0);

@@ -1,0 +1,47 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] ipc: add MakOS process and thread primitives
+
+Use MakOS' real gettid syscall for Chromium thread identity. MakOS currently
+has no procfs; FD cleanup therefore tries the future /dev/fd mount and falls
+back to Chromium's allocation-free descriptor close loop.
+
+diff --git a/ipc/chromium/src/base/process_util_posix.cc b/ipc/chromium/src/base/process_util_posix.cc
+--- a/ipc/chromium/src/base/process_util_posix.cc
++++ b/ipc/chromium/src/base/process_util_posix.cc
+@@ -135,6 +135,11 @@ void CloseSuperfluousFds(void* aCtx, bool (*aShouldPreserve)(void*, int)) {
+ #elif defined(XP_DARWIN)
+   static const rlim_t kSystemDefaultMaxFds = 256;
+   static const char kFDDir[] = "/dev/fd";
++#elif defined(XP_MAKOS)
++  // MakOS has no procfs. Try the future /dev/fd mount, then use the existing
++  // allocation-free close loop when it is absent.
++  static const rlim_t kSystemDefaultMaxFds = 256;
++  static const char kFDDir[] = "/dev/fd";
+ #elif defined(__DragonFly__) || defined(XP_FREEBSD) || defined(XP_NETBSD) || \
+     defined(XP_OPENBSD)
+   // the getrlimit below should never fail, so whatever ..
+diff --git a/ipc/chromium/src/base/platform_thread_posix.cc b/ipc/chromium/src/base/platform_thread_posix.cc
+--- a/ipc/chromium/src/base/platform_thread_posix.cc
++++ b/ipc/chromium/src/base/platform_thread_posix.cc
+@@ -13,8 +13,11 @@
+ #  include <mach/mach.h>
+ #elif defined(XP_NETBSD)
+ #  include <lwp.h>
+-#elif defined(XP_LINUX)
++#elif defined(XP_LINUX) || defined(XP_MAKOS)
+ #  include <sys/syscall.h>
++#endif
++
++#if defined(XP_LINUX)
+ #  include <sys/prctl.h>
+ #endif
+ 
+@@ -50,6 +53,8 @@ PlatformThreadId PlatformThread::CurrentId() {
+   return port;
+ #elif defined(XP_LINUX)
+   return syscall(__NR_gettid);
++#elif defined(XP_MAKOS)
++  return syscall(SYS_gettid);
+ #elif defined(XP_OPENBSD) || defined(XP_SOLARIS) || defined(__GLIBC__)
+   return (intptr_t)(pthread_self());
+ #elif defined(XP_NETBSD)

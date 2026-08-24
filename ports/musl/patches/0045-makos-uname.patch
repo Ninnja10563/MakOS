@@ -1,0 +1,36 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -19,6 +19,7 @@
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/statfs.h>
++#include <sys/utsname.h>
+ #include <termios.h>
+ #include <time.h>
+ #include <unistd.h>
+@@ -78,6 +79,7 @@ enum linux_aarch64_syscall {
+ 	L_rt_sigprocmask = 135,
+ 	L_setpgid = 154,
+ 	L_getpgid = 155,
++	L_uname = 160,
+ 	L_getrlimit = 163,
+ 	L_getrusage = 165,
+ 	L_umask = 166,
+@@ -147,6 +149,7 @@ enum makos_syscall {
+ 	M_process_exit = 119,
+ 	M_mremap_probe = 120,
+ 	M_filesystem_stats = 121,
++	M_uname = 122,
+ };
+ 
+ struct makos_metadata {
+@@ -852,6 +855,8 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_raw(M_getpgrp, 0, 0, 0, 0, 0, 0);
+ 	case L_setpgid:
+ 		return makos_raw(M_setpgid, a, b, 0, 0, 0, 0);
++	case L_uname:
++		return makos_raw(M_uname, a, 0, 0, 0, 0, 0);
+ 	case L_getrlimit:
+ 		return makos_prlimit(0, a, 0, (struct rlimit *)b);
+ 	case L_prlimit64:

@@ -1,0 +1,49 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -15,6 +15,8 @@
+ 
+ enum linux_aarch64_syscall {
+ 	L_dup = 23,
++	L_dup3 = 24,
++	L_fcntl = 25,
+ 	L_ioctl = 29,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
+@@ -89,6 +91,8 @@ enum makos_syscall {
+ 	M_process_identity = 85,
+ 	M_fd_dup = 86,
+ 	M_fd_seek = 87,
++	M_fd_dup3 = 88,
++	M_fd_control = 89,
+ };
+ 
+ struct makos_termios {
+@@ -226,6 +230,27 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_dup:
+ 		result = makos_raw(M_fd_dup, a, 0, 0, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;
++	case L_dup3:
++		if (a == b || c & ~O_CLOEXEC) return -EINVAL;
++		return makos_raw(M_fd_dup3, a, b, c != 0, 0, 0, 0);
++	case L_fcntl:
++		switch (b) {
++		case F_DUPFD:
++			return makos_raw(M_fd_control, a, 0, c, 0, 0, 0);
++		case F_GETFD:
++			return makos_raw(M_fd_control, a, 1, 0, 0, 0, 0);
++		case F_SETFD:
++			if (c & ~FD_CLOEXEC) return -EINVAL;
++			return makos_raw(M_fd_control, a, 2, c, 0, 0, 0);
++		case F_GETFL:
++			return makos_raw(M_fd_control, a, 3, 0, 0, 0, 0);
++		case F_SETFL:
++			return makos_raw(M_fd_control, a, 4, c & ~O_LARGEFILE, 0, 0, 0);
++		case F_DUPFD_CLOEXEC:
++			return makos_raw(M_fd_control, a, 5, c, 0, 0, 0);
++		default:
++			return -EINVAL;
++		}
+ 	case L_read:
+ 		result = makos_raw(M_read, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;

@@ -1,0 +1,14 @@
+[package]
+name = "makos-loader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "makos-loader"
+path = "src/main.rs"
+
+[dependencies]
+makos-boot-api = { path = "../../crates/boot-api" }
+makos-elf64 = { path = "../../crates/elf64" }
+uefi = { version = "0.39.0", features = ["alloc", "global_allocator", "panic_handler"] }

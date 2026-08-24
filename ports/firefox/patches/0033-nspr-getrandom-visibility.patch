@@ -1,0 +1,18 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] config: wrap sys/random.h with default visibility
+
+Firefox compiles source files under gcc_hidden.h.  System declarations must
+pass through generated wrappers so imports from shared libc retain default
+visibility.  NSPR's MakOS entropy backend includes sys/random.h; without this
+entry getrandom becomes a hidden undefined symbol and libnspr4.so cannot link.
+
+diff --git a/config/system-headers.mozbuild b/config/system-headers.mozbuild
+--- a/config/system-headers.mozbuild
++++ b/config/system-headers.mozbuild
+@@ -855,5 +855,6 @@ system_headers = [
+     "sys/queue.h",
+     "sys/quota.h",
++    "sys/random.h",
+     "sys/reboot.h",
+     "sys/reg.h",
+     "sys/regset.h",

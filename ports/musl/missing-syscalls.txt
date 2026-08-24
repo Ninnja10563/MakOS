@@ -1,0 +1,32 @@
+# Exact Firefox/musl runtime gates after 0001-makos-aarch64-syscalls.patch.
+# Format: Linux AArch64 syscall number/name -> absent MakOS semantic.
+partial/epoll_pwait -> scheduler-blocked level/edge/oneshot pipe and asynchronous TCP/UDP socket readiness; fixed bounded sets, no nested epoll or sole-task idle path
+partial/ppoll -> timed/infinite scheduler-blocked file/pipe/asynchronous socket readiness; no sole-runnable-task idle path
+partial/stat -> AT_FDCWD paths/AT_EMPTY_PATH FDs, MakFS4 Unix-epoch atime/mtime/ctime, symlink follow/nofollow; no device Unix times or dirfd traversal
+95/waitid -> no general child-process wait API
+partial/nanosleep -> timer-blocked deadlines work with a runnable successor; signal interruption/remaining-time and sole-task idle path incomplete
+partial/clock_nanosleep -> relative realtime plus relative/absolute monotonic; no absolute realtime or full signal interruption
+132/sigaltstack -> no MakOS alternate signal stack
+133/rt_sigsuspend -> no MakOS equivalent
+137/rt_sigtimedwait -> no MakOS equivalent
+partial/bind -> IPv4/IPv6 wildcard or configured-local client bind with ephemeral or unique port; no device/server policy
+201/listen -> no MakOS socket listen API
+202/accept -> no MakOS socket accept API
+partial/getsockname -> IPv4/IPv6 client endpoint; no bound-address retention or server sockets
+partial/getpeername -> connected IPv4/IPv6 peer endpoint; scoped link-local IDs unsupported
+partial/setsockopt -> TCP_NODELAY=1 plus fixed IPV6_V6ONLY=1; no keepalive, reuse, multicast, or tunable buffers
+partial/getsockopt -> SO_TYPE/SO_ERROR/SO_RCVBUF/SO_SNDBUF/SO_DOMAIN/SO_PROTOCOL and fixed IPV6_V6ONLY=1; no broader option state
+partial/shutdown -> SHUT_RDWR only; no independent read/write half-close
+partial/sendmsg -> bounded 16-iovec/4 KiB gather with optional IPv4/IPv6 destination; no ancillary/control messages
+partial/recvmsg -> bounded 16-iovec/4 KiB scatter with IPv4/IPv6 source; no ancillary/control messages or truncation breadth
+partial/openat -> AT_FDCWD only; O_RDONLY/O_WRONLY/O_RDWR and explicit preserve/truncate plus O_DIRECTORY/CLOEXEC; no append/exclusive/no-follow/nonblocking file semantics
+partial/fcntl -> regular-file dup/descriptor/status flags plus process byte-range GETLK/SETLK/SETLKW; sockets support GET/SETFD and GET/SETFL nonblocking; no socket duplication, OFD locks, leases, async ownership, or seals
+partial/mmap -> anonymous private plus eager private read-only-file mapping and fixed ELF segments inside owned reservations; no MAP_SHARED, writable file backing, arbitrary hints/fixed replacement, demand paging, or writeback
+partial/mprotect -> PROT_NONE/R/RW/RX supported; W+X denied
+partial/madvise -> DONTNEED and anonymous FREE release resident frames while preserving demand-zero/file reload metadata; other accepted policy hints are no-ops, no active prefetch or huge-page promotion
+partial/clock_gettime -> monotonic resolution 10 ms; realtime resolution 1 s
+partial/rt_sigaction -> action layout maps; masks/delivery frame not full POSIX contract
+partial/socket -> connected IPv4/IPv6 TCP/UDP with SOCK_NONBLOCK/SOCK_CLOEXEC, fcntl flag changes, read/write, poll/epoll, and exec cleanup; no listen/accept or broad socket options
+abi/errno -> kernel returns mixed -errno, u64::MAX, and boolean conventions
+partial/dynamic-linker -> upstream musl PT_INTERP, libc resolution, external VFS DSO lookup/open/fstat/private-map, RELA/PLT/GOT, RELRO, plus runtime dlopen(RTLD_NOW)/dlsym/call/dlclose execute under HVF; no recursive/deep dependency suite, TLS/versioned relocation breadth, cache, unload stress, or scalable dependency store
+abi/filesystem -> bounded flat VFS; not scalable POSIX filesystem semantics

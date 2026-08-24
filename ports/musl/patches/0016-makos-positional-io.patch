@@ -1,0 +1,30 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -35,3 +35,5 @@ enum linux_aarch64_syscall {
+ 	L_getdents64 = 61,
+ 	L_lseek = 62,
++	L_pread64 = 67,
++	L_pwrite64 = 68,
+ 	L_ppoll = 73,
+@@ -122,5 +124,7 @@ enum makos_syscall {
+ 	M_mkdir = 98,
+ 	M_rmdir = 99,
++	M_pread = 100,
++	M_pwrite = 101,
+ };
+ 
+ struct makos_metadata {
+@@ -416,6 +420,12 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_fstat(a, (struct kstat *)b);
+ 	case L_fsync:
+ 		return makos_raw(M_fsync, a, 0, 0, 0, 0, 0);
++	case L_pread64:
++		if (d < 0) return -EINVAL;
++		return makos_raw(M_pread, a, b, c, d, 0, 0);
++	case L_pwrite64:
++		if (d < 0) return -EINVAL;
++		return makos_raw(M_pwrite, a, b, c, d, 0, 0);
+ 	case L_read:
+ 		result = makos_raw(M_read, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;

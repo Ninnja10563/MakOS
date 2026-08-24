@@ -1,0 +1,43 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] xpcom: read MakOS executable path from startup auxv
+
+MakOS process startup provides AT_EXECFN. Use it directly instead of Linux
+procfs or Darwin bundle APIs.
+
+diff --git a/xpcom/build/BinaryPath.h b/xpcom/build/BinaryPath.h
+--- a/xpcom/build/BinaryPath.h
++++ b/xpcom/build/BinaryPath.h
+@@ -11,6 +11,11 @@
+ #  include <windows.h>
+ #elif defined(XP_DARWIN)
+ #  include <CoreFoundation/CoreFoundation.h>
++#elif defined(__makos__)
++#  include <sys/auxv.h>
++#  include <elf.h>
++#  include <stdlib.h>
++#  include <string.h>
+ #elif defined(XP_UNIX)
+ #  include <unistd.h>
+ #  include <stdlib.h>
+@@ -126,6 +131,21 @@ class BinaryPath {
+     return NS_OK;
+   }
+ 
++#elif defined(__makos__)
++  static nsresult Get(char aResult[MAXPATHLEN]) {
++    const char* executable =
++        reinterpret_cast<const char*>(getauxval(AT_EXECFN));
++    if (!executable || !*executable) {
++      return NS_ERROR_FAILURE;
++    }
++    size_t length = strlen(executable);
++    if (length >= MAXPATHLEN) {
++      return NS_ERROR_FILE_NAME_TOO_LONG;
++    }
++    memcpy(aResult, executable, length + 1);
++    return NS_OK;
++  }
++
+ #elif defined(XP_LINUX) || defined(XP_SOLARIS)
+   static nsresult Get(char aResult[MAXPATHLEN]) {
+ #  if defined(XP_SOLARIS)

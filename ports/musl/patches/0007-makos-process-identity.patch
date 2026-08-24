@@ -1,0 +1,29 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -29,3 +29,8 @@ enum linux_aarch64_syscall {
+ 	L_setpgid = 154,
+ 	L_getpgid = 155,
++	L_getpid = 172,
++	L_getuid = 174,
++	L_geteuid = 175,
++	L_getgid = 176,
++	L_getegid = 177,
+ 	L_gettid = 178,
+@@ -79,3 +84,4 @@ enum makos_syscall {
+ 	M_getrandom = 83,
+ 	M_clock_realtime = 84,
++	M_process_identity = 85,
+ };
+@@ -269,3 +275,11 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_setpgid:
+ 		return makos_raw(M_setpgid, a, b, 0, 0, 0, 0);
++	case L_getpid:
++		return makos_raw(M_process_identity, 0, 0, 0, 0, 0, 0);
++	case L_getuid:
++	case L_geteuid:
++		return makos_raw(M_process_identity, 1, 0, 0, 0, 0, 0);
++	case L_getgid:
++	case L_getegid:
++		return makos_raw(M_process_identity, 2, 0, 0, 0, 0, 0);
+ 	case L_socket:

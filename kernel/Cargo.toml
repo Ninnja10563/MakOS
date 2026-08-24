@@ -1,0 +1,30 @@
+[package]
+name = "makos-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "makos-kernel"
+path = "src/main.rs"
+
+[dependencies]
+makos-accounts = { path = "../crates/accounts" }
+makos-acpi = { path = "../crates/acpi" }
+makos-boot-api = { path = "../crates/boot-api" }
+makos-crypto = { path = "../crates/crypto" }
+makos-elf64 = { path = "../crates/elf64" }
+makos-frame-allocator = { path = "../crates/frame-allocator" }
+makos-gpt = { path = "../crates/gpt" }
+makos-installer = { path = "../crates/installer" }
+makos-ipc = { path = "../crates/ipc" }
+makos-futex = { path = "../crates/futex" }
+makos-makfs4 = { path = "../crates/makfs4" }
+makos-package-store = { path = "../crates/package-store" }
+makos-pe64 = { path = "../crates/pe64" }
+makos-process-table = { path = "../crates/process-table" }
+makos-readiness = { path = "../crates/readiness" }
+makos-structured-log = { path = "../crates/structured-log" }
+makos-tty = { path = "../crates/tty" }
+makos-vm-space = { path = "../crates/vm-space" }

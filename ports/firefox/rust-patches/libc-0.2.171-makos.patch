@@ -1,0 +1,55 @@
+diff --git a/build.rs b/build.rs
+--- a/build.rs
++++ b/build.rs
+@@ -28,6 +28,6 @@ const CHECK_CFG_EXTRA: &'static [(&'static str, &'static [&'static str])] = &[
+         "target_os",
+         &[
+-            "switch", "aix", "ohos", "hurd", "rtems", "visionos", "nuttx", "cygwin",
++            "switch", "aix", "ohos", "hurd", "rtems", "visionos", "nuttx", "cygwin", "makos",
+         ],
+     ),
+     ("target_env", &["illumos", "wasi", "aix", "ohos"]),
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -17,5 +17,6 @@
+     // - https://github.com/rust-lang/rust/pull/126456
+     dead_code,
++    useless_deprecated,
+ )]
+ #![cfg_attr(libc_deny_warnings, deny(warnings))]
+ // Attributes needed when building as part of the standard library
+diff --git a/src/unix/mod.rs b/src/unix/mod.rs
+--- a/src/unix/mod.rs
++++ b/src/unix/mod.rs
+@@ -1724,8 +1724,9 @@ cfg_if! {
+         mod newlib;
+         pub use self::newlib::*;
+     } else if #[cfg(any(
+         target_os = "linux",
++        target_os = "makos",
+         target_os = "l4re",
+         target_os = "android",
+         target_os = "emscripten"
+     ))] {
+diff --git a/src/unix/linux_like/mod.rs b/src/unix/linux_like/mod.rs
+--- a/src/unix/linux_like/mod.rs
++++ b/src/unix/linux_like/mod.rs
+@@ -64,7 +64,7 @@ s! {
+         pub ai_protocol: c_int,
+         pub ai_addrlen: socklen_t,
+ 
+-        #[cfg(any(target_os = "linux", target_os = "emscripten"))]
++        #[cfg(any(target_os = "linux", target_os = "makos", target_os = "emscripten"))]
+         pub ai_addr: *mut crate::sockaddr,
+ 
+         pub ai_canonname: *mut c_char,
+@@ -2023,7 +2023,7 @@ cfg_if! {
+     if #[cfg(target_os = "emscripten")] {
+         mod emscripten;
+         pub use self::emscripten::*;
+-    } else if #[cfg(target_os = "linux")] {
++    } else if #[cfg(any(target_os = "linux", target_os = "makos"))] {
+         mod linux;
+         pub use self::linux::*;
+     } else if #[cfg(target_os = "l4re")] {

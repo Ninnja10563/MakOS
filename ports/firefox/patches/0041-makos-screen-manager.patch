@@ -1,0 +1,24 @@
+diff --git a/widget/makos/nsAppShell.cpp b/widget/makos/nsAppShell.cpp
+--- a/widget/makos/nsAppShell.cpp
++++ b/widget/makos/nsAppShell.cpp
+@@ -6,9 +6,19 @@
+ 
+ #include <time.h>
+ 
++#include "HeadlessScreenHelper.h"
+ #include "MakOSWindow.h"
++#include "mozilla/UniquePtr.h"
++#include "mozilla/widget/ScreenManager.h"
++#include "nsXULAppAPI.h"
+ 
+-nsresult nsAppShell::Init() { return nsBaseAppShell::Init(); }
++nsresult nsAppShell::Init() {
++  if (XRE_IsParentProcess()) {
++    mozilla::widget::ScreenManager::GetSingleton().SetHelper(
++        mozilla::MakeUnique<mozilla::widget::HeadlessScreenHelper>());
++  }
++  return nsBaseAppShell::Init();
++}
+ 
+ void nsAppShell::ScheduleNativeEventCallback() {
+   mNativeCallbackPending = true;

@@ -1,0 +1,37 @@
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -168,9 +168,13 @@ class MakOSWindow final : public HeadlessWidget {
+  public:
+   NS_INLINE_DECL_REFCOUNTING_INHERITED(MakOSWindow, HeadlessWidget)
+ 
+   nsresult Create(nsIWidget* aParent, const LayoutDeviceIntRect& aRect,
+                   InitData* aInitData = nullptr) override {
+-    nsresult result = HeadlessWidget::Create(aParent, aRect, aInitData);
++    LayoutDeviceIntRect rect = aRect;
++    if (!aParent && (rect.Width() <= 1 || rect.Height() <= 1)) {
++      rect.SetRect(rect.X(), rect.Y(), 700, 400);
++    }
++    nsresult result = HeadlessWidget::Create(aParent, rect, aInitData);
+     if (NS_FAILED(result)) {
+       return result;
+     }
+@@ -176,7 +180,7 @@ class MakOSWindow final : public HeadlessWidget {
+     if (aParent) {
+       return NS_OK;
+     }
+-    mSurface = makos::CreateSurface(aRect.Width(), aRect.Height(),
++    mSurface = makos::CreateSurface(rect.Width(), rect.Height(),
+                                     makos::kBrowserSurfaceSlot);
+     if (mSurface == makos::kInvalidSurface) {
+       HeadlessWidget::Destroy();
+@@ -186,7 +190,7 @@ class MakOSWindow final : public HeadlessWidget {
+       return NS_ERROR_FAILURE;
+     }
+     gTopLevelWindow = this;
+-    makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, aRect.Width(),
+-                       aRect.Height());
++    makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, rect.Width(),
++                       rect.Height());
+     return NS_OK;
+   }

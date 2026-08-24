@@ -1,0 +1,40 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+index 0f7412d..0aa46cc 100644
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -75,6 +75,7 @@ enum linux_aarch64_syscall {
+ 	L_clock_getres = 114,
+ 	L_clock_nanosleep = 115,
+ 	L_sched_setscheduler = 119,
++	L_sched_getscheduler = 120,
+ 	L_sched_getparam = 121,
+ 	L_sched_getaffinity = 123,
+ 	L_sched_yield = 124,
+@@ -113,6 +114,7 @@ enum linux_aarch64_syscall {
+ 	L_clone = 220,
+ 	L_execve = 221,
+ 	L_mmap = 222,
++	L_fadvise64 = 223,
+ 	L_mprotect = 226,
+ 	L_madvise = 233,
+ 	L_getrandom = 278,
+@@ -1102,5 +1104,9 @@ long __makos_syscall_dispatch(long number, long a, long b, long c, long d,
+ 	case L_madvise:
+ 		return makos_raw(M_madvise, a, b, c, 0, 0, 0);
++	case L_fadvise64:
++		/* POSIX_FADV_* are advisory; all valid hints are already satisfied. */
++		if (d > POSIX_FADV_NOREUSE) return -EINVAL;
++		return 0;
+ 	case L_mremap:
+ 		return makos_raw(M_mremap_probe, a, b, c, d, e, 0);
+ 	case L_membarrier:
+@@ -1120,6 +1126,9 @@ long __makos_syscall_dispatch(long number, long a, long b, long c, long d,
+ 		if (!c) return -EINVAL;
+ 		return makos_raw(M_thread_set_scheduler, a, b,
+ 			((const struct sched_param *)c)->sched_priority, 0, 0, 0);
++	case L_sched_getscheduler:
++		/* MakOS currently exposes one real, preemptive SCHED_OTHER policy. */
++		return SCHED_OTHER;
+ 	case L_sched_getparam:
+ 		if (!b) return -EINVAL;
+ 		result = makos_raw(M_thread_set_scheduler, a, SCHED_OTHER, 0, 0, 0, 0);

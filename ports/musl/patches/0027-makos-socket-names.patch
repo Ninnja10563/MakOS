@@ -1,0 +1,44 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -72,6 +72,8 @@
+ 	L_gettid = 178,
+ 	L_socket = 198,
+ 	L_connect = 203,
++	L_getsockname = 204,
++	L_getpeername = 205,
+ 	L_sendto = 206,
+ 	L_recvfrom = 207,
+ 	L_setsockopt = 208,
+@@ -242,6 +244,20 @@
+ 	if (level == IPPROTO_TCP && option == TCP_NODELAY)
+ 		return makos_raw(M_fd_control, fd, 11, setting, 0, 0, 0);
+ 	return -ENOPROTOOPT;
++}
++
++static long makos_sockname(long fd, int peer, struct sockaddr *address,
++	socklen_t *length)
++{
++	struct sockaddr_in ipv4 = {0};
++	long packed;
++	if (!address || !length || *length < sizeof ipv4) return -EINVAL;
++	packed = makos_raw(M_fd_control, fd, peer ? 15 : 14, 0, 0, 0, 0);
++	if (packed < 0) return packed;
++	memcpy(&ipv4, &packed, 8);
++	memcpy(address, &ipv4, sizeof ipv4);
++	*length = sizeof ipv4;
++	return 0;
+ }
+ 
+ static long makos_sleep_deadline(const struct timespec *request, int absolute)
+@@ -656,6 +672,10 @@
+ 	case L_connect:
+ 		if (c < 8) return -EINVAL;
+ 		return makos_bool_result(makos_raw(M_connect, a, b, 8, 0, 0, 0), ECONNREFUSED);
++	case L_getsockname:
++		return makos_sockname(a, 0, (struct sockaddr *)b, (socklen_t *)c);
++	case L_getpeername:
++		return makos_sockname(a, 1, (struct sockaddr *)b, (socklen_t *)c);
+ 	case L_sendto:
+ 		if (d || e) return -ENOTSUP;
+ 		result = makos_raw(M_send, a, b, c, 0, 0, 0);

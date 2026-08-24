@@ -1,0 +1,43 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -22,6 +22,9 @@
+ 
+ enum linux_aarch64_syscall {
+ 	L_getcwd = 17,
++	L_epoll_create1 = 20,
++	L_epoll_ctl = 21,
++	L_epoll_pwait = 22,
+ 	L_dup = 23,
+ 	L_dup3 = 24,
+ 	L_fcntl = 25,
+@@ -130,6 +133,10 @@ enum makos_syscall {
+ 	M_pwrite = 101,
+ 	M_clock_resolution = 102,
+ 	M_sleep_until = 103,
++	M_epoll_create = 104,
++	M_epoll_ctl = 105,
++	M_epoll_wait = 106,
++	M_epoll_close = 107,
+ };
+ 
+ struct makos_metadata {
+@@ -468,7 +475,17 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		if (result < 0) return result;
+ 		if (result == 1) return 0;
+ 		result = makos_raw(M_socket_close, a, 0, 0, 0, 0, 0);
+-		return makos_bool_result(result, EBADF);
++		if (result == 1) return 0;
++		result = makos_raw(M_epoll_close, a, 0, 0, 0, 0, 0);
++		return makos_bool_result(result, EBADF);
++	case L_epoll_create1:
++		if (a & ~O_CLOEXEC) return -EINVAL;
++		return makos_raw(M_epoll_create, a, 0, 0, 0, 0, 0);
++	case L_epoll_ctl:
++		return makos_raw(M_epoll_ctl, a, b, c, d, 0, 0);
++	case L_epoll_pwait:
++		if (e) return -ENOTSUP;
++		return makos_raw(M_epoll_wait, a, b, c, d, 0, 0);
+ 	case L_openat:
+ 		return makos_openat(a, (const char *)b, c);
+ 	case L_lseek:

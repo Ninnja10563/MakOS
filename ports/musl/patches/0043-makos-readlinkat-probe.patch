@@ -1,0 +1,28 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -51,6 +51,7 @@ enum linux_aarch64_syscall {
+ 	L_pwrite64 = 68,
+ 	L_pselect6 = 72,
+ 	L_ppoll = 73,
++	L_readlinkat = 78,
+ 	L_newfstatat = 79,
+ 	L_fstat = 80,
+ 	L_fsync = 82,
+@@ -704,6 +705,16 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		}
+ 		return makos_raw(M_poll, a, b, milliseconds, signal_mask, d != 0, 0);
+ 	}
++	case L_readlinkat:
++	{
++		struct makos_metadata metadata;
++		if (a != AT_FDCWD) return -ENOTSUP;
++		length = path_length((const char *)b);
++		if (!length) return -ENOENT;
++		if (length >= 4096) return -ENAMETOOLONG;
++		result = makos_raw(M_stat, b, length, (long)&metadata, 0, 0, 0);
++		return result == 1 ? -EINVAL : -ENOENT;
++	}
+ 	case L_newfstatat:
+ 		return makos_fstatat(a, (const char *)b, (struct kstat *)c, d);
+ 	case L_fstat:

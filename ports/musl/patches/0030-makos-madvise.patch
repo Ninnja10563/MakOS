@@ -1,0 +1,28 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -88,6 +88,7 @@
+ 	L_execve = 221,
+ 	L_mmap = 222,
+ 	L_mprotect = 226,
++	L_madvise = 233,
+ 	L_getrandom = 278,
+ };
+ 
+@@ -155,6 +156,7 @@
+ 	M_sigprocmask = 108,
+ 	M_pselect = 109,
+ 	M_execve = 112,
++	M_madvise = 114,
+ };
+ 
+ struct makos_metadata {
+@@ -796,6 +798,8 @@
+ 		    (c && !(c & PROT_READ)))
+ 			return -ENOTSUP;
+ 		return makos_bool_result(makos_raw(M_mprotect, a, b, c, 0, 0, 0), EINVAL);
++	case L_madvise:
++		return makos_raw(M_madvise, a, b, c, 0, 0, 0);
+ 	case L_brk:
+ 		result = makos_raw(M_brk, a, 0, 0, 0, 0, 0);
+ 		return result == -1 ? 0 : result;

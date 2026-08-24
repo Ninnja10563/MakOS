@@ -1,0 +1,39 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget/makos: paint frontend transition without poll spin
+
+MakOS invalidation state lives in the browser process, so setting it cannot
+wake a kernel I/O wait. Paint the frontend size-mode transition synchronously
+on the main thread. Keep the normal Gecko listener, SKIA draw target and BLIT
+path. Add bounded raw key tracing for navigation input verification.
+
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -231,6 +231,9 @@ class MakOSWindow final : public HeadlessWidget {
+       Invalidate(
+           LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
+     }
++    // A queued user-space invalidation cannot wake a kernel I/O wait. Paint
++    // this frontend lifecycle transition synchronously on the main thread.
++    (void)ProcessPendingPaint();
+   }
+ 
+   void Invalidate(const LayoutDeviceIntRect& aRect) override {
+@@ -343,6 +346,9 @@ class MakOSWindow final : public HeadlessWidget {
+         break;
+       }
+       case makos::SurfaceEventKind::Key:
++        if (mKeyTraceCount++ < 64) {
++          printf_stderr("MAKOS_WIDGET_KEY raw=%u\n", event.key);
++        }
+         DispatchMakOSKey(this, event.key);
+         Invalidate(
+             LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
+@@ -430,6 +436,7 @@ class MakOSWindow final : public HeadlessWidget {
+   uint32_t mInvalidateTraceCount = 0;
+   uint32_t mPaintTraceCount = 0;
+   uint32_t mPaintCycleTraceCount = 0;
++  uint32_t mKeyTraceCount = 0;
+   uint32_t mPointerButtons = 0;
+ };
+ 

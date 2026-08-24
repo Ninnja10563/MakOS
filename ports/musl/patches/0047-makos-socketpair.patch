@@ -1,0 +1,35 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -94,4 +94,5 @@ enum linux_aarch64_syscall {
+ 	L_getegid = 177,
+ 	L_gettid = 178,
+ 	L_socket = 198,
++	L_socketpair = 199,
+ 	L_bind = 200,
+@@ -190,3 +191,4 @@ enum makos_syscall {
+ 	M_filesystem_stats = 121,
+ 	M_uname = 122,
++	M_socketpair = 124,
+ };
+@@ -920,14 +922,20 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_socket:
+ 	{
+ 		long type = b & 0xf;
+ 		if (a != 2) return -EAFNOSUPPORT;
+ 		if (b & ~(0xf | SOCK_NONBLOCK | SOCK_CLOEXEC)) return -EINVAL;
+ 		if (type != SOCK_STREAM && type != SOCK_DGRAM) return -ENOTSUP;
+ 		if (!c) c = type == SOCK_STREAM ? 6 : 17;
+ 		if ((type == SOCK_STREAM && c != 6) ||
+ 		    (type == SOCK_DGRAM && c != 17))
+ 			return -EPROTONOSUPPORT;
+ 		result = makos_raw(M_socket, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EAFNOSUPPORT : result;
+ 	}
++	case L_socketpair:
++		if (a != AF_UNIX) return -EAFNOSUPPORT;
++		if ((b & 0xf) != SOCK_STREAM ||
++		    b & ~(0xf | SOCK_NONBLOCK | SOCK_CLOEXEC)) return -EINVAL;
++		if (c) return -EPROTONOSUPPORT;
++		return makos_raw(M_socketpair, a, b, c, d, 0, 0);
+ 	case L_bind:

@@ -1,0 +1,138 @@
+diff --git a/widget/headless/HeadlessClipboard.cpp b/widget/headless/HeadlessClipboard.cpp
+index d24f3990e2..16a8ba1751 100644
+--- a/widget/headless/HeadlessClipboard.cpp
++++ b/widget/headless/HeadlessClipboard.cpp
+@@ -7,9 +7,70 @@
+ #include "nsISupportsPrimitives.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsCOMPtr.h"
++#include "nsString.h"
+ 
+ namespace mozilla::widget {
+ 
++#if defined(MOZ_WIDGET_MAKOS) && defined(__aarch64__)
++namespace {
++
++constexpr uint64_t kClipboardWriteSyscall = 110;
++constexpr uint64_t kClipboardReadSyscall = 111;
++constexpr uint32_t kClipboardCapacity = 64 * 1024;
++
++uint64_t ClipboardSvc(uint64_t aNumber, void* aBuffer, uint64_t aLength) {
++  register uint64_t x0 __asm__("x0") = reinterpret_cast<uint64_t>(aBuffer);
++  register uint64_t x1 __asm__("x1") = aLength;
++  register uint64_t x8 __asm__("x8") = aNumber;
++  __asm__ volatile("svc #0"
++                   : "+r"(x0)
++                   : "r"(x1), "r"(x8)
++                   : "memory", "cc");
++  return x0;
++}
++
++bool WriteMakOSClipboard(const nsACString& aText) {
++  if (aText.Length() > kClipboardCapacity) {
++    return false;
++  }
++  uint64_t result = ClipboardSvc(
++      kClipboardWriteSyscall,
++      const_cast<char*>(PromiseFlatCString(aText).get()), aText.Length());
++  return static_cast<int64_t>(result) >= 0 && result == aText.Length();
++}
++
++bool ReadMakOSClipboard(nsCString& aText) {
++  aText.SetLength(kClipboardCapacity);
++  uint64_t result = ClipboardSvc(kClipboardReadSyscall, aText.BeginWriting(),
++                                 kClipboardCapacity);
++  if (static_cast<int64_t>(result) < 0 || result > kClipboardCapacity) {
++    aText.Truncate();
++    return false;
++  }
++  aText.SetLength(result);
++  return true;
++}
++
++void RefreshMakOSClipboard(HeadlessClipboardData& aClipboard) {
++  nsCString utf8;
++  if (!ReadMakOSClipboard(utf8)) {
++    return;
++  }
++  if (utf8.IsEmpty()) {
++    if (aClipboard.HasText() || aClipboard.HasHTML()) {
++      aClipboard.Clear();
++    }
++    return;
++  }
++  NS_ConvertUTF8toUTF16 utf16(utf8);
++  if (!aClipboard.HasText() || !aClipboard.GetText().Equals(utf16)) {
++    aClipboard.SetText(utf16);
++  }
++}
++
++}  // namespace
++#endif
++
+ NS_IMPL_ISUPPORTS_INHERITED0(HeadlessClipboard, nsBaseClipboard)
+ 
+ HeadlessClipboard::HeadlessClipboard()
+@@ -61,6 +122,12 @@ HeadlessClipboard::SetNativeClipboardData(nsITransferable* aTransferable,
+     wideString->GetData(utf16string);
+     flavor.EqualsLiteral(kTextMime) ? clipboard->SetText(utf16string)
+                                     : clipboard->SetHTML(utf16string);
++#if defined(MOZ_WIDGET_MAKOS) && defined(__aarch64__)
++    if (aWhichClipboard == nsIClipboard::kGlobalClipboard &&
++        flavor.EqualsLiteral(kTextMime)) {
++      (void)WriteMakOSClipboard(NS_ConvertUTF16toUTF8(utf16string));
++    }
++#endif
+   }
+ 
+   return NS_OK;
+@@ -75,6 +142,12 @@ HeadlessClipboard::GetNativeClipboardData(const nsACString& aFlavor,
+   auto& clipboard = mClipboards[aWhichClipboard];
+   MOZ_ASSERT(clipboard);
+ 
++#if defined(MOZ_WIDGET_MAKOS) && defined(__aarch64__)
++  if (aWhichClipboard == nsIClipboard::kGlobalClipboard) {
++    RefreshMakOSClipboard(*clipboard);
++  }
++#endif
++
+   if (!aFlavor.EqualsLiteral(kTextMime) && !aFlavor.EqualsLiteral(kHTMLMime)) {
+     return nsCOMPtr<nsISupports>{};
+   }
+@@ -103,6 +176,11 @@ nsresult HeadlessClipboard::EmptyNativeClipboardData(
+   auto& clipboard = mClipboards[aWhichClipboard];
+   MOZ_ASSERT(clipboard);
+   clipboard->Clear();
++#if defined(MOZ_WIDGET_MAKOS) && defined(__aarch64__)
++  if (aWhichClipboard == nsIClipboard::kGlobalClipboard) {
++    (void)WriteMakOSClipboard(EmptyCString());
++  }
++#endif
+   return NS_OK;
+ }
+ 
+@@ -113,6 +191,11 @@ HeadlessClipboard::GetNativeClipboardSequenceNumber(
+       nsIClipboard::IsClipboardTypeSupported(aWhichClipboard));
+   auto& clipboard = mClipboards[aWhichClipboard];
+   MOZ_ASSERT(clipboard);
++#if defined(MOZ_WIDGET_MAKOS) && defined(__aarch64__)
++  if (aWhichClipboard == nsIClipboard::kGlobalClipboard) {
++    RefreshMakOSClipboard(*clipboard);
++  }
++#endif
+   return clipboard->GetChangeCount();
+   ;
+ }
+@@ -126,6 +209,12 @@ HeadlessClipboard::HasNativeClipboardDataMatchingFlavors(
+   auto& clipboard = mClipboards[aWhichClipboard];
+   MOZ_ASSERT(clipboard);
+ 
++#if defined(MOZ_WIDGET_MAKOS) && defined(__aarch64__)
++  if (aWhichClipboard == nsIClipboard::kGlobalClipboard) {
++    RefreshMakOSClipboard(*clipboard);
++  }
++#endif
++
+   // Retrieve the union of all aHasType in aFlavorList
+   for (auto& flavor : aFlavorList) {
+     if ((flavor.EqualsLiteral(kTextMime) && clipboard->HasText()) ||

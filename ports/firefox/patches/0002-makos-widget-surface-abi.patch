@@ -1,0 +1,575 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget: add MakOS surface and graphics-info backend
+
+Recognize cairo-makos as a distinct Gecko widget toolkit. Add AArch64 native
+surface ABI plus MakOS GfxInfo XPCOM service. Report actual virtio-gpu and
+MakOSSurface software-compositor properties; never alias Linux/macOS or claim
+host graphics APIs.
+
+diff --git a/toolkit/moz.configure b/toolkit/moz.configure
+index 7eb76b2dd0..b8bfb7a288 100644
+--- a/toolkit/moz.configure
++++ b/toolkit/moz.configure
+@@ -556,6 +556,8 @@ def toolkit_choices(target):
+         return ("cairo-uikit",)
+     elif target.os == "Android":
+         return ("cairo-android",)
++    elif target.os == "MakOS":
++        return ("cairo-makos",)
+     else:
+         # cairo-gtk3 - X11 backend with optional Wayland backend (auto detected)
+         # cairo-gtk3-wayland - Wayland backend with optional X11 backend (auto detected)
+diff --git a/widget/GfxInfoOperatingSystemDefs.h b/widget/GfxInfoOperatingSystemDefs.h
+index 2495934b62..fb0d02f0ef 100644
+--- a/widget/GfxInfoOperatingSystemDefs.h
++++ b/widget/GfxInfoOperatingSystemDefs.h
+@@ -18,6 +18,7 @@ GFXINFO_OS(Windows10, "WINNT 10.0")
+ GFXINFO_OS(RecentWindows10, "WINNT Recent")
+ GFXINFO_OS(NotRecentWindows10, "WINNT NotRecent")
+ GFXINFO_OS(Linux, "Linux")
++GFXINFO_OS(MakOS, "MakOS")
+ GFXINFO_OS(OSX, "Darwin")
+ GFXINFO_OS(OSX10_5, "Darwin 9")
+ GFXINFO_OS(OSX10_6, "Darwin 10")
+diff --git a/widget/moz.build b/widget/moz.build
+index 4327ffeb16..a5d3ffb4be 100644
+--- a/widget/moz.build
++++ b/widget/moz.build
+@@ -55,7 +55,7 @@ XPCOM_MANIFESTS += [
+     "components.conf",
+ ]
+ 
+-if toolkit in ("android", "cocoa", "gtk", "uikit", "windows"):
++if toolkit in ("android", "cocoa", "gtk", "makos", "uikit", "windows"):
+     DIRS += [toolkit]
+ 
+ if toolkit == "cocoa":
+@@ -384,6 +384,12 @@ elif toolkit == "android":
+         "android/PlatformWidgetTypes.ipdlh",
+         "headless/HeadlessWidgetTypes.ipdlh",
+     ]
++elif toolkit == "makos":
++    IPDL_SOURCES = [
++        "headless/HeadlessWidgetTypes.ipdlh",
++        "makos/PCompositorWidget.ipdl",
++        "makos/PlatformWidgetTypes.ipdlh",
++    ]
+ else:
+     IPDL_SOURCES = [
+         "generic/PCompositorWidget.ipdl",
+diff --git a/widget/makos/MakOSSurface.cpp b/widget/makos/MakOSSurface.cpp
+new file mode 100644
+index 0000000000..eadcfb7821
+--- /dev/null
++++ b/widget/makos/MakOSSurface.cpp
+@@ -0,0 +1,69 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "MakOSSurface.h"
++
++namespace mozilla::widget::makos {
++
++namespace {
++
++enum class Syscall : uint64_t {
++  Yield = 1,
++  SurfaceCreate = 8,
++  SurfaceFill = 9,
++  SurfacePresent = 10,
++  SurfaceClose = 58,
++  SurfaceReadEvent = 60,
++};
++
++uint64_t Svc4(Syscall aNumber, uint64_t aFirst, uint64_t aSecond,
++              uint64_t aThird, uint64_t aFourth) {
++#if defined(__aarch64__) && defined(MOZ_WIDGET_MAKOS)
++  register uint64_t x0 __asm__("x0") = aFirst;
++  register uint64_t x1 __asm__("x1") = aSecond;
++  register uint64_t x2 __asm__("x2") = aThird;
++  register uint64_t x3 __asm__("x3") = aFourth;
++  register uint64_t x8 __asm__("x8") = static_cast<uint64_t>(aNumber);
++  __asm__ volatile("svc #0"
++                   : "+r"(x0)
++                   : "r"(x1), "r"(x2), "r"(x3), "r"(x8)
++                   : "memory", "cc");
++  return x0;
++#else
++#  error "MakOS widget backend requires AArch64 and MOZ_WIDGET_MAKOS"
++#endif
++}
++
++}  // namespace
++
++SurfaceHandle CreateSurface(uint32_t aWidth, uint32_t aHeight,
++                            uint64_t aReservedSlot) {
++  return Svc4(Syscall::SurfaceCreate, aWidth, aHeight, aReservedSlot, 0);
++}
++
++bool FillSurface(SurfaceHandle aSurface, uint32_t aArgb, uint32_t aX,
++                 uint32_t aY, uint32_t aWidth, uint32_t aHeight) {
++  const uint32_t rectangle[4] = {aX, aY, aWidth, aHeight};
++  return Svc4(Syscall::SurfaceFill, aSurface, aArgb,
++              reinterpret_cast<uint64_t>(rectangle), 0) == 1;
++}
++
++bool PresentSurface(SurfaceHandle aSurface) {
++  return Svc4(Syscall::SurfacePresent, aSurface, 0, 0, 0) == 1;
++}
++
++bool HideSurface(SurfaceHandle aSurface) {
++  return Svc4(Syscall::SurfaceClose, aSurface, 0, 0, 0) == 1;
++}
++
++bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent) {
++  return Svc4(Syscall::SurfaceReadEvent, aSurface,
++              reinterpret_cast<uint64_t>(&aEvent), sizeof(aEvent), 0) ==
++         sizeof(aEvent);
++}
++
++void YieldThread() { (void)Svc4(Syscall::Yield, 0, 0, 0, 0); }
++
++}  // namespace mozilla::widget::makos
+diff --git a/widget/makos/MakOSSurface.h b/widget/makos/MakOSSurface.h
+new file mode 100644
+index 0000000000..aefc1d2dc2
+--- /dev/null
++++ b/widget/makos/MakOSSurface.h
+@@ -0,0 +1,54 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_widget_MakOSSurface_h
++#define mozilla_widget_MakOSSurface_h
++
++#include <stdint.h>
++
++namespace mozilla::widget::makos {
++
++using SurfaceHandle = uint64_t;
++
++constexpr uint64_t kInvalidSurface = 0;
++// Current compositor reserves selector 5 for the browser, mapping to its
++// fixed browser surface. General surface allocation remains a kernel gate.
++constexpr uint64_t kBrowserSurfaceSlot = 5;
++
++enum class SurfaceEventKind : uint32_t {
++  None = 0,
++  Key = 1,
++  Pointer = 2,
++  Resize = 3,
++  Close = 4,
++};
++
++struct SurfaceEvent {
++  uint32_t kind;
++  uint32_t key;
++  uint32_t modifiers;
++  int32_t x;
++  int32_t y;
++  uint32_t width;
++  uint32_t height;
++};
++
++static_assert(sizeof(SurfaceEvent) == 28,
++              "MakOS kernel surface-event ABI changed");
++
++SurfaceHandle CreateSurface(uint32_t aWidth, uint32_t aHeight,
++                            uint64_t aReservedSlot);
++bool FillSurface(SurfaceHandle aSurface, uint32_t aArgb, uint32_t aX,
++                 uint32_t aY, uint32_t aWidth, uint32_t aHeight);
++bool PresentSurface(SurfaceHandle aSurface);
++// Current close operation hides a retained surface; it does not destroy the
++// process or release the handle.
++bool HideSurface(SurfaceHandle aSurface);
++bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent);
++void YieldThread();
++
++}  // namespace mozilla::widget::makos
++
++#endif  // mozilla_widget_MakOSSurface_h
+diff --git a/widget/makos/PCompositorWidget.ipdl b/widget/makos/PCompositorWidget.ipdl
+new file mode 100644
+index 0000000000..299d2bfeff
+--- /dev/null
++++ b/widget/makos/PCompositorWidget.ipdl
+@@ -0,0 +1,25 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include protocol PCompositorBridge;
++
++namespace mozilla {
++namespace widget {
++
++[ManualDealloc, ChildImpl=virtual, ParentImpl=virtual]
++sync protocol PCompositorWidget
++{
++  manager PCompositorBridge;
++
++parent:
++  async __delete__();
++
++child:
++  async ObserveVsync();
++  async UnobserveVsync();
++};
++
++} // namespace widget
++} // namespace mozilla
+diff --git a/widget/makos/PlatformWidgetTypes.ipdlh b/widget/makos/PlatformWidgetTypes.ipdlh
+new file mode 100644
+index 0000000000..b7242e30f1
+--- /dev/null
++++ b/widget/makos/PlatformWidgetTypes.ipdlh
+@@ -0,0 +1,25 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include HeadlessWidgetTypes;
++
++namespace mozilla {
++namespace widget {
++
++struct MakOSCompositorWidgetInitData
++{
++  uint64_t surface;
++  uint32_t width;
++  uint32_t height;
++};
++
++union CompositorWidgetInitData
++{
++  MakOSCompositorWidgetInitData;
++  HeadlessCompositorWidgetInitData;
++};
++
++} // namespace widget
++} // namespace mozilla
+diff --git a/widget/makos/moz.build b/widget/makos/moz.build
+new file mode 100644
+index 0000000000..6d8b186a88
+--- /dev/null
++++ b/widget/makos/moz.build
+@@ -0,0 +1,29 @@
++# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++EXPORTS.mozilla.widget += [
++    "GfxInfo.h",
++    "MakOSSurface.h",
++]
++
++SOURCES += [
++    "GfxInfo.cpp",
++    "MakOSSurface.cpp",
++    "nsLookAndFeel.cpp",
++]
++
++include("/ipc/chromium/chromium-config.mozbuild")
++
++LOCAL_INCLUDES += [
++    "/widget",
++    "/widget/headless",
++]
++
++XPCOM_MANIFESTS += [
++    "components.conf",
++]
++
++FINAL_LIBRARY = "xul"
+diff --git a/widget/makos/GfxInfo.cpp b/widget/makos/GfxInfo.cpp
+new file mode 100644
+index 0000000000..4a574026b5
+--- /dev/null
++++ b/widget/makos/GfxInfo.cpp
+@@ -0,0 +1,185 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "GfxInfo.h"
++
++namespace mozilla::widget {
++
++#ifdef DEBUG
++NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
++#endif
++
++NS_IMETHODIMP GfxInfo::GetD2DEnabled(bool* aEnabled) {
++  *aEnabled = false;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetDWriteEnabled(bool* aEnabled) {
++  *aEnabled = false;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetDWriteVersion(nsAString& aVersion) {
++  aVersion.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetEmbeddedInFirefoxReality(bool* aEmbedded) {
++  *aEmbedded = false;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetHasBattery(bool* aHasBattery) {
++  *aHasBattery = false;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetCleartypeParameters(nsAString& aParameters) {
++  aParameters.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetWindowProtocol(nsAString& aProtocol) {
++  aProtocol.AssignLiteral("MakOSSurface");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetTestType(nsAString& aTestType) {
++  aTestType.AssignLiteral("virtio-gpu");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDescription(nsAString& aDescription) {
++  aDescription.AssignLiteral("MakOS Virtio GPU");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriver(nsAString& aDriver) {
++  aDriver.AssignLiteral("virtio-gpu");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterVendorID(nsAString& aVendor) {
++  aVendor.AssignLiteral("virtio");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDeviceID(nsAString& aDevice) {
++  aDevice.AssignLiteral("gpu");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterSubsysID(nsAString& aSubsystem) {
++  aSubsystem.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterRAM(uint32_t* aRam) {
++  *aRam = 0;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriverVendor(nsAString& aVendor) {
++  aVendor.AssignLiteral("MakOS");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriverVersion(nsAString& aVersion) {
++  aVersion.AssignLiteral("0.1");
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriverDate(nsAString& aDate) {
++  aDate.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDescription2(nsAString& aDescription) {
++  aDescription.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriver2(nsAString& aDriver) {
++  aDriver.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterVendorID2(nsAString& aVendor) {
++  aVendor.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDeviceID2(nsAString& aDevice) {
++  aDevice.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterSubsysID2(nsAString& aSubsystem) {
++  aSubsystem.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterRAM2(uint32_t* aRam) {
++  *aRam = 0;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriverVendor2(nsAString& aVendor) {
++  aVendor.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriverVersion2(nsAString& aVersion) {
++  aVersion.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetAdapterDriverDate2(nsAString& aDate) {
++  aDate.Truncate();
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetIsGPU2Active(bool* aActive) {
++  *aActive = false;
++  return NS_OK;
++}
++
++NS_IMETHODIMP GfxInfo::GetDrmRenderDevice(nsACString& aDevice) {
++  aDevice.Truncate();
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
++  return *sDriverInfo;
++}
++
++nsresult GfxInfo::GetFeatureStatusImpl(
++    int32_t aFeature, int32_t* aStatus, nsAString& aSuggestedDriverVersion,
++    const nsTArray<GfxDriverInfo>& aDriverInfo, nsACString& aFailureId,
++    OperatingSystem* aOS) {
++  if (aOS) {
++    *aOS = OperatingSystem::MakOS;
++  }
++  return GfxInfoBase::GetFeatureStatusImpl(
++      aFeature, aStatus, aSuggestedDriverVersion, aDriverInfo, aFailureId,
++      aOS);
++}
++
++#ifdef DEBUG
++NS_IMETHODIMP GfxInfo::SpoofVendorID(const nsAString&) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP GfxInfo::SpoofDeviceID(const nsAString&) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP GfxInfo::SpoofDriverVersion(const nsAString&) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP GfxInfo::SpoofOSVersion(uint32_t) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++#endif
++
++}  // namespace mozilla::widget
+diff --git a/widget/makos/GfxInfo.h b/widget/makos/GfxInfo.h
+new file mode 100644
+index 0000000000..01886027af
+--- /dev/null
++++ b/widget/makos/GfxInfo.h
+@@ -0,0 +1,65 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_widget_makos_GfxInfo_h
++#define mozilla_widget_makos_GfxInfo_h
++
++#include "GfxInfoBase.h"
++
++namespace mozilla::widget {
++
++class GfxInfo final : public GfxInfoBase {
++ public:
++  NS_IMETHOD GetD2DEnabled(bool* aEnabled) override;
++  NS_IMETHOD GetDWriteEnabled(bool* aEnabled) override;
++  NS_IMETHOD GetDWriteVersion(nsAString& aVersion) override;
++  NS_IMETHOD GetEmbeddedInFirefoxReality(bool* aEmbedded) override;
++  NS_IMETHOD GetHasBattery(bool* aHasBattery) override;
++  NS_IMETHOD GetCleartypeParameters(nsAString& aParameters) override;
++  NS_IMETHOD GetWindowProtocol(nsAString& aProtocol) override;
++  NS_IMETHOD GetTestType(nsAString& aTestType) override;
++  NS_IMETHOD GetAdapterDescription(nsAString& aDescription) override;
++  NS_IMETHOD GetAdapterDriver(nsAString& aDriver) override;
++  NS_IMETHOD GetAdapterVendorID(nsAString& aVendor) override;
++  NS_IMETHOD GetAdapterDeviceID(nsAString& aDevice) override;
++  NS_IMETHOD GetAdapterSubsysID(nsAString& aSubsystem) override;
++  NS_IMETHOD GetAdapterRAM(uint32_t* aRam) override;
++  NS_IMETHOD GetAdapterDriverVendor(nsAString& aVendor) override;
++  NS_IMETHOD GetAdapterDriverVersion(nsAString& aVersion) override;
++  NS_IMETHOD GetAdapterDriverDate(nsAString& aDate) override;
++  NS_IMETHOD GetAdapterDescription2(nsAString& aDescription) override;
++  NS_IMETHOD GetAdapterDriver2(nsAString& aDriver) override;
++  NS_IMETHOD GetAdapterVendorID2(nsAString& aVendor) override;
++  NS_IMETHOD GetAdapterDeviceID2(nsAString& aDevice) override;
++  NS_IMETHOD GetAdapterSubsysID2(nsAString& aSubsystem) override;
++  NS_IMETHOD GetAdapterRAM2(uint32_t* aRam) override;
++  NS_IMETHOD GetAdapterDriverVendor2(nsAString& aVendor) override;
++  NS_IMETHOD GetAdapterDriverVersion2(nsAString& aVersion) override;
++  NS_IMETHOD GetAdapterDriverDate2(nsAString& aDate) override;
++  NS_IMETHOD GetIsGPU2Active(bool* aActive) override;
++  NS_IMETHOD GetDrmRenderDevice(nsACString& aDevice) override;
++  using GfxInfoBase::GetFeatureStatus;
++  using GfxInfoBase::GetFeatureSuggestedDriverVersion;
++
++#ifdef DEBUG
++  NS_DECL_ISUPPORTS_INHERITED
++  NS_DECL_NSIGFXINFODEBUG
++#endif
++
++ protected:
++  ~GfxInfo() = default;
++  OperatingSystem GetOperatingSystem() override {
++    return OperatingSystem::MakOS;
++  }
++  nsresult GetFeatureStatusImpl(
++      int32_t aFeature, int32_t* aStatus, nsAString& aSuggestedDriverVersion,
++      const nsTArray<GfxDriverInfo>& aDriverInfo, nsACString& aFailureId,
++      OperatingSystem* aOS = nullptr) override;
++  const nsTArray<GfxDriverInfo>& GetGfxDriverInfo() override;
++};
++
++}  // namespace mozilla::widget
++
++#endif  // mozilla_widget_makos_GfxInfo_h
+diff --git a/widget/makos/components.conf b/widget/makos/components.conf
+new file mode 100644
+index 0000000000..75dc97edf8
+--- /dev/null
++++ b/widget/makos/components.conf
+@@ -0,0 +1,16 @@
++# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++Classes = [
++    {
++        'name': 'GfxInfo',
++        'cid': '{d755a760-9f27-11df-0800-200c9a664242}',
++        'contract_ids': ['@mozilla.org/gfx/info;1'],
++        'type': 'mozilla::widget::GfxInfo',
++        'headers': ['/widget/makos/GfxInfo.h'],
++        'init_method': 'Init',
++        'processes': ProcessSelector.ALLOW_IN_GPU_PROCESS,
++    },
++]

@@ -1,0 +1,64 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -57,6 +57,7 @@ enum linux_aarch64_syscall {
+ 	L_clock_nanosleep = 115,
+ 	L_sched_yield = 124,
+ 	L_rt_sigaction = 134,
++	L_rt_sigprocmask = 135,
+ 	L_setpgid = 154,
+ 	L_getpgid = 155,
+ 	L_getpid = 172,
+@@ -137,6 +138,7 @@ enum makos_syscall {
+ 	M_epoll_ctl = 105,
+ 	M_epoll_wait = 106,
+ 	M_epoll_close = 107,
++	M_sigprocmask = 108,
+ };
+ 
+ struct makos_metadata {
+@@ -438,7 +440,11 @@ long __makos_syscall_dispatch(long n, long a, long b, long c, long d, long e, lo
+ 	case L_ppoll:
+ 	{
+ 		long milliseconds = -1;
+-		if (d) return -ENOTSUP;
++		unsigned long signal_mask = 0;
++		if (d) {
++			if (e != 8) return -EINVAL;
++			signal_mask = *(const unsigned long *)d;
++		}
+ 		if (c) {
+ 			const struct timespec *timeout = (const struct timespec *)c;
+ 			if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 ||
+@@ -448,7 +454,7 @@ long __makos_syscall_dispatch(long n, long a, long b, long c, long d, long e, lo
+ 			milliseconds = timeout->tv_sec * 1000 +
+ 				(timeout->tv_nsec + 999999L) / 1000000L;
+ 		}
+-		return makos_raw(M_poll, a, b, milliseconds, 0, 0, 0);
++		return makos_raw(M_poll, a, b, milliseconds, signal_mask, d != 0, 0);
+ 	}
+ 	case L_newfstatat:
+ 		return makos_fstatat(a, (const char *)b, (struct kstat *)c, d);
+@@ -482,8 +488,9 @@ long __makos_syscall_dispatch(long n, long a, long b, long c, long d, long e, lo
+ 	case L_epoll_ctl:
+ 		return makos_raw(M_epoll_ctl, a, b, c, d, 0, 0);
+ 	case L_epoll_pwait:
+-		if (e) return -ENOTSUP;
+-		return makos_raw(M_epoll_wait, a, b, c, d, 0, 0);
++		if (e && f != 8) return -EINVAL;
++		return makos_raw(M_epoll_wait, a, b, c, d,
++			e ? *(const unsigned long *)e : 0, e != 0);
+ 	case L_openat:
+ 		return makos_openat(a, (const char *)b, c);
+ 	case L_lseek:
+@@ -550,6 +557,10 @@ long __makos_syscall_dispatch(long n, long a, long b, long c, long d, long e, lo
+ 	case L_rt_sigaction:
+ 		if (d != 8) return -EINVAL;
+ 		return makos_raw(M_sigaction, a, b, c, 32, 0, 0);
++	case L_rt_sigprocmask:
++		if (d != 8) return -EINVAL;
++		return makos_raw(M_sigprocmask, a,
++			b ? *(const unsigned long *)b : 0, b != 0, c, 0, 0);
+ 	case L_getpgid:
+ 		if (a) return -ENOTSUP;
+ 		return makos_raw(M_getpgrp, 0, 0, 0, 0, 0, 0);

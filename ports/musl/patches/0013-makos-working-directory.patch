@@ -1,0 +1,48 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -20,12 +20,14 @@
+ #include "kstat.h"
+ 
+ enum linux_aarch64_syscall {
++	L_getcwd = 17,
+ 	L_dup = 23,
+ 	L_dup3 = 24,
+ 	L_fcntl = 25,
+ 	L_ioctl = 29,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
++	L_chdir = 49,
+ 	L_pipe2 = 59,
+ 	L_getdents64 = 61,
+ 	L_lseek = 62,
+@@ -108,6 +110,8 @@ enum makos_syscall {
+ 	M_poll = 91,
+ 	M_fstat_metadata = 92,
+ 	M_read_dir_fd = 93,
++	M_chdir = 94,
++	M_getcwd = 95,
+ };
+ 
+ struct makos_metadata {
+@@ -354,6 +358,8 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	long length, result;
+ 
+ 	switch (n) {
++	case L_getcwd:
++		return makos_raw(M_getcwd, a, b, 0, 0, 0, 0);
+ 	case L_dup:
+ 		result = makos_raw(M_fd_dup, a, 0, 0, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;
+@@ -383,6 +389,11 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_raw(M_pipe2, a, b, 0, 0, 0, 0);
+ 	case L_getdents64:
+ 		return makos_getdents(a, (unsigned char *)b, c);
++	case L_chdir:
++		length = path_length((const char *)a);
++		if (!length) return -ENOENT;
++		if (length >= 4096) return -ENAMETOOLONG;
++		return makos_raw(M_chdir, a, length, 0, 0, 0, 0);
+ 	case L_ppoll:
+ 		if (d) return -ENOTSUP;
+ 		if (!c) return -ENOTSUP;

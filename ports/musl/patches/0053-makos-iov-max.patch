@@ -1,0 +1,27 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] musl: honor advertised IOV_MAX in message bridge
+
+Firefox uses the libc IOV_MAX contract when assembling IPC messages. Accept
+that advertised limit while retaining the bridge's independent 64 KiB byte cap.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -350,7 +350,7 @@ static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
+ 	size_t rights_count;
+ 	long packed;
+ 	struct cmsghdr *control;
+-	if (!message || message->msg_iovlen > 16) return -ENOTSUP;
++	if (!message || message->msg_iovlen > IOV_MAX) return -ENOTSUP;
+ 	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
+ 	if (message->msg_name &&
+ 	    makos_pack_sockaddr(message->msg_name, message->msg_namelen, &packed) < 0)
+@@ -398,7 +398,7 @@ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ 	size_t capacity = 0, copied = 0, rights_count, delivered;
+ 	size_t control_capacity;
+ 	long result;
+-	if (!message || message->msg_iovlen > 16)
++	if (!message || message->msg_iovlen > IOV_MAX)
+ 		return -ENOTSUP;
+ 	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
+ 	for (size_t i = 0; i < message->msg_iovlen; i++) {

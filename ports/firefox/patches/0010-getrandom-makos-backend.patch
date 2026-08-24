@@ -1,0 +1,27 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage getrandom crate for MakOS backend
+
+Cargo verifies vendored crate checksums. Route getrandom through a separately
+staged copy whose backend calls MakOS musl getrandom(2).
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2490,6 +2490,4 @@
+ [[package]]
+ name = "getrandom"
+ version = "0.3.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
+ dependencies = [
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -107,6 +107,7 @@
+ # stay unused by overriding them with crates that contain enough to build the current
+ # code and will fail the build in unwanted cases.
+ cmake = { path = "build/rust/cmake" }
+ vcpkg = { path = "build/rust/vcpkg" }
++getrandom_0_3 = { package = "getrandom", path = "../getrandom-makos" }
+ 
+ # Helper crate for integration in the gecko build system.

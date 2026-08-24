@@ -1,0 +1,77 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] build: recognize aarch64-unknown-makos as distinct target
+
+MakOS is intentionally not mapped to Linux. Keep OS and kernel identity
+separate so every unsupported Gecko backend remains a visible build gate.
+
+---
+ build/autoconf/config.sub                        |  1 +
+ build/moz.configure/init.configure              | 12 ++++++++++++
+ python/mozbuild/mozbuild/configure/constants.py |  3 +++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/build/autoconf/config.sub b/build/autoconf/config.sub
+--- a/build/autoconf/config.sub
++++ b/build/autoconf/config.sub
+@@ -2022,6 +2022,7 @@ case $os in
+ 	| lynxos* \
+ 	| mach* \
+ 	| macos* \
++	| makos* \
+ 	| magic* \
+ 	| mbr* \
+ 	| midipix* \
+diff --git a/build/moz.configure/init.configure b/build/moz.configure/init.configure
+--- a/build/moz.configure/init.configure
++++ b/build/moz.configure/init.configure
+@@ -513,6 +513,9 @@ def split_triplet(triplet, allow_wasi=False):
+         canonical_os = canonical_kernel = "OpenBSD"
+     elif os.startswith("solaris"):
+         canonical_os = canonical_kernel = "SunOS"
++    elif os.startswith("makos"):
++        canonical_os = canonical_kernel = "MakOS"
++        sub_configure_alias = triplet
+     elif os.startswith("wasi") and allow_wasi:
+         canonical_os = canonical_kernel = "WASI"
+     else:
+@@ -884,6 +887,15 @@ def target_is_ios(target):
+ set_define("XP_IOS", target_is_ios)
+ 
+ 
++@depends(target)
++def target_is_makos(target):
++    if target.os == "MakOS":
++        return True
++
++
++set_define("XP_MAKOS", target_is_makos)
++
++
+ @depends(target)
+ def target_has_linux_kernel(target):
+     if target.kernel == "Linux":
+diff --git a/python/mozbuild/mozbuild/configure/constants.py b/python/mozbuild/mozbuild/configure/constants.py
+--- a/python/mozbuild/mozbuild/configure/constants.py
++++ b/python/mozbuild/mozbuild/configure/constants.py
+@@ -38,4 +38,5 @@ class OS(EnumString):
+         "iOS",
++        "MakOS",
+         "NetBSD",
+         "OpenBSD",
+         "OSX",
+@@ -54,5 +55,6 @@ class Kernel(EnumString):
+         "kFreeBSD",
+         "Linux",
++        "MakOS",
+         "NetBSD",
+         "OpenBSD",
+         "SunOS",
+@@ -144,5 +146,6 @@ kernel_preprocessor_checks = {
+     "kFreeBSD": "__FreeBSD_kernel__",
+     "Linux": "__linux__",
++    "MakOS": "__makos__",
+     "NetBSD": "__NetBSD__",
+     "OpenBSD": "__OpenBSD__",
+     "SunOS": "__sun__",
+-- 
+2.50.1

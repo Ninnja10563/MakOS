@@ -1,0 +1,11 @@
+FIREFOX_VERSION=140.13.0esr
+FIREFOX_ARCHIVE=firefox-140.13.0esr.source.tar.xz
+FIREFOX_URL=https://archive.mozilla.org/pub/firefox/releases/140.13.0esr/source/firefox-140.13.0esr.source.tar.xz
+FIREFOX_SIGNATURE_URL=https://archive.mozilla.org/pub/firefox/releases/140.13.0esr/source/firefox-140.13.0esr.source.tar.xz.asc
+FIREFOX_CHECKSUMS_URL=https://archive.mozilla.org/pub/firefox/releases/140.13.0esr/SHA512SUMS
+FIREFOX_CHECKSUMS_SIGNATURE_URL=https://archive.mozilla.org/pub/firefox/releases/140.13.0esr/SHA512SUMS.asc
+FIREFOX_SHA512=937a4103d71c5e1e4bf051821729f6ea70b5c18d444930a487695cc23d74712a0134047248f6ac02305e01becb705426a55b9d89739f02a01eda01ecf5bc27f1
+FIREFOX_REPOSITORY=https://github.com/mozilla-firefox/firefox.git
+FIREFOX_TAG=FIREFOX_140_13_0esr_RELEASE
+FIREFOX_COMMIT=90ad18aabeaa9cbd63a1f749a57f266e758e50da
+FIREFOX_PRIMARY_LICENSE=MPL-2.0

@@ -1,0 +1,323 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget: add MakOS app shell and native mouse events
+
+Provide XPCOM app-shell/widget services, scheduler-backed idle waiting, and
+dispatch retained-surface mouse, resize, and close events into Gecko.
+
+diff --git a/widget/makos/MakOSWindow.h b/widget/makos/MakOSWindow.h
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/MakOSWindow.h
+@@ -0,0 +1,14 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_widget_MakOSWindow_h
++#define mozilla_widget_MakOSWindow_h
++
++namespace mozilla::widget {
++
++bool ProcessNextMakOSWindowEvent();
++
++}  // namespace mozilla::widget
++
++#endif  // mozilla_widget_MakOSWindow_h
+diff --git a/widget/makos/nsAppShell.h b/widget/makos/nsAppShell.h
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsAppShell.h
+@@ -0,0 +1,22 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_makos_nsAppShell_h
++#define widget_makos_nsAppShell_h
++
++#include "mozilla/Atomics.h"
++#include "nsBaseAppShell.h"
++
++class nsAppShell final : public nsBaseAppShell {
++ public:
++  nsresult Init();
++  void ScheduleNativeEventCallback() override;
++  bool ProcessNextNativeEvent(bool aMayWait) override;
++
++ private:
++  ~nsAppShell() override = default;
++  mozilla::Atomic<bool> mNativeCallbackPending{false};
++};
++
++#endif  // widget_makos_nsAppShell_h
+diff --git a/widget/makos/nsAppShell.cpp b/widget/makos/nsAppShell.cpp
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsAppShell.cpp
+@@ -0,0 +1,36 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsAppShell.h"
++
++#include <time.h>
++
++#include "MakOSWindow.h"
++
++nsresult nsAppShell::Init() { return nsBaseAppShell::Init(); }
++
++void nsAppShell::ScheduleNativeEventCallback() {
++  mNativeCallbackPending = true;
++}
++
++bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
++  if (mSuspendNativeCount) {
++    return false;
++  }
++  bool processed = mozilla::widget::ProcessNextMakOSWindowEvent();
++  if (mNativeCallbackPending.exchange(false)) {
++    NativeEventCallback();
++    processed = true;
++  }
++  if (!processed && aMayWait) {
++    const timespec delay{0, 10 * 1000 * 1000};
++    (void)nanosleep(&delay, nullptr);
++    processed = mozilla::widget::ProcessNextMakOSWindowEvent();
++    if (mNativeCallbackPending.exchange(false)) {
++      NativeEventCallback();
++      processed = true;
++    }
++  }
++  return processed;
++}
+diff --git a/widget/makos/nsWidgetFactory.h b/widget/makos/nsWidgetFactory.h
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsWidgetFactory.h
+@@ -0,0 +1,15 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef widget_makos_nsWidgetFactory_h
++#define widget_makos_nsWidgetFactory_h
++
++#include "nsID.h"
++#include "nscore.h"
++
++nsresult nsAppShellConstructor(const nsIID& aIID, void** aResult);
++void nsWidgetMakOSModuleCtor();
++void nsWidgetMakOSModuleDtor();
++
++#endif  // widget_makos_nsWidgetFactory_h
+diff --git a/widget/makos/nsWidgetFactory.cpp b/widget/makos/nsWidgetFactory.cpp
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsWidgetFactory.cpp
+@@ -0,0 +1,28 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsWidgetFactory.h"
++
++#include "HeadlessClipboard.h"
++#include "mozilla/Components.h"
++#include "mozilla/WidgetUtils.h"
++#include "nsAppShell.h"
++#include "nsAppShellSingleton.h"
++#include "nsLookAndFeel.h"
++
++using namespace mozilla;
++using namespace mozilla::widget;
++
++NS_IMPL_COMPONENT_FACTORY(nsIClipboard) {
++  nsCOMPtr<nsIClipboard> instance = new HeadlessClipboard();
++  return instance.forget().downcast<nsISupports>();
++}
++
++void nsWidgetMakOSModuleCtor() { (void)nsAppShellInit(); }
++
++void nsWidgetMakOSModuleDtor() {
++  WidgetUtils::Shutdown();
++  nsLookAndFeel::Shutdown();
++  nsAppShellShutdown();
++}
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -5,9 +5,13 @@
+ 
+ #include "HeadlessWidget.h"
+ #include "MakOSSurface.h"
++#include "MakOSWindow.h"
+ #include "mozilla/gfx/2D.h"
+ #include "nsIWidget.h"
+ 
+ namespace mozilla::widget {
++
++class MakOSWindow;
++static MakOSWindow* gTopLevelWindow;
+ 
+ class MakOSWindow final : public HeadlessWidget {
+@@ -28,6 +32,7 @@ class MakOSWindow final : public HeadlessWidget {
+       HeadlessWidget::Destroy();
+       return NS_ERROR_FAILURE;
+     }
++    gTopLevelWindow = this;
+     makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, aRect.Width(),
+                        aRect.Height());
+     return NS_OK;
+@@ -35,6 +40,9 @@ class MakOSWindow final : public HeadlessWidget {
+   }
+ 
+   void Destroy() override {
++    if (gTopLevelWindow == this) {
++      gTopLevelWindow = nullptr;
++    }
+     if (mSurface != makos::kInvalidSurface) {
+       makos::HideSurface(mSurface);
+       mSurface = makos::kInvalidSurface;
+@@ -83,11 +91,60 @@ class MakOSWindow final : public HeadlessWidget {
+     mDrawTarget->ReleaseBits(pixels);
+     (void)makos::PresentSurface(mSurface);
+   }
+ 
++  bool ProcessNextSurfaceEvent() {
++    if (mSurface == makos::kInvalidSurface) {
++      return false;
++    }
++    makos::SurfaceEvent event{};
++    if (!makos::ReadSurfaceEvent(mSurface, event)) {
++      return false;
++    }
++    switch (static_cast<makos::SurfaceEventKind>(event.kind)) {
++      case makos::SurfaceEventKind::Pointer: {
++        LayoutDeviceIntPoint offset = WidgetToScreenOffset();
++        LayoutDeviceIntPoint point(offset.x + event.x, offset.y + event.y);
++        (void)SynthesizeNativeMouseEvent(
++            point, NativeMouseMessage::Move, MouseButton::eNotPressed,
++            nsIWidget::Modifiers::NO_MODIFIERS, nullptr);
++        bool wasDown = (mPointerButtons & 1) != 0;
++        bool isDown = (event.key & 1) != 0;
++        if (wasDown != isDown) {
++          (void)SynthesizeNativeMouseEvent(
++              point,
++              isDown ? NativeMouseMessage::ButtonDown
++                     : NativeMouseMessage::ButtonUp,
++              MouseButton::ePrimary, nsIWidget::Modifiers::NO_MODIFIERS,
++              nullptr);
++        }
++        mPointerButtons = event.key;
++        break;
++      }
++      case makos::SurfaceEventKind::Resize:
++        HeadlessWidget::Resize(event.width, event.height, true);
++        mDrawTarget = nullptr;
++        break;
++      case makos::SurfaceEventKind::Close:
++        if (mWidgetListener) {
++          (void)mWidgetListener->RequestWindowClose(this);
++        }
++        break;
++      case makos::SurfaceEventKind::Key:
++      case makos::SurfaceEventKind::None:
++        break;
++    }
++    return true;
++  }
++
+  private:
+   ~MakOSWindow() override { Destroy(); }
+   makos::SurfaceHandle mSurface = makos::kInvalidSurface;
+   RefPtr<gfx::DrawTarget> mDrawTarget;
++  uint32_t mPointerButtons = 0;
+ };
+ 
++bool ProcessNextMakOSWindowEvent() {
++  return gTopLevelWindow && gTopLevelWindow->ProcessNextSurfaceEvent();
++}
++
+ }  // namespace mozilla::widget
+diff --git a/widget/makos/moz.build b/widget/makos/moz.build
+--- a/widget/makos/moz.build
++++ b/widget/makos/moz.build
+@@ -7,6 +7,7 @@
+ EXPORTS.mozilla.widget += [
+     "GfxInfo.h",
+     "MakOSSurface.h",
++    "MakOSWindow.h",
+ ]
+ 
+ SOURCES += [
+@@ -15,4 +16,6 @@ SOURCES += [
+     "MakOSWindow.cpp",
+     "MediaKeysEventSourceFactory.cpp",
++    "nsAppShell.cpp",
+     "nsLookAndFeel.cpp",
++    "nsWidgetFactory.cpp",
+ ]
+diff --git a/widget/makos/components.conf b/widget/makos/components.conf
+--- a/widget/makos/components.conf
++++ b/widget/makos/components.conf
+@@ -3,8 +3,20 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
++Headers = '/widget/makos/nsWidgetFactory.h',
++
++InitFunc = 'nsWidgetMakOSModuleCtor'
++UnloadFunc = 'nsWidgetMakOSModuleDtor'
++
+ Classes = [
+     {
++        'cid': '{49f428e8-baf9-4ba3-b1b0-7d2fd3abbcea}',
++        'contract_ids': ['@mozilla.org/widget/parent/clipboard;1'],
++        'interfaces': ['nsIClipboard'],
++        'type': 'nsIClipboard',
++        'processes': ProcessSelector.MAIN_PROCESS_ONLY,
++    },
++    {
+         'name': 'GfxInfo',
+         'cid': '{d755a760-9f27-11df-0800-200c9a664242}',
+         'contract_ids': ['@mozilla.org/gfx/info;1'],
+@@ -14,4 +26,38 @@ Classes = [
+         'init_method': 'Init',
+         'processes': ProcessSelector.ALLOW_IN_GPU_PROCESS,
+     },
++    {
++        'cid': '{2d96b3df-c051-11d1-a827-0040959a28c9}',
++        'contract_ids': ['@mozilla.org/widget/appshell/makos;1'],
++        'legacy_constructor': 'nsAppShellConstructor',
++        'headers': ['/widget/makos/nsWidgetFactory.h'],
++        'processes': ProcessSelector.ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS,
++    },
++    {
++        'cid': '{8b5314bc-db01-11d2-96ce-0060b0fb9956}',
++        'contract_ids': ['@mozilla.org/widget/transferable;1'],
++        'type': 'nsTransferable',
++        'headers': ['/widget/nsTransferable.h'],
++    },
++    {
++        'cid': '{948a0023-e3a7-11d2-96cf-0060b0fb9956}',
++        'contract_ids': ['@mozilla.org/widget/htmlformatconverter;1'],
++        'type': 'nsHTMLFormatConverter',
++        'headers': ['/widget/nsHTMLFormatConverter.h'],
++    },
++    {
++        'cid': '{77221d5a-1dd2-11b2-8c69-c710f15d2ed5}',
++        'contract_ids': ['@mozilla.org/widget/clipboardhelper;1'],
++        'type': 'nsClipboardHelper',
++        'headers': ['/widget/nsClipboardHelper.h'],
++    },
++    {
++        'cid': '{f0ddedd7-e8d5-4f95-a5b4-0f48f1741b36}',
++        'contract_ids': ['@mozilla.org/gfx/parent/screenmanager;1'],
++        'type': 'mozilla::widget::ScreenManager',
++        'headers': ['mozilla/widget/ScreenManager.h'],
++        'constructor': 'mozilla::widget::ScreenManager::GetAddRefedSingleton',
++        'processes': ProcessSelector.MAIN_PROCESS_ONLY,
++        'singleton': True,
++    },
+ ]

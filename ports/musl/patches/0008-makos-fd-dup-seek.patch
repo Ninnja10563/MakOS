@@ -1,0 +1,44 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -14,9 +14,11 @@
+ #include "libc.h"
+ 
+ enum linux_aarch64_syscall {
++	L_dup = 23,
+ 	L_ioctl = 29,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
++	L_lseek = 62,
+ 	L_openat = 56,
+ 	L_close = 57,
+ 	L_read = 63,
+@@ -84,6 +86,8 @@ enum makos_syscall {
+ 	M_getrandom = 83,
+ 	M_clock_realtime = 84,
+ 	M_process_identity = 85,
++	M_fd_dup = 86,
++	M_fd_seek = 87,
+ };
+ 
+ struct makos_termios {
+@@ -219,6 +223,9 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	long length, result;
+ 
+ 	switch (n) {
++	case L_dup:
++		result = makos_raw(M_fd_dup, a, 0, 0, 0, 0, 0);
++		return result == -1 ? -EBADF : result;
+ 	case L_read:
+ 		result = makos_raw(M_read, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;
+@@ -232,6 +239,9 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_bool_result(result, EBADF);
+ 	case L_openat:
+ 		return makos_openat(a, (const char *)b, c);
++	case L_lseek:
++		result = makos_raw(M_fd_seek, a, b, c, 0, 0, 0);
++		return result == -1 ? -EINVAL : result;
+ 	case L_unlinkat:
+ 		if (a != AT_FDCWD || c) return -ENOTSUP;
+ 		length = path_length((const char *)b);

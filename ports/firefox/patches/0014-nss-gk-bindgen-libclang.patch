@@ -1,0 +1,40 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage nss-gk-api for version-matched libclang
+
+Cargo verifies git source integrity. Override that source with a separately
+staged copy, where field-correct libclang 18 receives the small libc++ 22 parser
+compatibility definitions it needs.
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4885,7 +4885,6 @@ dependencies = [
+ [[package]]
+ name = "nss-gk-api"
+ version = "0.3.0"
+-source = "git+https://github.com/beurdouche/nss-gk-api?rev=e48a946811ffd64abc78de3ee284957d8d1c0d63#e48a946811ffd64abc78de3ee284957d8d1c0d63"
+ dependencies = [
+  "bindgen 0.69.4",
+  "log",
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -70,6 +70,9 @@ rusqlite = "0.33.0"
+ # Shared across multiple glean consumers.
+ glean = "=64.3.1"
+ 
++[patch."https://github.com/beurdouche/nss-gk-api"]
++nss-gk-api = { path = "../nss-gk-api-makos" }
++
+ # Explicitly specify what our profiles use.  The opt-level setting here is
+ # a total fiction; see the setup of MOZ_RUST_DEFAULT_FLAGS for what the
+ # opt-level setting will be as a result of various other configure flags.
+@@ -246,7 +249,7 @@ unicode-width = { path = "build/rust/unicode-width" }
+ 
+ # To-be-published changes.
+ unicode-bidi = { git = "https://github.com/servo/unicode-bidi", rev = "ca612daf1c08c53abe07327cb3e6ef6e0a760f0c" }
+-nss-gk-api = { git = "https://github.com/beurdouche/nss-gk-api", rev = "e48a946811ffd64abc78de3ee284957d8d1c0d63" }
++nss-gk-api = { path = "../nss-gk-api-makos" }
+ cssparser = { git = "https://github.com/servo/rust-cssparser", rev = "958a3f098acb92ddacdce18a7ef2c4a87ac3326f" }
+ 
+ # Other overrides

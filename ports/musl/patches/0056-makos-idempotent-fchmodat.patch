@@ -1,0 +1,31 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -47,6 +47,7 @@ enum linux_aarch64_syscall {
+ 	L_fallocate = 47,
+ 	L_faccessat = 48,
+ 	L_chdir = 49,
++	L_fchmodat = 53,
+ 	L_pipe2 = 59,
+ 	L_getdents64 = 61,
+ 	L_lseek = 62,
+@@ -768,5 +769,19 @@ long __makos_syscall_dispatch(long n, long a, long b, long c, long d, long e, long f)
+ 	case L_faccessat:
+ 		return makos_faccessat(a, (const char *)b, c);
++	case L_fchmodat:
++	{
++		struct makos_metadata metadata;
++		if (a != AT_FDCWD) return -ENOTSUP;
++		if (c & ~07777) return -EINVAL;
++		length = path_length((const char *)b);
++		if (!length) return -ENOENT;
++		if (length >= 4096) return -ENAMETOOLONG;
++		result = makos_raw(M_stat, b, length, (long)&metadata, 0, 0, 0);
++		if (result != 1) return -ENOENT;
++		/* Persistent MakFS4 files are created 0600. Until inode-mode
++		 * transactions land, truthfully accept only an idempotent chmod. */
++		return (metadata.mode & 07777) == (unsigned)c ? 0 : -ENOTSUP;
++	}
+ 	case L_pselect6:
+ 	{
+ 		long options[3] = {-1, 0, 0};

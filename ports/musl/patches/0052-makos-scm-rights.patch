@@ -1,0 +1,136 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] musl: translate bounded SCM_RIGHTS messages
+
+Bridge one SCM_RIGHTS control message containing up to 200 descriptors while
+preserving existing flattened sendmsg/recvmsg behavior for no-control network
+messages.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -196,6 +196,8 @@
+ 	M_socketpair = 124,
+ 	M_process_fork = 125,
+ 	M_process_wait_status = 126,
++	M_sendmsg_rights = 127,
++	M_recvmsg_rights = 128,
+ };
+ 
+ struct makos_metadata {
+@@ -343,10 +345,13 @@
+ static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
+ {
+-	unsigned char buffer[4096];
++	unsigned char buffer[65536];
++	int passed_rights[200];
++	unsigned long long rights[200];
+ 	size_t total = 0;
++	size_t rights_count;
+ 	long packed;
+-	if (!message || message->msg_iovlen > 16 || message->msg_controllen)
+-		return -ENOTSUP;
++	struct cmsghdr *control;
++	if (!message || message->msg_iovlen > 16) return -ENOTSUP;
+ 	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
+ 	if (message->msg_name &&
+ 	    makos_pack_sockaddr(message->msg_name, message->msg_namelen, &packed) < 0)
+@@ -358,6 +363,27 @@
+ 			message->msg_iov[i].iov_len);
+ 		total += message->msg_iov[i].iov_len;
+ 	}
++	if (message->msg_controllen) {
++		if (!message->msg_control || message->msg_name ||
++		    message->msg_controllen < CMSG_LEN(0)) return -ENOTSUP;
++		control = CMSG_FIRSTHDR((struct msghdr *)message);
++		if (!control || control->cmsg_len < CMSG_LEN(0) ||
++		    control->cmsg_len > message->msg_controllen) return -EINVAL;
++		rights_count = (control->cmsg_len - CMSG_LEN(0)) / sizeof(int);
++		if (control->cmsg_level != SOL_SOCKET ||
++		    control->cmsg_type != SCM_RIGHTS || rights_count < 1 ||
++		    rights_count > 200 ||
++		    control->cmsg_len != CMSG_LEN(rights_count * sizeof(int)) ||
++		    message->msg_controllen > CMSG_SPACE(rights_count * sizeof(int)) ||
++		    CMSG_NXTHDR((struct msghdr *)message, control)) return -ENOTSUP;
++		memcpy(passed_rights, CMSG_DATA(control), rights_count * sizeof(int));
++		for (size_t i = 0; i < rights_count; i++) {
++			if (passed_rights[i] < 0) return -EBADF;
++			rights[i] = (unsigned)passed_rights[i];
++		}
++		return makos_raw(M_sendmsg_rights, fd, (long)buffer, total, flags,
++			(long)rights, rights_count);
++	}
+ 	if (!total) return 0;
+ 	return makos_raw(M_send, fd, (long)buffer, total, flags,
+ 		(long)message->msg_name, message->msg_namelen);
+@@ -366,8 +392,11 @@
+ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ {
+-	unsigned char buffer[4096];
++	unsigned char buffer[65536];
++	int received_rights[200];
++	unsigned long long rights[200];
+ 	socklen_t name_length;
+-	size_t capacity = 0, copied = 0;
++	size_t capacity = 0, copied = 0, rights_count, delivered;
++	size_t control_capacity;
+ 	long result;
+ 	if (!message || message->msg_iovlen > 16)
+ 		return -ENOTSUP;
+@@ -377,11 +406,29 @@
+ 			return -EMSGSIZE;
+ 		capacity += message->msg_iov[i].iov_len;
+ 	}
+-	if (!capacity) return 0;
+-	name_length = message->msg_namelen;
+-	result = makos_raw(M_receive, fd, (long)buffer, capacity, flags,
+-		(long)message->msg_name, message->msg_name ? (long)&name_length : 0);
++	if (!capacity && !message->msg_controllen) return 0;
++	name_length = message->msg_namelen;
++	control_capacity = message->msg_controllen;
++	if (control_capacity) {
++		if (!message->msg_control || message->msg_name) return -ENOTSUP;
++		result = makos_raw(M_recvmsg_rights, fd, (long)buffer, capacity, flags,
++			(long)rights, 200);
++	} else {
++		result = makos_raw(M_receive, fd, (long)buffer, capacity, flags,
++			(long)message->msg_name, message->msg_name ? (long)&name_length : 0);
++	}
+ 	if (result < 0) return result;
++	rights_count = control_capacity ? (unsigned long)result >> 32 : 0;
++	if (control_capacity) result = (unsigned long)result & 0xffffffffUL;
++	if ((size_t)result > capacity || rights_count > 200) return -EIO;
++	for (size_t i = 0; i < rights_count; i++) {
++		if (rights[i] > INT_MAX) {
++			for (size_t j = 0; j < rights_count; j++)
++				(void)makos_raw(M_close, rights[j], 0, 0, 0, 0, 0);
++			return -EIO;
++		}
++		received_rights[i] = rights[i];
++	}
+ 	for (size_t i = 0; i < message->msg_iovlen && copied < (size_t)result; i++) {
+ 		size_t count = message->msg_iov[i].iov_len;
+ 		if (count > (size_t)result - copied) count = result - copied;
+@@ -391,6 +438,23 @@
+ 	message->msg_namelen = name_length;
+ 	message->msg_controllen = 0;
+ 	message->msg_flags = 0;
++	if (rights_count) {
++		for (delivered = rights_count; delivered; delivered--)
++			if (CMSG_SPACE(delivered * sizeof(int)) <= control_capacity) break;
++		if (delivered) {
++			struct cmsghdr *control = (struct cmsghdr *)message->msg_control;
++			control->cmsg_level = SOL_SOCKET;
++			control->cmsg_type = SCM_RIGHTS;
++			control->cmsg_len = CMSG_LEN(delivered * sizeof(int));
++			memcpy(CMSG_DATA(control), received_rights, delivered * sizeof(int));
++			message->msg_controllen = CMSG_SPACE(delivered * sizeof(int));
++		}
++		if (delivered != rights_count) {
++			message->msg_flags |= MSG_CTRUNC;
++			for (size_t i = delivered; i < rights_count; i++)
++				(void)makos_raw(M_close, rights[i], 0, 0, 0, 0, 0);
++		}
++	}
+ 	return result;
+ }
+ 

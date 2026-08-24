@@ -1,0 +1,73 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -21,5 +21,6 @@ enum linux_aarch64_syscall {
+ 	L_write = 64,
+ 	L_set_tid_address = 96,
++	L_futex = 98,
+ 	L_exit = 93,
+ 	L_exit_group = 94,
+ 	L_clock_gettime = 113,
+@@ -37,4 +38,5 @@ enum linux_aarch64_syscall {
+ 	L_munmap = 215,
++	L_clone = 220,
+ 	L_mmap = 222,
+ 	L_mprotect = 226,
+ };
+@@ -68,3 +70,6 @@ enum makos_syscall {
+ 	M_set_tid_address = 78,
+ 	M_gettid = 79,
++	M_thread_clone = 80,
++	M_thread_exit = 81,
++	M_futex = 82,
+ };
+@@ -288,10 +293,14 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_set_tid_address:
+ 		return makos_raw(M_set_tid_address, a, 0, 0, 0, 0, 0);
++	case L_futex:
++		return makos_raw(M_futex, a, b, c, d, e, f);
+ 	case L_gettid:
+ 		return makos_raw(M_gettid, 0, 0, 0, 0, 0, 0);
++	case L_clone:
++		return makos_raw(M_thread_clone, a, b, c, d, e, 0);
+ 	case L_exit:
+ 	case L_exit_group:
+-		makos_raw(M_exit, a, 0, 0, 0, 0, 0);
++		makos_raw(M_thread_exit, a, 0, 0, 0, 0, 0);
+ 		for (;;) __asm__ __volatile__("wfe");
+ 	default:
+ 		return -ENOSYS;
+diff --git a/src/thread/aarch64/clone.s b/src/thread/aarch64/clone.s
+--- a/src/thread/aarch64/clone.s
++++ b/src/thread/aarch64/clone.s
+@@ -1,7 +1,28 @@
+-// MakOS has no clone/pthread creation ABI yet.
++// __clone(func, stack, flags, arg, ptid, tls, ctid)
++//         x0,   x1,    w2,    x3,  x4,   x5,  x6
++
++// MakOS thread_clone(flags, stack, ptid, tls, ctid)
++//                    x0,    x1,    x2,   x3,  x4
+ .global __clone
+ .hidden __clone
+ .type __clone,%function
+ __clone:
+-	mov x0,#-38 // -ENOSYS
++	and x1,x1,#-16
++	stp x0,x3,[x1,#-16]!
++
++	uxtw x0,w2
++	mov x2,x4
++	mov x3,x5
++	mov x4,x6
++	mov x8,#80 // SYS_thread_clone
++	svc #0
++
++	cbz x0,1f
+ 	ret
++1:	mov x29,0
++	ldp x1,x0,[sp],#16
++	blr x1
++	mov x8,#81 // SYS_thread_exit
++	svc #0
++2:	wfe
++	b 2b

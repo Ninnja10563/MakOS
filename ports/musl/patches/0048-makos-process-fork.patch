@@ -1,0 +1,15 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -192,3 +192,4 @@ enum makos_syscall {
+ 	M_uname = 122,
+ 	M_socketpair = 124,
++	M_process_fork = 125,
+ };
+@@ -1029,4 +1030,6 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_gettid:
+ 		return makos_raw(M_gettid, 0, 0, 0, 0, 0, 0);
+ 	case L_clone:
++		if (a == 17 /* SIGCHLD */ && !b)
++			return makos_raw(M_process_fork, 0, 0, 0, 0, 0, 0);
+ 		return makos_raw(M_thread_clone, a, b, c, d, e, 0);

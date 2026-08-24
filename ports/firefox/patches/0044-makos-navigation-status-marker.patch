@@ -1,0 +1,47 @@
+From 36d3e572807ab815dd647ea33f671b8e2adf18c4 Mon Sep 17 00:00:00 2001
+From: MakOS Port <makos@example.invalid>
+Date: Sat, 23 Aug 2026 04:25:00 +1000
+Subject: [PATCH] docshell: expose completed MakOS HTTP navigation status
+
+MakOS boot tests need a target-side success signal so an error page cannot be
+mistaken for a loaded website based only on framebuffer variation.
+---
+ docshell/base/nsDocShell.cpp | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+index 97302c96d3..9cdb065ff9 100644
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -33,6 +33,7 @@
+ #include "mozilla/MediaFeatureChange.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/PresShell.h"
++#include "mozilla/Printf.h"
+ #include "mozilla/ResultExtensions.h"
+ #include "mozilla/SchedulerGroup.h"
+ #include "mozilla/ScopeExit.h"
+@@ -6264,6 +6265,21 @@ nsresult nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
++#if defined(MOZ_WIDGET_MAKOS)
++  if (url->SchemeIs("http") || url->SchemeIs("https")) {
++    nsAutoCString spec;
++    if (NS_SUCCEEDED(url->GetSpec(spec))) {
++      uint32_t responseStatus = 0;
++      nsCOMPtr<nsIHttpChannel> markerHttpChannel = do_QueryInterface(aChannel);
++      if (markerHttpChannel) {
++        Unused << markerHttpChannel->GetResponseStatus(&responseStatus);
++      }
++      printf_stderr(
++          "MAKOS_FIREFOX_PAGE_STOP status=0x%08x http_status=%u uri=%s end=1\n",
++          static_cast<uint32_t>(aStatus), responseStatus, spec.get());
++    }
++  }
++#endif
+ 
+   nsCOMPtr<nsITimedChannel> timingChannel = do_QueryInterface(aChannel);
+   if (timingChannel) {
+-- 
+2.50.1

@@ -1,0 +1,33 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -13,5 +13,7 @@
+ #include <poll.h>
+ #include <stddef.h>
++#include <string.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
++#include <sys/socket.h>
+ #include <sys/stat.h>
+@@ -603,13 +603,18 @@
+ 	case L_getegid:
+ 		return makos_raw(M_process_identity, 2, 0, 0, 0, 0, 0);
+ 	case L_socket:
++	{
++		long type = b & 0xf;
+ 		if (a != 2) return -EAFNOSUPPORT;
+-		if (b != 1 && b != 2) return -ENOTSUP;
+-		if (!c) c = b == 1 ? 6 : 17;
+-		if ((b == 1 && c != 6) || (b == 2 && c != 17))
++		if (b & ~(0xf | SOCK_NONBLOCK | SOCK_CLOEXEC)) return -EINVAL;
++		if (type != SOCK_STREAM && type != SOCK_DGRAM) return -ENOTSUP;
++		if (!c) c = type == SOCK_STREAM ? 6 : 17;
++		if ((type == SOCK_STREAM && c != 6) ||
++		    (type == SOCK_DGRAM && c != 17))
+ 			return -EPROTONOSUPPORT;
+ 		result = makos_raw(M_socket, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EAFNOSUPPORT : result;
++	}
+ 	case L_connect:
+ 		if (c < 8) return -EINVAL;
+ 		return makos_bool_result(makos_raw(M_connect, a, b, 8, 0, 0, 0), ECONNREFUSED);

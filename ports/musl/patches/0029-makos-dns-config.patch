@@ -1,0 +1,57 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -110,6 +110,7 @@
+ 	M_mmap = 53,
+ 	M_munmap = 54,
+ 	M_mprotect = 55,
++	M_net_config = 61,
+ 	M_tcgetattr = 65,
+ 	M_tcsetattr = 66,
+ 	M_tcflush = 67,
+@@ -198,6 +199,12 @@
+ 	return x0;
+ }
+ 
++hidden int __makos_get_net_config(unsigned char output[12])
++{
++	long result = makos_raw(M_net_config, (long)output, 12, 0, 0, 0, 0);
++	return result == 12 ? 0 : -1;
++}
++
+ static long path_length(const char *path)
+ {
+ 	long length;
+diff --git a/src/network/resolvconf.c b/src/network/resolvconf.c
+--- a/src/network/resolvconf.c
++++ b/src/network/resolvconf.c
+@@ -6,6 +6,8 @@
+ #include <stdlib.h>
+ #include <netinet/in.h>
+ 
++hidden int __makos_get_net_config(unsigned char [12]);
++
+ int __get_resolv_conf(struct resolvconf *conf, char *search, size_t search_sz)
+ {
+ 	char line[256];
+@@ -84,8 +86,18 @@
+ 
+ no_resolv_conf:
+ 	if (!nns) {
+-		__lookup_ipliteral(conf->ns, "127.0.0.1", AF_UNSPEC);
+-		nns = 1;
++		unsigned char config[12];
++		if (!__makos_get_net_config(config) &&
++		    (config[8] || config[9] || config[10] || config[11])) {
++			conf->ns[0].family = AF_INET;
++			conf->ns[0].scopeid = 0;
++			memset(conf->ns[0].addr, 0, sizeof conf->ns[0].addr);
++			memcpy(conf->ns[0].addr, config + 8, 4);
++			nns = 1;
++		} else {
++			__lookup_ipliteral(conf->ns, "127.0.0.1", AF_UNSPEC);
++			nns = 1;
++		}
+ 	}
+ 
+ 	conf->nns = nns;

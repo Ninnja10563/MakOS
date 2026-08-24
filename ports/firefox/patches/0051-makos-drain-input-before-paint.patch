@@ -1,0 +1,20 @@
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -289,12 +289,13 @@ class MakOSTopLevelWindow final : public HeadlessWidget {
+     if (mSurface == makos::kInvalidSurface) {
+       return false;
+     }
+-    if (ProcessPendingPaint()) {
+-      return true;
+-    }
+     makos::SurfaceEvent event{};
+     if (!makos::ReadSurfaceEvent(mSurface, event)) {
+-      return false;
++      // Drain native input/resize/close events before painting. A key dispatch
++      // invalidates the window; painting before the next queued key serialized
++      // every character behind a full synchronous Skia paint and could
++      // overflow MakOS's bounded surface-event queue during normal typing.
++      return ProcessPendingPaint();
+     }
+     switch (static_cast<makos::SurfaceEventKind>(event.kind)) {
+       case makos::SurfaceEventKind::Pointer: {

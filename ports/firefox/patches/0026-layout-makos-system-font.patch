@@ -1,0 +1,21 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] layout: define privacy-resisting MakOS system font
+
+MakOS uses its bundled FreeType font set. Resolve fingerprint-resistant system
+font requests through the generic sans-serif family at Firefox's standard 12px
+size.
+
+diff --git a/layout/base/nsLayoutUtils.cpp b/layout/base/nsLayoutUtils.cpp
+--- a/layout/base/nsLayoutUtils.cpp
++++ b/layout/base/nsLayoutUtils.cpp
+@@ -9700,6 +9700,10 @@ static void GetSpoofedSystemFontForRFP(LookAndFeel::FontID aFontID,
+   // UI font-size.
+   aName = u"sans-serif"_ns;
+   aStyle.size = 15;
++#elif defined(MOZ_WIDGET_MAKOS)
++  // MakOS resolves the generic family through its bundled FreeType font set.
++  aName = u"sans-serif"_ns;
++  aStyle.size = 12;
+ #else
+ #  error "Unknown platform"
+ #endif

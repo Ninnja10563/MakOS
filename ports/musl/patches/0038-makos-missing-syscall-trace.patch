@@ -1,0 +1,19 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -165,6 +165,7 @@ enum makos_syscall {
+ 	M_madvise = 114,
+ 	M_thread_set_name = 115,
+ 	M_thread_set_scheduler = 116,
++	M_compat_missing = 118,
+ };
+ 
+ struct makos_metadata {
+@@ -860,6 +861,7 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		makos_raw(M_thread_exit, a, 0, 0, 0, 0, 0);
+ 		for (;;) __asm__ __volatile__("wfe");
+ 	default:
++		(void)makos_raw(M_compat_missing, n, a, b, c, d, e);
+ 		return -ENOSYS;
+ 	}
+ }

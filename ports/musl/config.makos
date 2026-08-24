@@ -1,0 +1,10 @@
+TARGET=aarch64-unknown-makos
+ARCH=aarch64
+CC=clang --target=aarch64-unknown-makos
+AR=llvm-ar
+RANLIB=llvm-ranlib
+STRIP=llvm-strip
+CFLAGS=-Os -ffreestanding -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables
+LDFLAGS=-fuse-ld=lld -nostdlib -static
+PREFIX=/usr
+SYSLIBDIR=/lib

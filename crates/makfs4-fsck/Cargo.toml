@@ -1,0 +1,9 @@
+[package]
+name = "makos-makfs4-fsck"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+makos-gpt = { path = "../gpt" }
+makos-makfs4 = { path = "../makfs4" }

@@ -1,0 +1,22 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget/makos: show the native top-level on creation
+
+MakOS owns one browser top-level surface slot and does not have a separate
+window-manager show handshake. Make that native surface visible immediately
+after successful creation. This queues the normal Gecko invalidation and
+paint path while keeping a later Firefox Show(true) idempotent.
+
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -189,6 +189,10 @@ class MakOSWindow final : public HeadlessWidget {
+     gTopLevelWindow = this;
+     makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, rect.Width(),
+                        rect.Height());
++    // MakOS owns the browser's single native top-level slot. Make it visible
++    // as soon as creation succeeds so frontend service initialization cannot
++    // indefinitely defer the first real Gecko paint.
++    Show(true);
+     return NS_OK;
+   }
+ 

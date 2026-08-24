@@ -1,0 +1,31 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage libloading with MakOS dlopen ABI
+
+Cargo verifies vendored crate checksums. Route libloading through separately
+staged source containing MakOS's musl-compatible RTLD flag values.
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3708,8 +3708,6 @@ dependencies = [
+ [[package]]
+ name = "libloading"
+ version = "0.8.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
+ dependencies = [
+  "cfg-if",
+  "windows-targets",
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -203,6 +203,9 @@ hashbrown_0_13 = { package = "hashbrown", path = "build/rust/hashbrown-0.13" }
+ # Patch `hashbrown` 0.14.* to depend on 0.15.*
+ hashbrown_0_14 = { package = "hashbrown", path = "build/rust/hashbrown" }
+ 
++# Teach libloading MakOS's musl-compatible dlopen flag ABI.
++libloading = { path = "../libloading-makos" }
++
+ # Patch `socket2` 0.4 to 0.5
+ socket2 = { path = "build/rust/socket2" }
+ socket2_0_5 = { package = "socket2", path = "../socket2-makos" }

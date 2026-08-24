@@ -1,0 +1,47 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -27,6 +27,7 @@ enum linux_aarch64_syscall {
+ 	L_ioctl = 29,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
++	L_ftruncate = 46,
+ 	L_chdir = 49,
+ 	L_pipe2 = 59,
+ 	L_getdents64 = 61,
+@@ -35,6 +36,7 @@ enum linux_aarch64_syscall {
+ 	L_ppoll = 73,
+ 	L_newfstatat = 79,
+ 	L_fstat = 80,
++	L_fsync = 82,
+ 	L_openat = 56,
+ 	L_close = 57,
+ 	L_read = 63,
+@@ -112,6 +114,8 @@ enum makos_syscall {
+ 	M_read_dir_fd = 93,
+ 	M_chdir = 94,
+ 	M_getcwd = 95,
++	M_ftruncate = 96,
++	M_fsync = 97,
+ };
+ 
+ struct makos_metadata {
+@@ -394,6 +398,9 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		if (!length) return -ENOENT;
+ 		if (length >= 4096) return -ENAMETOOLONG;
+ 		return makos_raw(M_chdir, a, length, 0, 0, 0, 0);
++	case L_ftruncate:
++		if (b < 0) return -EINVAL;
++		return makos_raw(M_ftruncate, a, b, 0, 0, 0, 0);
+ 	case L_ppoll:
+ 		if (d) return -ENOTSUP;
+ 		if (!c) return -ENOTSUP;
+@@ -405,6 +412,8 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_fstatat(a, (const char *)b, (struct kstat *)c, d);
+ 	case L_fstat:
+ 		return makos_fstat(a, (struct kstat *)b);
++	case L_fsync:
++		return makos_raw(M_fsync, a, 0, 0, 0, 0, 0);
+ 	case L_read:
+ 		result = makos_raw(M_read, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;

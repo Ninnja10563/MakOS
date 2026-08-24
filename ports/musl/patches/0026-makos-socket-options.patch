@@ -1,0 +1,74 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -10,6 +10,7 @@
+ #include <dirent.h>
+ #include <fcntl.h>
+ #include <limits.h>
++#include <netinet/tcp.h>
+ #include <poll.h>
+ #include <stddef.h>
+ #include <string.h>
+@@ -73,6 +74,9 @@
+ 	L_connect = 203,
+ 	L_sendto = 206,
+ 	L_recvfrom = 207,
++	L_setsockopt = 208,
++	L_getsockopt = 209,
++	L_shutdown = 210,
+ 	L_brk = 214,
+ 	L_munmap = 215,
+ 	L_clone = 220,
+@@ -207,6 +211,39 @@
+ 	return result == 1 ? 0 : -error;
+ }
+ 
++static long makos_getsockopt(long fd, long level, long option,
++	void *value, socklen_t *length)
++{
++	long operation, result;
++	if (!value || !length || *length < sizeof(int)) return -EINVAL;
++	if (level != SOL_SOCKET) return -ENOPROTOOPT;
++	switch (option) {
++	case SO_TYPE: operation = 6; break;
++	case SO_ERROR: operation = 7; break;
++	case SO_RCVBUF:
++	case SO_SNDBUF: operation = 8; break;
++	case SO_DOMAIN: operation = 9; break;
++	case SO_PROTOCOL: operation = 10; break;
++	default: return -ENOPROTOOPT;
++	}
++	result = makos_raw(M_fd_control, fd, operation, 0, 0, 0, 0);
++	if (result < 0) return result;
++	*(int *)value = result;
++	*length = sizeof(int);
++	return 0;
++}
++
++static long makos_setsockopt(long fd, long level, long option,
++	const void *value, socklen_t length)
++{
++	int setting;
++	if (!value || length < sizeof setting) return -EINVAL;
++	memcpy(&setting, value, sizeof setting);
++	if (level == IPPROTO_TCP && option == TCP_NODELAY)
++		return makos_raw(M_fd_control, fd, 11, setting, 0, 0, 0);
++	return -ENOPROTOOPT;
++}
++
+ static long makos_sleep_deadline(const struct timespec *request, int absolute)
+ {
+ 	long ticks;
+@@ -627,6 +664,12 @@
+ 		if (d || e) return -ENOTSUP;
+ 		result = makos_raw(M_receive, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EIO : result;
++	case L_setsockopt:
++		return makos_setsockopt(a, b, c, (const void *)d, e);
++	case L_getsockopt:
++		return makos_getsockopt(a, b, c, (void *)d, (socklen_t *)e);
++	case L_shutdown:
++		return makos_raw(M_fd_control, a, 13, b, 0, 0, 0);
+ 	case L_mmap:
+ 		if (!b || (c & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) ||
+ 		    (c & PROT_WRITE && c & PROT_EXEC) || f & 4095)

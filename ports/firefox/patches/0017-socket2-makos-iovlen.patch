@@ -1,0 +1,29 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage socket2 with MakOS msghdr ABI
+
+Cargo verifies vendored crate checksums. Route socket2 0.5 through separately
+staged source so MakOS can declare its real musl-compatible c_int msg_iovlen.
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -6227,8 +6227,6 @@ dependencies = [
+ [[package]]
+ name = "socket2"
+ version = "0.5.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ce305eb0b4296696835b71df73eb912e0f1ffd2556a501fcede6e0c50349191c"
+ dependencies = [
+  "libc",
+  "windows-sys",
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -206,6 +206,7 @@ hashbrown_0_14 = { package = "hashbrown", path = "build/rust/hashbrown" }
+ 
+ # Patch `socket2` 0.4 to 0.5
+ socket2 = { path = "build/rust/socket2" }
++socket2_0_5 = { package = "socket2", path = "../socket2-makos" }
+ 
+ # Patch `thiserror` 1 to 2.
+ thiserror = { path = "build/rust/thiserror" }

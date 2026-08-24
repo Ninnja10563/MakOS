@@ -1,0 +1,13 @@
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -128,6 +128,9 @@ static bool DecodeMakOSKey(uint32_t aKey, MakOSKeySpec& aSpec) {
+     case 0x87:
+       aSpec = {NS_VK_V, KEY_NAME_INDEX_USE_STRING, u'v', MODIFIER_CONTROL};
+       return true;
++    case 0x88:
++      aSpec = {NS_VK_L, KEY_NAME_INDEX_USE_STRING, u'l', MODIFIER_CONTROL};
++      return true;
+     default:
+       break;
+   }

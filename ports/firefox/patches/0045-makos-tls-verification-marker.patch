@@ -1,0 +1,39 @@
+From ed140526597541c26995bf3012267e22acecf4de Mon Sep 17 00:00:00 2001
+From: MakOS Port <makos@example.invalid>
+Date: Sat, 23 Aug 2026 04:28:00 +1000
+Subject: [PATCH] psm: expose successful MakOS certificate verification
+
+Emit a target-side test marker only after Firefox's normal certificate verifier
+accepts a TLS server chain. This prevents HTTPS tests from accepting network
+error or certificate-error pages based on framebuffer changes.
+---
+ security/manager/ssl/SSLServerCertVerification.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/security/manager/ssl/SSLServerCertVerification.cpp b/security/manager/ssl/SSLServerCertVerification.cpp
+index f7432a1d44..13a399866e 100644
+--- a/security/manager/ssl/SSLServerCertVerification.cpp
++++ b/security/manager/ssl/SSLServerCertVerification.cpp
+@@ -106,6 +106,7 @@
+ #include "cert.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/Casting.h"
++#include "mozilla/Printf.h"
+ #include "mozilla/RefPtr.h"
+ #include "mozilla/StaticPrefs_security.h"
+ #include "mozilla/UniquePtr.h"
+@@ -800,6 +801,11 @@ SSLServerCertVerificationJob::Run() {
+ 
+   TimeDuration elapsed = TimeStamp::Now() - jobStartTime;
+   if (result == Success) {
++#if defined(MOZ_WIDGET_MAKOS)
++    printf_stderr(
++        "MAKOS_FIREFOX_TLS_OK host=%s builtin_root=%d ocsp_requests=%d\n",
++        mHostName.get(), isCertChainRootBuiltInRoot, madeOCSPRequests);
++#endif
+     mozilla::glean::cert_verification_time::success.AccumulateRawDuration(
+         elapsed);
+     glean::ssl::cert_error_overrides.AccumulateSingleSample(1);
+-- 
+2.50.1
+

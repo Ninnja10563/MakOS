@@ -1,0 +1,89 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] nspr: select bundled generic Unix backend for MakOS
+
+Firefox's in-tree NSPR moz.build has an explicit OS allow-list separate from
+NSPR's configure logic. Select MakOS's dedicated md source while retaining
+the common non-Windows pthread source set below. Export and select MakOS's
+CPU data-model header for NSPR consumers.
+
+diff --git a/config/external/nspr/prcpucfg.h b/config/external/nspr/prcpucfg.h
+--- a/config/external/nspr/prcpucfg.h
++++ b/config/external/nspr/prcpucfg.h
+@@ -10,7 +10,9 @@
+  * Need to support conditionals that are defined in both the top-level build
+  * system as well as NSS' build system for now.
+  */
+-#if defined(XP_DARWIN) || defined(DARWIN)
++#if defined(__makos__) || defined(MAKOS)
++#  include "md/_makos.cfg"
++#elif defined(XP_DARWIN) || defined(DARWIN)
+ #  include "md/_darwin.cfg"
+ #elif defined(XP_WIN) || defined(_WINDOWS)
+ #  include "md/_win95.cfg"
+
+diff --git a/config/external/nspr/pr/moz.build b/config/external/nspr/pr/moz.build
+--- a/config/external/nspr/pr/moz.build
++++ b/config/external/nspr/pr/moz.build
+@@ -36,6 +36,11 @@ if CONFIG["OS_ARCH"] == "Linux":
+         SOURCES += ["/nsprpub/pr/src/md/unix/os_Linux_x86.s"]
+     elif CONFIG["TARGET_CPU"] == "ppc":
+         SOURCES += ["/nsprpub/pr/src/md/unix/os_Linux_ppc.s"]
++elif CONFIG["OS_TARGET"] == "MakOS":
++    DEFINES["MAKOS"] = True
++    DEFINES["HAVE_SOCKLEN_T"] = True
++    DEFINES["HAVE_POINTER_LOCALTIME_R"] = True
++    SOURCES += ["/nsprpub/pr/src/md/unix/makos.c"]
+ elif CONFIG["OS_TARGET"] in ("FreeBSD", "OpenBSD", "NetBSD"):
+     DEFINES["HAVE_BSD_FLOCK"] = True
+     DEFINES["HAVE_SOCKLEN_T"] = True
+@@ -253,6 +258,7 @@ EXPORTS.nspr.md += [
+     "/nsprpub/pr/include/md/_darwin.cfg",
+     "/nsprpub/pr/include/md/_freebsd.cfg",
+     "/nsprpub/pr/include/md/_linux.cfg",
++    "/nsprpub/pr/include/md/_makos.cfg",
+     "/nsprpub/pr/include/md/_netbsd.cfg",
+     "/nsprpub/pr/include/md/_openbsd.cfg",
+     "/nsprpub/pr/include/md/_solaris.cfg",
+diff --git a/nsprpub/pr/src/md/unix/uxrng.c b/nsprpub/pr/src/md/unix/uxrng.c
+--- a/nsprpub/pr/src/md/unix/uxrng.c
++++ b/nsprpub/pr/src/md/unix/uxrng.c
+@@ -49,7 +49,18 @@
+ 
+ #elif defined(AIX)
+ 
+ static size_t GetHighResClock(void* buf, size_t maxbytes) { return 0; }
+ 
++#elif defined(MAKOS)
++#  include <sys/random.h>
++
++static size_t GetHighResClock(void* buf, size_t maxbytes) {
++  ssize_t received;
++  do {
++    received = getrandom(buf, maxbytes, 0);
++  } while (received < 0 && errno == EINTR);
++  return received > 0 ? (size_t)received : 0;
++}
++
+ #elif (defined(LINUX) || defined(FREEBSD) || defined(__FreeBSD_kernel__) || \
+        defined(NETBSD) || defined(__NetBSD_kernel__) || defined(OPENBSD) || \
+       defined(__GNU__))
+diff --git a/nsprpub/pr/src/pthreads/ptio.c b/nsprpub/pr/src/pthreads/ptio.c
+--- a/nsprpub/pr/src/pthreads/ptio.c
++++ b/nsprpub/pr/src/pthreads/ptio.c
+@@ -190,7 +190,7 @@
+       defined(HPUX10_30) || defined(HPUX11) || defined(LINUX) ||    \
+       defined(__GNU__) || defined(__GLIBC__) || defined(FREEBSD) || \
+       defined(NETBSD) || defined(OPENBSD) || defined(NTO) ||        \
+-      defined(DARWIN) || defined(RISCOS)
++      defined(DARWIN) || defined(RISCOS) || defined(MAKOS)
+ #    define _PRSelectFdSetArg_t fd_set*
+ #  else
+ #    error "Cannot determine architecture"
+@@ -3277,6 +3277,6 @@
+       defined(__GNU__) || defined(__GLIBC__) || defined(AIX) ||  \
+       defined(FREEBSD) || defined(NETBSD) || defined(OPENBSD) || \
+-      defined(NTO) || defined(DARWIN) || defined(RISCOS)
++      defined(NTO) || defined(DARWIN) || defined(RISCOS) || defined(MAKOS)
+ #    define _PR_FCNTL_FLAGS O_NONBLOCK
+ #  else
+ #    error "Can't determine architecture"

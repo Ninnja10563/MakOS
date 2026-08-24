@@ -1,0 +1,171 @@
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -6,6 +6,8 @@
+ #include "HeadlessWidget.h"
+ #include "MakOSSurface.h"
+ #include "MakOSWindow.h"
++#include "mozilla/TextEvents.h"
++#include "mozilla/WidgetUtils.h"
+ #include "mozilla/gfx/2D.h"
+ #include "nsIWidget.h"
+ 
+@@ -14,6 +16,149 @@
+ class MakOSWindow;
+ static MakOSWindow* gTopLevelWindow;
+ 
++struct MakOSKeySpec {
++  uint32_t keyCode = 0;
++  KeyNameIndex keyName = KEY_NAME_INDEX_Unidentified;
++  char16_t charCode = 0;
++  Modifiers modifiers = MODIFIER_NONE;
++};
++
++static bool IsShiftedASCII(char16_t aChar) {
++  if (aChar >= 'A' && aChar <= 'Z') {
++    return true;
++  }
++  switch (aChar) {
++    case '~':
++    case '!':
++    case '@':
++    case '#':
++    case '$':
++    case '%':
++    case '^':
++    case '&':
++    case '*':
++    case '(':
++    case ')':
++    case '_':
++    case '+':
++    case '{':
++    case '}':
++    case '|':
++    case ':':
++    case '"':
++    case '<':
++    case '>':
++    case '?':
++      return true;
++    default:
++      return false;
++  }
++}
++
++static bool DecodeMakOSKey(uint32_t aKey, MakOSKeySpec& aSpec) {
++  switch (aKey) {
++    case 0x08:
++      aSpec = {NS_VK_BACK, KEY_NAME_INDEX_Backspace};
++      return true;
++    case 0x09:
++      aSpec = {NS_VK_TAB, KEY_NAME_INDEX_Tab, u'\t'};
++      return true;
++    case 0x0a:
++      aSpec = {NS_VK_RETURN, KEY_NAME_INDEX_Enter, u'\n'};
++      return true;
++    case 0x1b:
++      aSpec = {NS_VK_ESCAPE, KEY_NAME_INDEX_Escape};
++      return true;
++    case 0x11:
++      aSpec = {NS_VK_LEFT, KEY_NAME_INDEX_ArrowLeft};
++      return true;
++    case 0x12:
++      aSpec = {NS_VK_RIGHT, KEY_NAME_INDEX_ArrowRight};
++      return true;
++    case 0x13:
++      aSpec = {NS_VK_UP, KEY_NAME_INDEX_ArrowUp};
++      return true;
++    case 0x14:
++      aSpec = {NS_VK_DOWN, KEY_NAME_INDEX_ArrowDown};
++      return true;
++    case 0x15:
++      aSpec = {NS_VK_HOME, KEY_NAME_INDEX_Home};
++      return true;
++    case 0x16:
++      aSpec = {NS_VK_END, KEY_NAME_INDEX_End};
++      return true;
++    case 0x17:
++      aSpec = {NS_VK_DELETE, KEY_NAME_INDEX_Delete};
++      return true;
++    case 0x82:
++      aSpec = {NS_VK_F2, KEY_NAME_INDEX_F2};
++      return true;
++    case 0x83:
++      aSpec = {NS_VK_S, KEY_NAME_INDEX_USE_STRING, u's', MODIFIER_CONTROL};
++      return true;
++    case 0x84:
++      aSpec = {NS_VK_A, KEY_NAME_INDEX_USE_STRING, u'a', MODIFIER_CONTROL};
++      return true;
++    case 0x85:
++      aSpec = {NS_VK_C, KEY_NAME_INDEX_USE_STRING, u'c', MODIFIER_CONTROL};
++      return true;
++    case 0x86:
++      aSpec = {NS_VK_X, KEY_NAME_INDEX_USE_STRING, u'x', MODIFIER_CONTROL};
++      return true;
++    case 0x87:
++      aSpec = {NS_VK_V, KEY_NAME_INDEX_USE_STRING, u'v', MODIFIER_CONTROL};
++      return true;
++    default:
++      break;
++  }
++
++  if (aKey < 0x20 || aKey > 0x7e) {
++    return false;
++  }
++  aSpec.keyCode = WidgetUtils::ComputeKeyCodeFromChar(aKey);
++  aSpec.keyName = KEY_NAME_INDEX_USE_STRING;
++  aSpec.charCode = static_cast<char16_t>(aKey);
++  aSpec.modifiers = IsShiftedASCII(aSpec.charCode) ? MODIFIER_SHIFT
++                                                   : MODIFIER_NONE;
++  return aSpec.keyCode != 0;
++}
++
++static void InitMakOSKeyEvent(WidgetKeyboardEvent& aEvent,
++                              const MakOSKeySpec& aSpec) {
++  aEvent.mKeyCode = aSpec.keyCode;
++  aEvent.mKeyNameIndex = aSpec.keyName;
++  aEvent.mCodeNameIndex = CODE_NAME_INDEX_UNKNOWN;
++  aEvent.mModifiers = aSpec.modifiers;
++  aEvent.mLocation = eKeyLocationStandard;
++  aEvent.mIsRepeat = false;
++  aEvent.mTimeStamp = TimeStamp::Now();
++  aEvent.SetCharCode(aSpec.charCode);
++  if (aSpec.keyName == KEY_NAME_INDEX_USE_STRING) {
++    aEvent.mKeyValue = aSpec.charCode;
++  }
++}
++
++static void DispatchMakOSKey(nsIWidget* aWidget, uint32_t aKey) {
++  MakOSKeySpec spec;
++  if (!DecodeMakOSKey(aKey, spec)) {
++    return;
++  }
++
++  WidgetKeyboardEvent keyDown(true, eKeyDown, aWidget);
++  InitMakOSKeyEvent(keyDown, spec);
++  nsEventStatus status =
++      aWidget->DispatchInputEvent(&keyDown).mContentStatus;
++  if (status != nsEventStatus_eConsumeNoDefault) {
++    WidgetKeyboardEvent keyPress(true, eKeyPress, aWidget);
++    InitMakOSKeyEvent(keyPress, spec);
++    (void)aWidget->DispatchInputEvent(&keyPress);
++  }
++
++  WidgetKeyboardEvent keyUp(true, eKeyUp, aWidget);
++  InitMakOSKeyEvent(keyUp, spec);
++  (void)aWidget->DispatchInputEvent(&keyUp);
++}
++
+ class MakOSWindow final : public HeadlessWidget {
+  public:
+   NS_INLINE_DECL_REFCOUNTING_INHERITED(MakOSWindow, HeadlessWidget)
+@@ -134,6 +279,8 @@
+         }
+         break;
+       case makos::SurfaceEventKind::Key:
++        DispatchMakOSKey(this, event.key);
++        break;
+       case makos::SurfaceEventKind::None:
+         break;
+     }

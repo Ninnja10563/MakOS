@@ -1,0 +1,25 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage rustix crate for MakOS libc backend
+
+Cargo verifies vendored crate checksums. Route rustix through a separately
+staged copy using MakOS musl layouts and MakOS ioctl opcode width.
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -5874,6 +5874,4 @@
+ [[package]]
+ name = "rustix"
+ version = "0.38.39"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "375116bee2be9ed569afe2154ea6a99dfdffd257f533f187498c2a8f5feaf4ee"
+ dependencies = [
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -112,4 +112,5 @@
+ # Helper crate for integration in the gecko build system.
+ mozbuild = { path = "build/rust/mozbuild" }
++rustix_0_38 = { package = "rustix", path = "../rustix-makos" }
+ 
+ # Workspace hack

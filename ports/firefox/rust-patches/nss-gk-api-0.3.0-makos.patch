@@ -1,0 +1,23 @@
+diff --git a/build.rs b/build.rs
+--- a/build.rs
++++ b/build.rs
+@@ -429,8 +429,18 @@ fn process_config(config: &mut HashMap<String, Bindings>) {
+ fn main() {
+-    let flags = if cfg!(feature = "gecko") {
++    let mut flags = if cfg!(feature = "gecko") {
+         setup_for_gecko()
+     } else {
+         setup_standalone()
+     };
+ 
++    // bindgen 0.69 plus libclang 22 makes NSS C structs opaque. Keep the
++    // field-correct libclang 18 parser, defining only libc++ 22 builtins that
++    // were introduced after Clang 18. Bindings never execute these templates.
++    flags.extend([
++        "-D__builtin_clzg(x,...)=__builtin_clzll(x)".to_string(),
++        "-D__builtin_ctzg(x,...)=__builtin_ctzll(x)".to_string(),
++        "-D__GCC_DESTRUCTIVE_SIZE=64".to_string(),
++        "-D__GCC_CONSTRUCTIVE_SIZE=64".to_string(),
++    ]);
++
+     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);

@@ -1,0 +1,15 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -559,5 +559,11 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		case F_DUPFD_CLOEXEC:
+ 			return makos_raw(M_fd_control, a, 5, c, 0, 0, 0);
++		case F_GETLK:
++			return makos_raw(M_fd_control, a, 6, c, 0, 0, 0);
++		case F_SETLK:
++			return makos_raw(M_fd_control, a, 7, c, 0, 0, 0);
++		case F_SETLKW:
++			return makos_raw(M_fd_control, a, 8, c, 0, 0, 0);
+ 		default:
+ 			return -EINVAL;
+ 		}

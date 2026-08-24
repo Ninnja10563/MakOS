@@ -1,0 +1,27 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] makos: keep sendmsg/recvmsg scratch storage off small stacks
+
+Firefox resolver and socket worker threads may have stacks smaller than the
+full 64 KiB datagram capacity.  Keep scratch buffers in per-thread storage.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -348,7 +348,7 @@ static long makos_pack_sockaddr(const struct sockaddr *address,
+ 
+ static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
+ {
+-	unsigned char buffer[65536];
++	static __thread unsigned char buffer[65536];
+ 	int passed_rights[200];
+ 	unsigned long long rights[200];
+ 	size_t total = 0;
+@@ -398,7 +398,7 @@ static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
+ 
+ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ {
+-	unsigned char buffer[65536];
++	static __thread unsigned char buffer[65536];
+ 	int received_rights[200];
+ 	unsigned long long rights[200];
+ 	socklen_t name_length;

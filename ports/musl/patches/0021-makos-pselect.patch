@@ -1,0 +1,49 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -40,6 +40,7 @@ enum linux_aarch64_syscall {
+ 	L_lseek = 62,
+ 	L_pread64 = 67,
+ 	L_pwrite64 = 68,
++	L_pselect6 = 72,
+ 	L_ppoll = 73,
+ 	L_newfstatat = 79,
+ 	L_fstat = 80,
+@@ -139,6 +140,7 @@ enum makos_syscall {
+ 	M_epoll_wait = 106,
+ 	M_epoll_close = 107,
+ 	M_sigprocmask = 108,
++	M_pselect = 109,
+ };
+ 
+ struct makos_metadata {
+@@ -438,6 +440,29 @@ long __makos_syscall_dispatch(long n, long a, long b, long c, long d, long e, lo
+ 	case L_ftruncate:
+ 		if (b < 0) return -EINVAL;
+ 		return makos_raw(M_ftruncate, a, b, 0, 0, 0, 0);
++	case L_pselect6:
++	{
++		long options[3] = {-1, 0, 0};
++		if (e) {
++			const struct timespec *timeout = (const struct timespec *)e;
++			if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 ||
++			    timeout->tv_nsec >= 1000000000L ||
++			    timeout->tv_sec > (LONG_MAX - 999) / 1000)
++				return -EINVAL;
++			options[0] = timeout->tv_sec * 1000 +
++				(timeout->tv_nsec + 999999L) / 1000000L;
++		}
++		if (f) {
++			const unsigned long *signal_data = (const unsigned long *)f;
++			if (signal_data[1] != 8) return -EINVAL;
++			if (signal_data[0]) {
++				options[1] = *(const unsigned long *)signal_data[0];
++				options[2] = 1;
++			}
++		}
++		return makos_raw(M_pselect, a, b, c, d,
++			(long)options, sizeof options);
++	}
+ 	case L_ppoll:
+ 	{
+ 		long milliseconds = -1;

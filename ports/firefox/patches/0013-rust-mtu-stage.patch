@@ -1,0 +1,25 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage mtu crate for MakOS unsupported route fallback
+
+Cargo verifies vendored crate checksums. Route mtu through a separately staged
+copy whose existing unsupported path covers MakOS until route MTU discovery is
+implemented. This does not invent an interface or Linux netlink ABI.
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4634,6 +4634,4 @@
+ [[package]]
+ name = "mtu"
+ version = "0.2.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4c30d3771729ec4349aae3b1a7c0b6b4a1500459e60b1fda95fe0657c3711574"
+ dependencies = [
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -291,3 +291,4 @@
+ tabs = { git = "https://github.com/mozilla/application-services", rev = "f5907a411e52a3985d0369d71c486eb507c2c4e6" }
+ viaduct = { git = "https://github.com/mozilla/application-services", rev = "f5907a411e52a3985d0369d71c486eb507c2c4e6" }
+ webext-storage = { git = "https://github.com/mozilla/application-services", rev = "f5907a411e52a3985d0369d71c486eb507c2c4e6" }
++mtu = { path = "../mtu-makos" }

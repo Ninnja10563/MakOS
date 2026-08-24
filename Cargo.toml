@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "boot/uefi",
+    "crates/accounts",
+    "crates/acpi",
+    "crates/boot-api",
+    "crates/crypto",
+    "crates/elf64",
+    "crates/frame-allocator",
+    "crates/gpt",
+    "crates/installer",
+    "crates/ipc",
+    "crates/files-model",
+    "crates/futex",
+    "crates/makfs4",
+    "crates/makfs4-fsck",
+    "crates/package-store",
+    "crates/pe64",
+    "crates/process-table",
+    "crates/readiness",
+    "crates/structured-log",
+    "crates/tty",
+    "crates/vm-space",
+    "kernel",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = false

@@ -1,0 +1,20 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] style: define legacy platform-query behavior for MakOS
+
+MakOS has no legacy StylePlatform enum value. Match none rather than
+masquerading as Linux, macOS, Windows, Android, or iOS.
+
+diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
+--- a/layout/style/nsMediaFeatures.cpp
++++ b/layout/style/nsMediaFeatures.cpp
+@@ -257,6 +257,10 @@ bool Gecko_MediaFeatures_MatchesPlatform(StylePlatform aPlatform) {
+ #elif defined(XP_IOS)
+     case StylePlatform::Ios:
+       return true;
++#elif defined(XP_MAKOS)
++    // MakOS is distinct: no legacy CSS platform keyword maps to it.
++    case StylePlatform::Linux:
++      return false;
+ #else
+ #  error "Unknown platform?"
+ #endif

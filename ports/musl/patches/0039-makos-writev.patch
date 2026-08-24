@@ -1,0 +1,33 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -51,6 +51,7 @@ enum linux_aarch64_syscall {
+ 	L_close = 57,
+ 	L_read = 63,
+ 	L_write = 64,
++	L_writev = 66,
+ 	L_set_tid_address = 96,
+ 	L_nanosleep = 101,
+ 	L_futex = 98,
+@@ -667,6 +668,21 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_write:
+ 		result = makos_raw(M_write, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;
++	case L_writev:
++	{
++		const struct iovec *vectors = (const struct iovec *)b;
++		long total = 0;
++		if (c < 0 || c > 1024) return -EINVAL;
++		for (long index = 0; index < c; index++) {
++			if (vectors[index].iov_len > LONG_MAX - total) return -EINVAL;
++			result = makos_raw(M_write, a, (long)vectors[index].iov_base,
++				vectors[index].iov_len, 0, 0, 0);
++			if (result < 0) return total ? total : -EBADF;
++			total += result;
++			if ((size_t)result != vectors[index].iov_len) break;
++		}
++		return total;
++	}
+ 	case L_close:
+ 		result = makos_raw(M_close, a, 0, 0, 0, 0, 0);
+ 		if (result < 0) return result;

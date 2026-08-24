@@ -1,0 +1,22 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] libunwind: keep MakOS getauxval reference externally visible
+
+MakOS links static PIC libunwind into shared Gecko DSOs.  libunwind builds with
+hidden default visibility, but getauxval is supplied by shared musl libc and
+must remain a default-visibility undefined reference.
+
+diff --git a/libunwind/src/Registers.hpp b/libunwind/src/Registers.hpp
+--- a/libunwind/src/Registers.hpp
++++ b/libunwind/src/Registers.hpp
+@@ -23,6 +23,11 @@
+ #include <sys/auxv.h>
+ #endif
+ 
++#if defined(__makos__) && defined(_LIBUNWIND_HAVE_GETAUXVAL)
++extern "C" __attribute__((visibility("default"))) unsigned long
++getauxval(unsigned long);
++#endif
++
+ namespace libunwind {
+ 
+ // For emulating 128-bit registers

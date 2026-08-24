@@ -1,0 +1,76 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] build: accept distinct MakOS Rust target specification
+
+Keep MakOS distinct from Rust's Linux target. A target JSON is required until
+the target is upstream; staged std/core/alloc provide its real standard library.
+
+diff --git a/build/moz.configure/rust.configure b/build/moz.configure/rust.configure
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -256,6 +256,12 @@ def rust_compiler(rustc_info, cargo_info, target):
+ 
+     return True
+ 
++option(
++    env="MAKOS_RUST_TARGET",
++    nargs=1,
++    when=rust_compiler,
++    help="Path to the aarch64-unknown-makos Rust target specification",
++)
+ 
+ @depends(rustc, when=rust_compiler)
+ @imports(_from="__builtin__", _import="ValueError")
+@@ -523,18 +530,36 @@ def rust_host_triple(
+ 
+ 
+ @depends(
+-    rustc, target, c_compiler, rust_supported_targets, arm_target, when=rust_compiler
++    rustc,
++    target,
++    c_compiler,
++    rust_supported_targets,
++    arm_target,
++    "MAKOS_RUST_TARGET",
++    when=rust_compiler,
+ )
+ @checking("for rust target triplet")
+ def rust_target_triple(
+-    rustc, target, compiler_info, rust_supported_targets, arm_target
++    rustc, target, compiler_info, rust_supported_targets, arm_target, makos_target
+ ):
+-    rustc_target = detect_rustc_target(
+-        target, compiler_info, arm_target, rust_supported_targets
+-    )
++    if target.kernel == "MakOS":
++        if not makos_target:
++            die("MAKOS_RUST_TARGET must name the distinct MakOS target JSON")
++        rustc_target = makos_target[0]
++    else:
++        rustc_target = detect_rustc_target(
++            target, compiler_info, arm_target, rust_supported_targets
++        )
+     assert_rust_compile(target, rustc_target, rustc)
+-    return rustc_target
++    return target.alias if target.kernel == "MakOS" else rustc_target
++
++
++@depends(target, "MAKOS_RUST_TARGET", when=rust_compiler)
++def rust_target_spec(target, makos_target):
++    if target.kernel == "MakOS":
++        return makos_target[0]
+ 
+ 
+ set_config("RUST_TARGET", rust_target_triple)
++set_config("RUST_TARGET_SPEC", rust_target_spec)
+ set_config("RUST_HOST_TARGET", rust_host_triple)
+diff --git a/config/makefiles/rust.mk b/config/makefiles/rust.mk
+--- a/config/makefiles/rust.mk
++++ b/config/makefiles/rust.mk
+@@ -12,6 +12,6 @@
+ 
+ cargo_host_flag := --target=$(RUST_HOST_TARGET)
+-cargo_target_flag := --target=$(RUST_TARGET)
++cargo_target_flag := --target=$(or $(RUST_TARGET_SPEC),$(RUST_TARGET))
+ 
+ # Permit users to pass flags to cargo from their mozconfigs (e.g. --color=always).
+ cargo_build_flags = $(CARGOFLAGS)

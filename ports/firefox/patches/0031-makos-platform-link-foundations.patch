@@ -1,0 +1,284 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] platform: complete MakOS libxul link foundations
+
+Select Chromium's documented generic Unix process launcher, add honest MakOS
+process metrics, portable native theme, and a real MakOS top-level surface.
+Keep unavailable cross-process statistics explicit instead of inventing data.
+
+diff --git a/gfx/skia/moz.build b/gfx/skia/moz.build
+--- a/gfx/skia/moz.build
++++ b/gfx/skia/moz.build
+@@ -563,6 +563,16 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk':
+         'skia/src/ports/SkFontHost_cairo.cpp',
+         'skia/src/ports/SkFontHost_FreeType_common.cpp',
+     ]
++if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'makos':
++    LOCAL_INCLUDES += ['/modules/freetype2/include']
++    UNIFIED_SOURCES += [
++        'skia/src/ports/SkDebug_stdio.cpp',
++        'skia/src/ports/SkOSFile_posix.cpp',
++    ]
++    SOURCES += [
++        'skia/src/ports/SkFontHost_cairo.cpp',
++        'skia/src/ports/SkFontHost_FreeType_common.cpp',
++    ]
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+     SOURCES += [
+         'skia/src/ports/SkDebug_win.cpp',
+
+diff --git a/accessible/other/Platform.cpp b/accessible/other/Platform.cpp
+--- a/accessible/other/Platform.cpp
++++ b/accessible/other/Platform.cpp
+@@ -36,3 +36,8 @@ void a11y::PlatformTextChangeEvent(Accessible*, const nsAString&, int32_t,
+ void a11y::PlatformShowHideEvent(Accessible*, Accessible*, bool, bool) {}
+ 
+ void a11y::PlatformSelectionEvent(Accessible*, Accessible*, uint32_t) {}
++
++uint64_t a11y::GetCacheDomainsForKnownClients(uint64_t aCacheDomains) {
++  // No MakOS accessibility client bridge exists yet; preserve caller domains.
++  return aCacheDomains;
++}
+diff --git a/ipc/chromium/moz.build b/ipc/chromium/moz.build
+--- a/ipc/chromium/moz.build
++++ b/ipc/chromium/moz.build
+@@ -125,6 +125,14 @@ if CONFIG["TARGET_KERNEL"] == "Linux":
+         DEFINES["ANDROID"] = True
+         DEFINES["_POSIX_MONOTONIC_CLOCK"] = 0
+ 
++if CONFIG["TARGET_KERNEL"] == "MakOS":
++    # process_util_linux.cc is Chromium's generic fork/exec implementation;
++    # its own header documents BSD/Solaris use.  MakOS stays a distinct target.
++    SOURCES += [
++        "src/base/process_util_linux.cc",
++        "src/base/time_posix.cc",
++    ]
++
+ if CONFIG["TARGET_KERNEL"] == "SunOS":
+     SOURCES += [
+         "src/base/process_util_linux.cc",
+diff --git a/toolkit/components/processtools/moz.build b/toolkit/components/processtools/moz.build
+--- a/toolkit/components/processtools/moz.build
++++ b/toolkit/components/processtools/moz.build
+@@ -49,5 +49,7 @@ elif toolkit == "windows":
+     UNIFIED_SOURCES += ["ProcInfo_win.cpp"]
+ elif toolkit in ("cocoa", "uikit"):
+     UNIFIED_SOURCES += ["ProcInfo.mm"]
++elif toolkit == "makos":
++    UNIFIED_SOURCES += ["ProcInfo_makos.cpp"]
+ 
+ include("/ipc/chromium/chromium-config.mozbuild")
+diff --git a/toolkit/components/processtools/ProcInfo_makos.cpp b/toolkit/components/processtools/ProcInfo_makos.cpp
+new file mode 100644
+--- /dev/null
++++ b/toolkit/components/processtools/ProcInfo_makos.cpp
+@@ -0,0 +1,36 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "mozilla/ProcInfo.h"
++
++#include <time.h>
++
++namespace mozilla {
++
++int GetCycleTimeFrequencyMHz() { return 0; }
++
++nsresult GetCpuTimeSinceProcessStartInMs(uint64_t* aResult) {
++  timespec time{};
++  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time) != 0) {
++    return NS_ERROR_NOT_AVAILABLE;
++  }
++  *aResult = uint64_t(time.tv_sec) * 1000u + uint64_t(time.tv_nsec) / 1000000u;
++  return NS_OK;
++}
++
++nsresult GetGpuTimeSinceProcessStartInMs(uint64_t*) {
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++ProcInfoPromise::ResolveOrRejectValue GetProcInfoSync(
++    nsTArray<ProcInfoRequest>&&) {
++  ProcInfoPromise::ResolveOrRejectValue result;
++  // MakOS needs a process-stat syscall before Gecko can truthfully enumerate
++  // another process's threads, memory, and CPU time.
++  result.SetReject(NS_ERROR_NOT_IMPLEMENTED);
++  return result;
++}
++
++}  // namespace mozilla
+diff --git a/widget/Theme.cpp b/widget/Theme.cpp
+--- a/widget/Theme.cpp
++++ b/widget/Theme.cpp
+@@ -117,9 +117,10 @@ static StaticRefPtr<Theme> gRDMInstance;
+ 
+ }  // namespace
+ 
+-#ifdef ANDROID
++#if defined(ANDROID) || defined(XP_MAKOS)
+ already_AddRefed<Theme> do_CreateNativeThemeDoNotUseDirectly() {
+-  // Android doesn't have a native theme.
++  // MakOS currently paints Gecko's portable theme; platform styling can
++  // replace this without changing widget semantics.
+   return do_AddRef(new Theme(Theme::ScrollbarStyle()));
+ }
+ #endif
+diff --git a/widget/headless/HeadlessWidget.h b/widget/headless/HeadlessWidget.h
+--- a/widget/headless/HeadlessWidget.h
++++ b/widget/headless/HeadlessWidget.h
+@@ -39,7 +39,7 @@ namespace mozilla {
+ enum class NativeKeyBindingsType : uint8_t;
+ namespace widget {
+ 
+-class HeadlessWidget final : public nsBaseWidget {
++class HeadlessWidget : public nsBaseWidget {
+  public:
+   HeadlessWidget();
+ 
+@@ -132,8 +132,10 @@ class HeadlessWidget final : public nsBaseWidget {
+                                        int32_t aModifierFlags,
+                                        nsIObserver* aObserver) override;
+ 
+- private:
++ protected:
+   ~HeadlessWidget();
++
++ private:
+   bool mEnabled;
+   bool mVisible;
+   bool mDestroyed;
+diff --git a/widget/nsBaseWidget.cpp b/widget/nsBaseWidget.cpp
+--- a/widget/nsBaseWidget.cpp
++++ b/widget/nsBaseWidget.cpp
+@@ -2542,7 +2542,7 @@ already_AddRefed<nsIBidiKeyboard> nsIWidget::CreateBidiKeyboard() {
+   return CreateBidiKeyboardInner();
+ }
+ 
+-#ifdef ANDROID
++#if defined(ANDROID) || defined(XP_MAKOS)
+ already_AddRefed<nsIBidiKeyboard> nsIWidget::CreateBidiKeyboardInner() {
+   // no bidi keyboard implementation
+   return nullptr;
+diff --git a/widget/moz.build b/widget/moz.build
+--- a/widget/moz.build
++++ b/widget/moz.build
+@@ -338,7 +338,7 @@ if toolkit in {"gtk", "cocoa", "windows"}:
+         "nsBaseColorPicker.cpp",
+     ]
+ 
+-if toolkit in ("gtk", "windows", "cocoa", "uikit", "android"):
++if toolkit in ("gtk", "windows", "cocoa", "uikit", "android", "makos"):
+     UNIFIED_SOURCES += [
+         "nsNativeTheme.cpp",
+     ]
+@@ -329,6 +329,6 @@ if CONFIG["MOZ_X11"] or CONFIG["MOZ_WAYLAND"]:
+     DIRS += ["x11"]
+ 
+-if toolkit in {"gtk", "cocoa", "windows", "android", "uikit"}:
++if toolkit in {"gtk", "cocoa", "windows", "android", "makos", "uikit"}:
+     UNIFIED_SOURCES += [
+         "nsBaseFilePicker.cpp",
+     ]
+diff --git a/widget/makos/moz.build b/widget/makos/moz.build
+--- a/widget/makos/moz.build
++++ b/widget/makos/moz.build
+@@ -13,5 +13,7 @@ SOURCES += [
+     "GfxInfo.cpp",
+     "MakOSSurface.cpp",
++    "MakOSWindow.cpp",
++    "MediaKeysEventSourceFactory.cpp",
+     "nsLookAndFeel.cpp",
+ ]
+ 
+diff --git a/widget/makos/MediaKeysEventSourceFactory.cpp b/widget/makos/MediaKeysEventSourceFactory.cpp
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/MediaKeysEventSourceFactory.cpp
+@@ -0,0 +1,14 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "MediaKeysEventSourceFactory.h"
++
++namespace mozilla::widget {
++
++mozilla::dom::MediaControlKeySource* CreateMediaControlKeySource() {
++  // MakOS has no global media-key device ABI yet.
++  return nullptr;
++}
++
++}  // namespace mozilla::widget
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/MakOSWindow.cpp
+@@ -0,0 +1,67 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "HeadlessWidget.h"
++#include "MakOSSurface.h"
++#include "nsIWidget.h"
++
++namespace mozilla::widget {
++
++class MakOSWindow final : public HeadlessWidget {
++ public:
++  NS_INLINE_DECL_REFCOUNTING_INHERITED(MakOSWindow, HeadlessWidget)
++
++  nsresult Create(nsIWidget* aParent, const LayoutDeviceIntRect& aRect,
++                  InitData* aInitData = nullptr) override {
++    nsresult result = HeadlessWidget::Create(aParent, aRect, aInitData);
++    if (NS_FAILED(result)) {
++      return result;
++    }
++    mSurface = makos::CreateSurface(aRect.Width(), aRect.Height(),
++                                    makos::kBrowserSurfaceSlot);
++    if (mSurface == makos::kInvalidSurface) {
++      HeadlessWidget::Destroy();
++      return NS_ERROR_FAILURE;
++    }
++    makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, aRect.Width(),
++                       aRect.Height());
++    return NS_OK;
++  }
++
++  void Destroy() override {
++    if (mSurface != makos::kInvalidSurface) {
++      makos::HideSurface(mSurface);
++      mSurface = makos::kInvalidSurface;
++    }
++    HeadlessWidget::Destroy();
++  }
++
++  void Show(bool aState) override {
++    if (mSurface != makos::kInvalidSurface) {
++      if (aState) {
++        makos::PresentSurface(mSurface);
++      } else {
++        makos::HideSurface(mSurface);
++      }
++    }
++    HeadlessWidget::Show(aState);
++  }
++
++ private:
++  ~MakOSWindow() override { Destroy(); }
++  makos::SurfaceHandle mSurface = makos::kInvalidSurface;
++};
++
++}  // namespace mozilla::widget
++
++already_AddRefed<nsIWidget> nsIWidget::CreateTopLevelWindow() {
++  nsCOMPtr<nsIWidget> widget = new mozilla::widget::MakOSWindow();
++  return widget.forget();
++}
++
++already_AddRefed<nsIWidget> nsIWidget::CreateChildWindow() {
++  nsCOMPtr<nsIWidget> widget = new mozilla::widget::MakOSWindow();
++  return widget.forget();
++}

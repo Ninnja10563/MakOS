@@ -1,0 +1,25 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -618,10 +618,17 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		result = makos_raw(M_receive, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EIO : result;
+ 	case L_mmap:
+-		if (a || !b || d != (MAP_PRIVATE | MAP_ANONYMOUS) || e != -1 || f)
+-			return -ENOTSUP;
+-		result = makos_raw(M_mmap, b, c, 0, 0, 0, 0);
+-		return result == -1 ? -ENOMEM : result;
++		if (!b || (c & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) ||
++		    (c & PROT_WRITE && c & PROT_EXEC) || f & 4095)
++			return -EINVAL;
++		if (d != MAP_PRIVATE && d != (MAP_PRIVATE | MAP_FIXED) &&
++		    d != (MAP_PRIVATE | MAP_ANONYMOUS) &&
++		    d != (MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS))
++			return -ENOTSUP;
++		if ((d & MAP_FIXED && !a) || (d & MAP_ANONYMOUS ? e != -1 : e < 3))
++			return -EINVAL;
++		result = makos_raw(M_mmap, a, b, c, d, e, f);
++		return result == -1 ? -ENOMEM : result;
+ 	case L_munmap:
+ 		return makos_bool_result(makos_raw(M_munmap, a, b, 0, 0, 0, 0), EINVAL);
+ 	case L_mprotect:

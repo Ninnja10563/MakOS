@@ -1,0 +1,134 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -71,6 +71,7 @@
+ 	L_getegid = 177,
+ 	L_gettid = 178,
+ 	L_socket = 198,
++	L_bind = 200,
+ 	L_connect = 203,
+ 	L_getsockname = 204,
+ 	L_getpeername = 205,
+@@ -79,6 +80,8 @@
+ 	L_setsockopt = 208,
+ 	L_getsockopt = 209,
+ 	L_shutdown = 210,
++	L_sendmsg = 211,
++	L_recvmsg = 212,
+ 	L_brk = 214,
+ 	L_munmap = 215,
+ 	L_clone = 220,
+@@ -260,6 +263,69 @@
+ 	return 0;
+ }
+ 
++static long makos_pack_sockaddr(const struct sockaddr *address,
++	socklen_t length, long *packed)
++{
++	if (!address || length < 8 || address->sa_family != AF_INET) return -EINVAL;
++	*packed = 0;
++	memcpy(packed, address, 8);
++	return 0;
++}
++
++static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
++{
++	unsigned char buffer[4096];
++	size_t total = 0;
++	long packed;
++	if (!message || message->msg_iovlen > 16 || message->msg_controllen)
++		return -ENOTSUP;
++	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
++	if (message->msg_name &&
++	    makos_pack_sockaddr(message->msg_name, message->msg_namelen, &packed) < 0)
++		return -EINVAL;
++	(void)packed;
++	for (size_t i = 0; i < message->msg_iovlen; i++) {
++		if (message->msg_iov[i].iov_len > sizeof buffer - total) return -EMSGSIZE;
++		memcpy(buffer + total, message->msg_iov[i].iov_base,
++			message->msg_iov[i].iov_len);
++		total += message->msg_iov[i].iov_len;
++	}
++	if (!total) return 0;
++	return makos_raw(M_send, fd, (long)buffer, total, flags,
++		(long)message->msg_name, message->msg_namelen);
++}
++
++static long makos_recvmsg(long fd, struct msghdr *message, long flags)
++{
++	unsigned char buffer[4096];
++	socklen_t name_length;
++	size_t capacity = 0, copied = 0;
++	long result;
++	if (!message || message->msg_iovlen > 16 || message->msg_controllen)
++		return -ENOTSUP;
++	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
++	for (size_t i = 0; i < message->msg_iovlen; i++) {
++		if (message->msg_iov[i].iov_len > sizeof buffer - capacity)
++			return -EMSGSIZE;
++		capacity += message->msg_iov[i].iov_len;
++	}
++	if (!capacity) return 0;
++	name_length = message->msg_namelen;
++	result = makos_raw(M_receive, fd, (long)buffer, capacity, flags,
++		(long)message->msg_name, message->msg_name ? (long)&name_length : 0);
++	if (result < 0) return result;
++	for (size_t i = 0; i < message->msg_iovlen && copied < (size_t)result; i++) {
++		size_t count = message->msg_iov[i].iov_len;
++		if (count > (size_t)result - copied) count = result - copied;
++		memcpy(message->msg_iov[i].iov_base, buffer + copied, count);
++		copied += count;
++	}
++	message->msg_namelen = name_length;
++	message->msg_controllen = 0;
++	message->msg_flags = 0;
++	return result;
++}
++
+ static long makos_sleep_deadline(const struct timespec *request, int absolute)
+ {
+ 	long ticks;
+@@ -669,6 +735,13 @@
+ 		result = makos_raw(M_socket, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EAFNOSUPPORT : result;
+ 	}
++	case L_bind:
++	{
++		long packed;
++		result = makos_pack_sockaddr((const struct sockaddr *)b, c, &packed);
++		if (result < 0) return result;
++		return makos_raw(M_fd_control, a, 16, packed, 0, 0, 0);
++	}
+ 	case L_connect:
+ 		if (c < 8) return -EINVAL;
+ 		return makos_bool_result(makos_raw(M_connect, a, b, 8, 0, 0, 0), ECONNREFUSED);
+@@ -677,12 +750,14 @@
+ 	case L_getpeername:
+ 		return makos_sockname(a, 1, (struct sockaddr *)b, (socklen_t *)c);
+ 	case L_sendto:
+-		if (d || e) return -ENOTSUP;
+-		result = makos_raw(M_send, a, b, c, 0, 0, 0);
++		if (d & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
++		if ((e && f < 8) || (!e && f)) return -EINVAL;
++		result = makos_raw(M_send, a, b, c, d, e, f);
+ 		return result == -1 ? -EIO : result;
+ 	case L_recvfrom:
+-		if (d || e) return -ENOTSUP;
+-		result = makos_raw(M_receive, a, b, c, 0, 0, 0);
++		if (d & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
++		if ((e && !f) || (!e && f)) return -EINVAL;
++		result = makos_raw(M_receive, a, b, c, d, e, f);
+ 		return result == -1 ? -EIO : result;
+ 	case L_setsockopt:
+ 		return makos_setsockopt(a, b, c, (const void *)d, e);
+@@ -690,6 +765,10 @@
+ 		return makos_getsockopt(a, b, c, (void *)d, (socklen_t *)e);
+ 	case L_shutdown:
+ 		return makos_raw(M_fd_control, a, 13, b, 0, 0, 0);
++	case L_sendmsg:
++		return makos_sendmsg(a, (const struct msghdr *)b, c);
++	case L_recvmsg:
++		return makos_recvmsg(a, (struct msghdr *)b, c);
+ 	case L_mmap:
+ 		if (!b || (c & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) ||
+ 		    (c & PROT_WRITE && c & PROT_EXEC) || f & 4095)

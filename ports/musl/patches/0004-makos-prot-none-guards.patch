@@ -1,0 +1,11 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -286,5 +286,6 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_bool_result(makos_raw(M_munmap, a, b, 0, 0, 0, 0), EINVAL);
+ 	case L_mprotect:
+-		if (!(c & PROT_READ) || (c & ~(PROT_READ | PROT_WRITE | PROT_EXEC)))
++		if ((c & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) ||
++		    (c && !(c & PROT_READ)))
+ 			return -ENOTSUP;
+ 		return makos_bool_result(makos_raw(M_mprotect, a, b, c, 0, 0, 0), EINVAL);

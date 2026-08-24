@@ -1,0 +1,34 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -85,6 +85,9 @@
+ 	L_sched_getparam = 121,
+ 	L_sched_getaffinity = 123,
+ 	L_sched_yield = 124,
++	L_kill = 129,
++	L_tkill = 130,
++	L_tgkill = 131,
+ 	L_rt_sigaction = 134,
+ 	L_rt_sigprocmask = 135,
+ 	L_setpgid = 154,
+@@ -212,6 +215,7 @@
+ 	M_socket_name = 134,
+ 	M_socket_bind = 135,
+ 	M_robust_list = 141,
++	M_signal = 142,
+ };
+ 
+ struct makos_metadata {
+@@ -1057,6 +1061,12 @@
+ 	case L_rt_sigaction:
+ 		if (d != 8) return -EINVAL;
+ 		return makos_raw(M_sigaction, a, b, c, 32, 0, 0);
++	case L_kill:
++		return makos_raw(M_signal, 0, a, b, 0, 0, 0);
++	case L_tkill:
++		return makos_raw(M_signal, 1, a, b, 0, 0, 0);
++	case L_tgkill:
++		return makos_raw(M_signal, 2, a, b, c, 0, 0);
+ 	case L_rt_sigprocmask:
+ 		if (d != 8) return -EINVAL;
+ 		return makos_raw(M_sigprocmask, a,

@@ -1,0 +1,24 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] style: parse libc++ 22 with field-correct libclang 18
+
+MakOS uses libclang 18 for correct Gecko C ABI field generation. Teach Servo
+style bindgen four libc++ 22 parser-only compatibility definitions.
+
+diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
+--- a/servo/components/style/build_gecko.rs
++++ b/servo/components/style/build_gecko.rs
+@@ -148,6 +148,14 @@ impl BuilderExt for Builder {
+             builder = builder.clang_arg(item);
+         }
+ 
++        // MakOS uses field-correct libclang 18 with libc++ 22 headers.
++        // Bindings parse these templates but never execute them.
++        builder = builder
++            .clang_arg("-D__builtin_clzg(x,...)=__builtin_clzll(x)")
++            .clang_arg("-D__builtin_ctzg(x,...)=__builtin_ctzll(x)")
++            .clang_arg("-D__GCC_DESTRUCTIVE_SIZE=64")
++            .clang_arg("-D__GCC_CONSTRUCTIVE_SIZE=64");
++
+         builder
+     }
+     fn include<T: Into<String>>(self, file: T) -> Builder {

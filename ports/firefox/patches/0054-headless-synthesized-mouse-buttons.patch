@@ -1,0 +1,36 @@
+From: MakOS Port Team <makos@example.invalid>
+Subject: [PATCH] widget: preserve buttons on synthesized mouse moves
+
+HeadlessWidget left WidgetMouseEvent::mButtons at zero for every synthesized
+event. MakOS uses this path for native surface input, so Gecko saw pointer
+motion with no held primary button and could not extend document selections.
+
+diff --git a/widget/headless/HeadlessWidget.h b/widget/headless/HeadlessWidget.h
+--- a/widget/headless/HeadlessWidget.h
++++ b/widget/headless/HeadlessWidget.h
+@@ -149,6 +149,7 @@ class HeadlessWidget : public nsBaseWidget {
+   mozilla::ScreenCoord mLastPinchSpan;
+   InputContext mInputContext;
+   mozilla::UniquePtr<mozilla::MultiTouchInput> mSynthesizedTouchInput;
++  int16_t mSynthesizedMouseButtons = 0;
+   // In headless there is no window manager to track window bounds
+   // across size mode changes, so we must track it to emulate.
+   LayoutDeviceIntRect mRestoreBounds;
+diff --git a/widget/headless/HeadlessWidget.cpp b/widget/headless/HeadlessWidget.cpp
+--- a/widget/headless/HeadlessWidget.cpp
++++ b/widget/headless/HeadlessWidget.cpp
+@@ -448,8 +448,14 @@ nsresult HeadlessWidget::SynthesizeNativeMouseEvent(
+     event.mButton = aButton;
+   }
+   if (msg == eMouseDown) {
++    mSynthesizedMouseButtons |=
++        static_cast<int16_t>(MouseButtonsFlagToChange(aButton));
+     event.mClickCount = 1;
++  } else if (msg == eMouseUp) {
++    mSynthesizedMouseButtons &=
++        ~static_cast<int16_t>(MouseButtonsFlagToChange(aButton));
+   }
++  event.mButtons = mSynthesizedMouseButtons;
+   event.AssignEventTime(WidgetEventTime());
+   DispatchInputEvent(&event);
+   return NS_OK;

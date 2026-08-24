@@ -1,0 +1,48 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -6,6 +6,7 @@
+  */
+ #include <errno.h>
+ #include <fcntl.h>
++#include <poll.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <termios.h>
+@@ -20,7 +21,9 @@ enum linux_aarch64_syscall {
+ 	L_ioctl = 29,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
++	L_pipe2 = 59,
+ 	L_lseek = 62,
++	L_ppoll = 73,
+ 	L_openat = 56,
+ 	L_close = 57,
+ 	L_read = 63,
+@@ -93,6 +96,8 @@ enum makos_syscall {
+ 	M_fd_seek = 87,
+ 	M_fd_dup3 = 88,
+ 	M_fd_control = 89,
++	M_pipe2 = 90,
++	M_poll = 91,
+ };
+ 
+ struct makos_termios {
+@@ -251,6 +256,17 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		default:
+ 			return -EINVAL;
+ 		}
++	case L_pipe2:
++		if (b & ~(O_NONBLOCK | O_CLOEXEC)) return -EINVAL;
++		if (!(b & O_NONBLOCK)) return -ENOTSUP;
++		return makos_raw(M_pipe2, a, b, 0, 0, 0, 0);
++	case L_ppoll:
++		if (d) return -ENOTSUP;
++		if (!c) return -ENOTSUP;
++		if (((const struct timespec *)c)->tv_sec ||
++		    ((const struct timespec *)c)->tv_nsec)
++			return -ENOTSUP;
++		return makos_raw(M_poll, a, b, 0, 0, 0, 0);
+ 	case L_read:
+ 		result = makos_raw(M_read, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;

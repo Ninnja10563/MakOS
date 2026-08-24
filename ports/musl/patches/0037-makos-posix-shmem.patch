@@ -1,0 +1,67 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -40,6 +40,7 @@ enum linux_aarch64_syscall {
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
+ 	L_ftruncate = 46,
++	L_fallocate = 47,
+ 	L_chdir = 49,
+ 	L_pipe2 = 59,
+ 	L_getdents64 = 61,
+@@ -467,8 +467,8 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 	long length, result;
+ 	int access;
+ 	/* O_LARGEFILE is a no-op on this 64-bit-only target. */
+-	long supported = O_ACCMODE | O_CREAT | O_TRUNC | O_LARGEFILE |
+-		O_DIRECTORY | O_CLOEXEC;
++	long supported = O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_LARGEFILE |
++		O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
+ 
+ 	if (dirfd != AT_FDCWD) return -ENOTSUP;
+ 	if (flags & ~supported) return -ENOTSUP;
+@@ -481,8 +481,10 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 	length = path_length(path);
+ 	if (!length) return -ENOENT;
+ 	if (length >= 4096) return -ENAMETOOLONG;
+-	if (flags & O_CREAT)
+-		(void)makos_raw(M_create, (long)path, length, 0, 0, 0, 0);
++	if (flags & O_CREAT) {
++		long created = makos_raw(M_create, (long)path, length, 0, 0, 0, 0);
++		if ((flags & O_EXCL) && created != 1) return -EEXIST;
++	}
+ 	result = makos_raw(M_open, (long)path, length, access,
+ 		(flags & O_TRUNC) ? 1 : 2, 0, 0);
+ 	result = makos_path_result(result, access != O_RDONLY ? EACCES : ENOENT);
+@@ -499,6 +501,11 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 		(void)makos_raw(M_close, result, 0, 0, 0, 0, 0);
+ 		return -EIO;
+ 	}
++	if ((flags & O_NONBLOCK) &&
++	    makos_raw(M_fd_control, result, 4, access | O_NONBLOCK, 0, 0, 0) < 0) {
++		(void)makos_raw(M_close, result, 0, 0, 0, 0, 0);
++		return -EIO;
++	}
+ 	return result;
+ }
+ 
+@@ -592,6 +600,9 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_ftruncate:
+ 		if (b < 0) return -EINVAL;
+ 		return makos_raw(M_ftruncate, a, b, 0, 0, 0, 0);
++	case L_fallocate:
++		/* MakOS sparse RAM/files have no truthful preallocation contract yet. */
++		return -EOPNOTSUPP;
+ 	case L_pselect6:
+ 	{
+ 		long options[3] = {-1, 0, 0};
+@@ -801,7 +809,8 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		    (c & PROT_WRITE && c & PROT_EXEC) || f & 4095)
+ 			return -EINVAL;
+ 		d &= ~MAP_NORESERVE;
+-		if (d != MAP_PRIVATE && d != (MAP_PRIVATE | MAP_FIXED) &&
++		if (d != MAP_SHARED && d != (MAP_SHARED | MAP_FIXED) &&
++		    d != MAP_PRIVATE && d != (MAP_PRIVATE | MAP_FIXED) &&
+ 		    d != (MAP_PRIVATE | MAP_ANONYMOUS) &&
+ 		    d != (MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS))
+ 			return -ENOTSUP;

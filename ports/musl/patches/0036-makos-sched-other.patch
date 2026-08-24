@@ -1,0 +1,38 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -13,6 +13,7 @@
+ #include <netinet/in.h>
+ #include <netinet/tcp.h>
+ #include <poll.h>
++#include <sched.h>
+ #include <stddef.h>
+ #include <string.h>
+ #include <sys/ioctl.h>
+@@ -61,6 +62,7 @@ enum linux_aarch64_syscall {
+ 	L_clock_gettime = 113,
+ 	L_clock_getres = 114,
+ 	L_clock_nanosleep = 115,
++	L_sched_setscheduler = 119,
+ 	L_sched_yield = 124,
+ 	L_rt_sigaction = 134,
+ 	L_rt_sigprocmask = 135,
+@@ -162,6 +164,7 @@ enum makos_syscall {
+ 	M_execve = 112,
+ 	M_madvise = 114,
+ 	M_thread_set_name = 115,
++	M_thread_set_scheduler = 116,
+ };
+ 
+ struct makos_metadata {
+@@ -818,6 +821,10 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		result = strnlen((const char *)b, 16);
+ 		if (result == 16) return -ERANGE;
+ 		return makos_raw(M_thread_set_name, b, result, 0, 0, 0, 0);
++	case L_sched_setscheduler:
++		if (!c) return -EINVAL;
++		return makos_raw(M_thread_set_scheduler, a, b,
++			((const struct sched_param *)c)->sched_priority, 0, 0, 0);
+ 	case L_brk:
+ 		result = makos_raw(M_brk, a, 0, 0, 0, 0, 0);
+ 		return result == -1 ? 0 : result;

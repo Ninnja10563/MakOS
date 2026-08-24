@@ -1,0 +1,58 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] makos: receive single-iovec messages without TLS scratch
+
+The common recvmsg path, including musl DNS, supplies one iovec. Receive
+directly into that destination so a large thread-local scratch allocation is
+not required or faulted. Keep the scratch path for scatter/gather and
+SCM_RIGHTS, and reject invalid destination and source-address capacities.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -410,7 +410,9 @@ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ 	if (!message || message->msg_iovlen > IOV_MAX)
+ 		return -ENOTSUP;
+ 	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
+ 	for (size_t i = 0; i < message->msg_iovlen; i++) {
++		if (message->msg_iov[i].iov_len && !message->msg_iov[i].iov_base)
++			return -EFAULT;
+ 		if (message->msg_iov[i].iov_len > sizeof buffer - capacity)
+ 			return -EMSGSIZE;
+ 		capacity += message->msg_iov[i].iov_len;
+@@ -417,10 +419,16 @@ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ 	if (!capacity && !message->msg_controllen) return 0;
+ 	name_length = message->msg_namelen;
+ 	control_capacity = message->msg_controllen;
++	if (message->msg_name && name_length < sizeof(struct sockaddr_in))
++		return -EINVAL;
+ 	if (control_capacity) {
+ 		if (!message->msg_control || message->msg_name) return -ENOTSUP;
+ 		result = makos_raw(M_recvmsg_rights, fd, (long)buffer, capacity, flags,
+ 			(long)rights, 200);
++	} else if (message->msg_iovlen == 1) {
++		result = makos_raw(M_receive, fd,
++			(long)message->msg_iov[0].iov_base, capacity, flags,
++			(long)message->msg_name, message->msg_name ? (long)&name_length : 0);
+ 	} else {
+ 		result = makos_raw(M_receive, fd, (long)buffer, capacity, flags,
+ 			(long)message->msg_name, message->msg_name ? (long)&name_length : 0);
+@@ -438,12 +447,13 @@ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ 		}
+ 		received_rights[i] = rights[i];
+ 	}
+-	for (size_t i = 0; i < message->msg_iovlen && copied < (size_t)result; i++) {
+-		size_t count = message->msg_iov[i].iov_len;
+-		if (count > (size_t)result - copied) count = result - copied;
+-		memcpy(message->msg_iov[i].iov_base, buffer + copied, count);
+-		copied += count;
+-	}
++	if (control_capacity || message->msg_iovlen != 1)
++		for (size_t i = 0; i < message->msg_iovlen && copied < (size_t)result; i++) {
++			size_t count = message->msg_iov[i].iov_len;
++			if (count > (size_t)result - copied) count = result - copied;
++			memcpy(message->msg_iov[i].iov_base, buffer + copied, count);
++			copied += count;
++		}
+ 	message->msg_namelen = name_length;
+ 	message->msg_controllen = 0;
+ 	message->msg_flags = 0;

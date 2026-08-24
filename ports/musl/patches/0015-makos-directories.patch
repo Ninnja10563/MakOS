@@ -1,0 +1,40 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -26,5 +26,6 @@ enum linux_aarch64_syscall {
+ 	L_fcntl = 25,
+ 	L_ioctl = 29,
++	L_mkdirat = 34,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
+ 	L_ftruncate = 46,
+@@ -118,6 +119,8 @@ enum makos_syscall {
+ 	M_getcwd = 95,
+ 	M_ftruncate = 96,
+ 	M_fsync = 97,
++	M_mkdir = 98,
++	M_rmdir = 99,
+ };
+ 
+ struct makos_metadata {
+@@ -433,11 +436,19 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_lseek:
+ 		result = makos_raw(M_fd_seek, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EINVAL : result;
++	case L_mkdirat:
++		if (a != AT_FDCWD) return -ENOTSUP;
++		length = path_length((const char *)b);
++		if (!length) return -ENOENT;
++		if (length >= 4096) return -ENAMETOOLONG;
++		return makos_raw(M_mkdir, b, length, 0, 0, 0, 0);
+ 	case L_unlinkat:
+-		if (a != AT_FDCWD || c) return -ENOTSUP;
++		if (a != AT_FDCWD || c & ~AT_REMOVEDIR) return -ENOTSUP;
+ 		length = path_length((const char *)b);
+ 		if (!length) return -ENOENT;
+ 		if (length >= 4096) return -ENAMETOOLONG;
++		if (c == AT_REMOVEDIR)
++			return makos_raw(M_rmdir, b, length, 0, 0, 0, 0);
+ 		return makos_bool_result(makos_raw(M_unlink, b, length, 0, 0, 0, 0), ENOENT);
+ 	case L_renameat:
+ 		if (a != AT_FDCWD || c != AT_FDCWD) return -ENOTSUP;

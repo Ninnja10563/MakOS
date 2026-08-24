@@ -1,0 +1,144 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -43,6 +43,7 @@
+ 	L_ioctl = 29,
+ 	L_mkdirat = 34,
+ 	L_unlinkat = 35,
++	L_symlinkat = 36,
+ 	L_renameat = 38,
+ 	L_statfs = 43,
+ 	L_fstatfs = 44,
+@@ -202,6 +203,10 @@
+ 	M_process_wait_status = 126,
+ 	M_sendmsg_rights = 127,
+ 	M_recvmsg_rights = 128,
++	M_symlink = 130,
++	M_readlink = 131,
++	M_stat_extended = 132,
++	M_fstat_extended = 133,
+ 	M_socket_name = 134,
+ 	M_socket_bind = 135,
+ };
+@@ -216,6 +221,18 @@
+ 	unsigned long long inode;
+ };
+ 
++struct makos_extended_metadata {
++	unsigned mode;
++	unsigned uid;
++	unsigned gid;
++	unsigned kind;
++	unsigned long long size;
++	unsigned long long accessed_ns;
++	unsigned long long modified_ns;
++	unsigned long long changed_ns;
++	unsigned long long inode;
++};
++
+ struct makos_directory_entry {
+ 	unsigned long long inode;
+ 	unsigned kind;
+@@ -525,11 +542,9 @@
+ 	return makos_raw(M_sleep_until, ticks, 0, 0, 0, 0, 0);
+ }
+ 
+-static void metadata_to_kstat(struct kstat *to,
+-	const struct makos_metadata *from)
++static void extended_metadata_to_kstat(struct kstat *to,
++	const struct makos_extended_metadata *from)
+ {
+-	long seconds = from->modified_ticks / 100;
+-	long nanoseconds = from->modified_ticks % 100 * 10000000;
+ 	*to = (struct kstat){
+ 		.st_dev = 1,
+ 		.st_ino = from->inode,
+@@ -540,28 +555,28 @@
+ 		.st_size = from->size,
+ 		.st_blksize = 4096,
+ 		.st_blocks = (from->size + 511) / 512,
+-		.st_atime_sec = seconds,
+-		.st_atime_nsec = nanoseconds,
+-		.st_mtime_sec = seconds,
+-		.st_mtime_nsec = nanoseconds,
+-		.st_ctime_sec = seconds,
+-		.st_ctime_nsec = nanoseconds,
++		.st_atime_sec = from->accessed_ns / 1000000000ULL,
++		.st_atime_nsec = from->accessed_ns % 1000000000ULL,
++		.st_mtime_sec = from->modified_ns / 1000000000ULL,
++		.st_mtime_nsec = from->modified_ns % 1000000000ULL,
++		.st_ctime_sec = from->changed_ns / 1000000000ULL,
++		.st_ctime_nsec = from->changed_ns % 1000000000ULL,
+ 	};
+ }
+ 
+ static long makos_fstat(long fd, struct kstat *output)
+ {
+-	struct makos_metadata metadata;
+-	long result = makos_raw(M_fstat_metadata, fd, (long)&metadata, 0, 0, 0, 0);
++	struct makos_extended_metadata metadata;
++	long result = makos_raw(M_fstat_extended, fd, (long)&metadata, 0, 0, 0, 0);
+ 	if (result < 0) return result;
+-	metadata_to_kstat(output, &metadata);
++	extended_metadata_to_kstat(output, &metadata);
+ 	return 0;
+ }
+ 
+ static long makos_fstatat(long dirfd, const char *path,
+ 	struct kstat *output, long flags)
+ {
+-	struct makos_metadata metadata;
++	struct makos_extended_metadata metadata;
+ 	long length, result;
+ 	if (flags == AT_EMPTY_PATH && dirfd >= 0 && !*path)
+ 		return makos_fstat(dirfd, output);
+@@ -570,9 +585,10 @@
+ 	length = path_length(path);
+ 	if (!length) return -ENOENT;
+ 	if (length >= 4096) return -ENAMETOOLONG;
+-	result = makos_raw(M_stat, (long)path, length, (long)&metadata, 0, 0, 0);
+-	if (result != 1) return -ENOENT;
+-	metadata_to_kstat(output, &metadata);
++	result = makos_raw(M_stat_extended, (long)path, length, (long)&metadata,
++		(flags & AT_SYMLINK_NOFOLLOW) != 0, 0, 0);
++	if (result < 0) return result;
++	extended_metadata_to_kstat(output, &metadata);
+ 	return 0;
+ }
+ 
+@@ -644,7 +660,8 @@
+ 		record->d_ino = entry.inode;
+ 		record->d_off = result;
+ 		record->d_reclen = length;
+-		record->d_type = entry.kind == 2 ? DT_DIR : DT_REG;
++		record->d_type = entry.kind == 2 ? DT_DIR :
++			(entry.kind == 7 ? DT_LNK : DT_REG);
+ 		for (index = 0; index < entry.name_length; index++)
+ 			record->d_name[index] = entry.name[index];
+ 		used += length;
+@@ -870,16 +887,20 @@
+ 		}
+ 		return makos_raw(M_poll, a, b, milliseconds, signal_mask, d != 0, 0);
+ 	}
++	case L_symlinkat:
++		if (b != AT_FDCWD) return -ENOTSUP;
++		length = path_length((const char *)a);
++		result = path_length((const char *)c);
++		if (!length || !result) return -ENOENT;
++		if (length >= 4096 || result >= 4096) return -ENAMETOOLONG;
++		return makos_raw(M_symlink, a, length, c, result, 0, 0);
+ 	case L_readlinkat:
+-	{
+-		struct makos_metadata metadata;
+ 		if (a != AT_FDCWD) return -ENOTSUP;
+ 		length = path_length((const char *)b);
+ 		if (!length) return -ENOENT;
+ 		if (length >= 4096) return -ENAMETOOLONG;
+-		result = makos_raw(M_stat, b, length, (long)&metadata, 0, 0, 0);
+-		return result == 1 ? -EINVAL : -ENOENT;
+-	}
++		if (d <= 0) return -EINVAL;
++		return makos_raw(M_readlink, b, length, c, d, 0, 0);
+ 	case L_statfs:
+ 	{
+ 		struct makos_metadata metadata;

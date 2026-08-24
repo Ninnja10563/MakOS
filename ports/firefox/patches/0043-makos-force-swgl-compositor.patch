@@ -1,0 +1,23 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] webrender: force SWGL compositor for MakOS framebuffer
+
+MakOS has a CPU-addressable native framebuffer but no OpenGL window-system
+binding. Route WebRender through RenderCompositorSWGL so frame submission uses
+the MakOS widget StartRemoteDrawing/EndRemoteDrawing bridge.
+
+diff --git a/gfx/webrender_bindings/RenderCompositor.cpp b/gfx/webrender_bindings/RenderCompositor.cpp
+--- a/gfx/webrender_bindings/RenderCompositor.cpp
++++ b/gfx/webrender_bindings/RenderCompositor.cpp
+@@ -201,6 +201,12 @@ void wr_partial_present_compositor_set_buffer_damage_region(
+ /* static */
+ UniquePtr<RenderCompositor> RenderCompositor::Create(
+     const RefPtr<widget::CompositorWidget>& aWidget, nsACString& aError) {
++#ifdef MOZ_WIDGET_MAKOS
++  // MakOS exposes a CPU-addressable BGRA framebuffer through its native
++  // widget bridge and intentionally has no OpenGL window-system binding.
++  // Always select SWGL so StartRemoteDrawingInRegion reaches that bridge.
++  return RenderCompositorSWGL::Create(aWidget, aError);
++#endif
+   if (aWidget->GetCompositorOptions().UseSoftwareWebRender()) {
+ #ifdef XP_DARWIN
+     // Mac uses NativeLayerCA

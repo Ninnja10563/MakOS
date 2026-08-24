@@ -1,0 +1,110 @@
+# AArch64 multicore userspace scheduler design
+
+## Current verified boundary
+
+QEMU `virt`/HVF starts four PEs through PSCI `CPU_ON_64`. Every PE has a
+private 64 KiB EL1 stack, VBAR, GICC interface, logical ID in `TPIDR_EL1`, and
+coherent identity-mapped kernel tables. A boot rendezvous proves all APs make
+parallel EL1 progress. APs then enter a closed-gate, interrupt-masked WFI idle
+dispatcher. Only CPU0 executes EL0 today; `userspace_scheduler_cpus=1` remains
+the truthful runtime marker.
+
+The offline scheduler foundation adds:
+
+- `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
+  a test proving one saved context cannot run on two CPUs;
+- AArch64 process/syscall/exception paths select `current_pid_on(cpu)` and use
+  CPU-indexed activate, schedule, block, exit, and exec-resource transitions;
+- per-CPU EL0-to-kernel return records selected through `TPIDR_EL1`;
+- per-CPU active TTBR0 caches, cross-CPU active-root teardown rejection, and
+  inner-shareable page invalidation (`TLBI VAE1IS`) for shared process roots.
+
+These changes preserve existing CPU0 wrappers. They do not release APs into
+EL0 and are not evidence of parallel Firefox execution.
+
+## Next enablement blockers
+
+- Initial and exception-time AP selectors now restrict candidates to
+  non-leader Firefox workers. Broader affinity/load balancing remains gated
+  until device-owning and PID1/UI paths are qualified.
+- Blocking with no AP-eligible successor must return through the per-CPU saved
+  kernel record into an AP idle loop; current blocking paths reactivate the
+  sole local task because CPU0 still owns session dispatch.
+- Exit/session teardown must distinguish no local successor from no live
+  session. `exit_group` must first stop/ack remote-running siblings; current
+  administrative `terminate` correctly rejects a task owned by another CPU.
+- APs need banked virtual-timer PPI enable/programming. AP timer IRQs must skip
+  CPU0-owned tick advancement, socket pumping, input polling, and graphics.
+- Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
+  Release unlock; idle selection must consume after Acquire lock acquisition.
+
+Until these land and boot proof passes, APs remain in closed-gate WFI at EL1.
+Routine BSP `SEV` traffic cannot wake this gate and consume host CPU. Eventual
+gate enablement must issue a per-AP SGI after publishing the enabled state.
+
+## Required runtime architecture
+
+1. Scheduler ownership
+   - All task lifecycle and selection remain under `LockedProcesses` initially.
+   - Every exception path obtains `cpu_index()` and uses
+     `current_pid_on(cpu)`, `schedule_next_on(cpu)`, `block_current_on(cpu)`,
+     and `exit_current_on(cpu)`.
+   - A Ready context becomes Running on exactly one CPU. Context save occurs
+     before releasing scheduler lock; context restore occurs after selection.
+   - CPU0 retains session ownership. APs returning with no Ready task enter an
+     idle WFI dispatcher; they never set `session_active=false` merely because
+     another CPU owns the last Running task.
+
+2. AP dispatch
+   - After desktop/session startup enables SMP scheduling, AP WFI dispatchers
+     select Ready Firefox worker threads. They do not run PID1/UI threads until
+     process and device paths are qualified for parallel use.
+   - Clone/wake/spawn publishes the context with Release ordering then sends an
+     SGI/SEV to idle dispatchers. Selection consumes it with Acquire ordering.
+   - A BSP-only boot option/fallback remains available until full regression
+     coverage passes.
+
+3. Timer and interrupt state
+   - Each AP enables its banked GICv2 virtual-timer PPI and programs
+     `CNTV_CVAL_EL0` before EL0 entry.
+   - CPU0 alone advances global monotonic ticks and services deadlines/device
+     polling. AP timer IRQs only preempt/select; otherwise four timer streams
+     would make wall time advance fourfold.
+   - GICC acknowledge/EOI is per PE. Device bottom halves remain CPU0-owned
+     until their locks and interrupt affinity are audited.
+
+4. Address spaces and TLBs
+   - TTBR0 is per PE. Same-process Firefox threads may concurrently use one
+     root; different processes may use different roots.
+   - Mapping mutation holds the VM/page-table owner lock, publishes PTE writes
+     with `DSB ISHST`, issues `TLBI ...IS`, then `DSB ISH; ISB`.
+   - Address-space destruction is forbidden while any per-CPU active-root slot
+     references it. Exit-group first evicts/stops every sibling and waits for
+     an acknowledgement mask before teardown.
+
+5. Blocking, futexes, signals, exit
+   - Blocking transitions only the calling CPU's current task. No-successor on
+     an AP returns to its idle dispatcher rather than reactivating the task.
+   - Futex/readiness wake changes Blocked to Ready once and kicks one idle CPU;
+     the existing global process lock provides correctness before sharded wait
+     queues are attempted.
+   - `exit_group` marks a group dying, sends reschedule IPIs, prevents new
+     scheduling, waits until no CPU owns a sibling, then reaps shared VM/files.
+   - `clear_child_tid`, TTY, VFS, sockets, graphics, credentials, and VM cleanup
+     execute once after task ownership is detached.
+
+## Proof gates before claiming parallel EL0
+
+- Four distinct guest TIDs simultaneously report four distinct logical CPU
+  IDs from EL0 while advancing independent counters.
+- Timer preemption/context restore covers GPRs, SIMD/FP, TLS, SP, PC, TTBR0 on
+  every PE; no task appears on two CPUs.
+- Shared-root concurrent map/protect/unmap plus broadcast TLB test passes.
+- Futex wait/wake, pipe/epoll, clone/exit/exit_group and two-boot persistence
+  pass under forced migrations and repeated contention.
+- Firefox first paint/navigation passes with at least two Firefox TIDs observed
+  running in overlapping intervals on different CPUs.
+- Idle CPU, cursor integrity, pointer latency, and CPU0 fallback suites remain
+  green.
+
+Until every gate passes, MakOS reports `userspace_scheduler_cpus=1`.

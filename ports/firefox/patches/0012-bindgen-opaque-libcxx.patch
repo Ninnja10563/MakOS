@@ -1,0 +1,40 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] profiler: select matching libclang and keep libc++ opaque
+
+libc++ 22 exposes implementation alias templates below std::__1. bindgen 0.69
+recursively emits several aliases without their template parameters, producing
+invalid Rust. Profiler FFI treats all C++ standard-library values as opaque and
+never accesses their fields, so extend the existing string/vector rule to the
+whole std namespace. NSS still needs libclang 18, while these libc++ 22 headers
+require libclang 22 builtins, so select the profiler parser per build script.
+
+diff --git a/tools/profiler/rust-api/build.rs b/tools/profiler/rust-api/build.rs
+--- a/tools/profiler/rust-api/build.rs
++++ b/tools/profiler/rust-api/build.rs
+@@ -94,6 +94,11 @@ fn generate_bindings() {
+         // not an opaque type, bindgen can't find its size properly and
+         // MarkerSchema's total size reduces. That causes a heap buffer overflow.
+         .opaque_type("std::vector")
++        // libc++ 22 exposes implementation aliases below std::__1 while
++        // resolving the aliases above. bindgen 0.69 emits those alias-template
++        // parameters without Rust generics. Keep the whole C++ standard-library
++        // boundary opaque; profiler FFI never accesses its fields directly.
++        .opaque_type("std::.*")
+         .raw_line("pub use self::root::*;")
+         // Tell cargo to invalidate the built crate whenever any of the
+         // included header files changed.
+@@ -111,6 +116,14 @@ fn main() {
+     println!("cargo:rerun-if-changed=build.rs");
+     println!("cargo:out_dir={}", env::var("OUT_DIR").unwrap());
+ 
++    // NSS's older bindgen input currently needs libclang 18, but profiler
++    // bindings include libc++ 22 and therefore need matching compiler
++    // builtins. Select the modern parser only inside this build-script
++    // process instead of making either generator consume incompatible headers.
++    if let Some(path) = env::var_os("MAKOS_PROFILER_BINDGEN_LIBDIR") {
++        env::set_var("LIBCLANG_PATH", path);
++    }
++
+     fs::create_dir_all(&*OUTDIR_PATH).unwrap();
+     generate_bindings();
+ }

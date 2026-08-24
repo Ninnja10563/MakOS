@@ -1,0 +1,27 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -72,5 +72,6 @@ enum linux_aarch64_syscall {
+ 	L_munmap = 215,
+ 	L_clone = 220,
++	L_execve = 221,
+ 	L_mmap = 222,
+ 	L_mprotect = 226,
+ 	L_getrandom = 278,
+@@ -143,6 +144,7 @@ enum makos_syscall {
+ 	M_epoll_close = 107,
+ 	M_sigprocmask = 108,
+ 	M_pselect = 109,
++	M_execve = 112,
+ };
+ 
+ struct makos_metadata {
+@@ -675,6 +677,8 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_raw(M_gettid, 0, 0, 0, 0, 0, 0);
+ 	case L_clone:
+ 		return makos_raw(M_thread_clone, a, b, c, d, e, 0);
++	case L_execve:
++		return makos_raw(M_execve, a, b, c, 0, 0, 0);
+ 	case L_getrandom:
+ 		if (c & ~3) return -EINVAL;
+ 		result = makos_raw(M_getrandom, a, b, c, 0, 0, 0);

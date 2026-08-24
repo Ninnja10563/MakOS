@@ -1,0 +1,18 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] media: use auxv AArch64 CPU detection on MakOS
+
+MakOS supplies ELF auxv HWCAP/HWCAP2 through musl. Reuse libvpx's generic
+AArch64 auxv detector without identifying MakOS as Linux.
+
+diff --git a/media/libvpx/libvpx/vpx_ports/aarch64_cpudetect.c b/media/libvpx/libvpx/vpx_ports/aarch64_cpudetect.c
+--- a/media/libvpx/libvpx/vpx_ports/aarch64_cpudetect.c
++++ b/media/libvpx/libvpx/vpx_ports/aarch64_cpudetect.c
+@@ -120,7 +120,7 @@ int arm_cpu_caps(void) {
+   return flags;
+ }
+ 
+-#elif defined(__linux__)  // end defined(VPX_USE_ANDROID_CPU_FEATURES)
++#elif defined(__linux__) || defined(__makos__)  // end VPX_USE_ANDROID_CPU_FEATURES
+ 
+ #include <sys/auxv.h>
+ 

@@ -1,0 +1,7 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. https://mozilla.org/MPL/2.0/
+set -eu
+tool_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export MAKOS_DRIVER_CXX=1
+exec python3 "$tool_dir/makos-clang.py" "$@"

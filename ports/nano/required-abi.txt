@@ -1,0 +1,63 @@
+# Runtime gates derived from GNU nano 9.1 configure.ac, src/, bundled gnulib,
+# and an official-source arm64 macOS build. Names are portable API names, not
+# Darwin-private linker spellings.
+
+[process-startup]
+_start argc argv envp
+exit _Exit abort
+
+[memory]
+malloc calloc realloc free
+mmap munmap mprotect
+
+[file-descriptors]
+open openat close read write lseek fsync fcntl
+faccessat access isatty
+
+[stdio]
+FILE stdin stdout stderr
+fopen fdopen fclose fflush fread fwrite ferror fileno
+fprintf vfprintf printf snprintf sprintf putc fputc puts putchar
+
+[filesystem]
+stat fstat chmod chown fchmod fchown unlink rename link symlink readlink
+mkdir rmdir getcwd realpath mkstemp mkstemps
+opendir readdir closedir rewinddir
+
+[terminal]
+tcgetattr tcsetattr
+ioctl(TIOCGWINSZ)
+SIGWINCH sigaction raise
+stdin/stdout/stderr character-device semantics
+ANSI/VT cursor-addressing erase attributes alternate-screen behavior
+TERM + terminfo database
+
+[curses]
+initscr endwin newwin delwin wgetch ungetch
+wmove waddch waddnstr wclrtoeol wrefresh wnoutrefresh doupdate
+keypad raw noecho nonl nodelay scrollok wscrl curs_set
+COLS LINES
+
+[time-user-environment]
+clock_gettime time napms
+getenv putenv setlocale localeconv nl_langinfo
+getuid geteuid getpid getpwuid getpwent endpwent
+
+[strings-and-conversion]
+memchr memcmp memcpy memmove memset
+strlen strnlen strcpy strncpy strcat strcmp strncmp strcasecmp strncasecmp
+strchr strrchr strstr strcasestr strpbrk strdup strerror
+strtol strtoul atoi dirname
+
+[utf8-target]
+mbrtowc mbsinit wcrtomb wctomb mbstowcs wcwidth wcslen
+iswalpha iswalnum iswpunct btowc
+
+[optional-external-tools]
+fork execvp pipe dup2 wait waitpid kill
+
+[makos-aarch64-exec]
+path ELF exec/spawn
+argv envp auxv
+multi-process scheduler wait
+larger user VA + growable stack

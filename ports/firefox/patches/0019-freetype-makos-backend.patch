@@ -1,0 +1,151 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] gfx: use bundled FreeType for MakOS
+
+MakOS has no host font framework. Build Gecko's bundled FreeType and its
+native FreeType font resource/scaled-font path for the MakOS widget backend.
+
+diff --git a/gfx/2d/Factory.cpp b/gfx/2d/Factory.cpp
+--- a/gfx/2d/Factory.cpp
++++ b/gfx/2d/Factory.cpp
+@@ -35,7 +35,7 @@
+ #  include "UnscaledFontFreeType.h"
+ #endif
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+ #  include "ScaledFontFreeType.h"
+ #  include "NativeFontResourceFreeType.h"
+ #  include "UnscaledFontFreeType.h"
+@@ -556,7 +556,7 @@ already_AddRefed<NativeFontResource> Factory::CreateNativeFontResource(
+     case FontType::FONTCONFIG:
+       return NativeFontResourceFontconfig::Create(
+           aData, aSize, static_cast<FT_Library>(aFontContext));
+-#elif defined(MOZ_WIDGET_ANDROID)
++#elif defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+     case FontType::FREETYPE:
+       return NativeFontResourceFreeType::Create(
+           aData, aSize, static_cast<FT_Library>(aFontContext));
+@@ -587,7 +587,7 @@ already_AddRefed<UnscaledFont> Factory::CreateUnscaledFontFromFontDescriptor(
+     case FontType::FONTCONFIG:
+       return UnscaledFontFontconfig::CreateFromFontDescriptor(
+           aData, aDataLength, aIndex);
+-#elif defined(MOZ_WIDGET_ANDROID)
++#elif defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+     case FontType::FREETYPE:
+       return UnscaledFontFreeType::CreateFromFontDescriptor(aData, aDataLength,
+                                                             aIndex);
+@@ -617,7 +617,7 @@ already_AddRefed<ScaledFont> Factory::CreateScaledFontForFontconfigFont(
+ }
+ #endif
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+ already_AddRefed<ScaledFont> Factory::CreateScaledFontForFreeTypeFont(
+     const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
+     RefPtr<SharedFTFace> aFace, bool aApplySyntheticBold) {
+diff --git a/gfx/2d/UnscaledFontFreeType.cpp b/gfx/2d/UnscaledFontFreeType.cpp
+--- a/gfx/2d/UnscaledFontFreeType.cpp
++++ b/gfx/2d/UnscaledFontFreeType.cpp
+@@ -179,7 +179,7 @@ void UnscaledFontFreeType::ApplyVariationsToFace(
+   }
+ }
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+ 
+ already_AddRefed<ScaledFont> UnscaledFontFreeType::CreateScaledFont(
+     Float aGlyphSize, const uint8_t* aInstanceData,
+@@ -237,6 +237,6 @@ already_AddRefed<UnscaledFont> UnscaledFontFreeType::CreateFromFontDescriptor(
+   return unscaledFont.forget();
+ }
+ 
+-#endif  // MOZ_WIDGET_ANDROID
++#endif  // MOZ_WIDGET_ANDROID || MOZ_WIDGET_MAKOS
+ 
+ }  // namespace mozilla::gfx
+diff --git a/gfx/2d/UnscaledFontFreeType.h b/gfx/2d/UnscaledFontFreeType.h
+--- a/gfx/2d/UnscaledFontFreeType.h
++++ b/gfx/2d/UnscaledFontFreeType.h
+@@ -41,7 +41,7 @@ class UnscaledFontFreeType : public UnscaledFont {
+ 
+   RefPtr<SharedFTFace> InitFace();
+ 
+-#ifdef MOZ_WIDGET_ANDROID
++#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_MAKOS)
+   static already_AddRefed<UnscaledFont> CreateFromFontDescriptor(
+       const uint8_t* aData, uint32_t aDataLength, uint32_t aIndex);
+ 
+diff --git a/gfx/2d/moz.build b/gfx/2d/moz.build
+--- a/gfx/2d/moz.build
++++ b/gfx/2d/moz.build
+@@ -97,7 +97,7 @@ elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
+     ]
+     DEFINES["WIN32"] = True
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk", "makos"):
+     EXPORTS.mozilla.gfx += [
+         "UnscaledFontFreeType.h",
+     ]
+@@ -111,7 +111,7 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
+         "ScaledFontFontconfig.cpp",
+     ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "makos"):
+     SOURCES += [
+         "ScaledFontFreeType.cpp",
+     ]
+@@ -211,12 +211,12 @@ FINAL_LIBRARY = "xul"
+ for var in ("USE_CAIRO", "MOZ2D_HAS_MOZ_CAIRO"):
+     DEFINES[var] = True
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk", "makos"):
+     DEFINES["MOZ_ENABLE_FREETYPE"] = True
+ 
+ CXXFLAGS += ["-Werror=switch"]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk", "makos"):
+     CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
+ 
+ LOCAL_INCLUDES += CONFIG["SKIA_INCLUDES"]
+diff --git a/gfx/thebes/moz.build b/gfx/thebes/moz.build
+--- a/gfx/thebes/moz.build
++++ b/gfx/thebes/moz.build
+@@ -282,7 +282,7 @@ LOCAL_INCLUDES += [
+     "/widget/gtk",
+ ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk", "makos"):
+     DEFINES["MOZ_ENABLE_FREETYPE"] = True
+ 
+ if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android"):
+diff --git a/gfx/webrender_bindings/moz.build b/gfx/webrender_bindings/moz.build
+--- a/gfx/webrender_bindings/moz.build
++++ b/gfx/webrender_bindings/moz.build
+@@ -105,7 +105,7 @@ if CONFIG["MOZ_WAYLAND"]:
+         "RenderCompositorNative.cpp",
+     ]
+ 
+-if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk"):
++if CONFIG["MOZ_WIDGET_TOOLKIT"] in ("android", "gtk", "makos"):
+     CXXFLAGS += CONFIG["CAIRO_FT_CFLAGS"]
+ 
+ if CONFIG["COMPILE_ENVIRONMENT"]:
+diff --git a/toolkit/moz.configure b/toolkit/moz.configure
+--- a/toolkit/moz.configure
++++ b/toolkit/moz.configure
+@@ -1337,7 +1337,9 @@ set_config("MOZ_SYSTEM_WEBP", depends(when=system_webp)(lambda: True))
+ # ==============================================================
+ @depends(target, "--enable-skia-pdf")
+ def tree_freetype(target, skia_pdf):
+-    if target.os == "Android" or (skia_pdf and target.os == "WINNT"):
++    if target.os in ("Android", "MakOS") or (
++        skia_pdf and target.os == "WINNT"
++    ):
+         return True
+ 
+ 

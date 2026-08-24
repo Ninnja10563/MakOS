@@ -1,0 +1,11 @@
+[package]
+name = "makos-installer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+makos-gpt = { path = "../gpt" }
+
+[lib]
+path = "src/lib.rs"

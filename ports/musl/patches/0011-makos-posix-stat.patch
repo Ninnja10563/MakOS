@@ -1,0 +1,127 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -5,14 +5,17 @@
+  * source.  This file is the only boundary that translates them to the
+  * independent MakOS ABI and normalizes MakOS's mixed return conventions.
+  */
++#define _GNU_SOURCE
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <poll.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
++#include <sys/stat.h>
+ #include <termios.h>
+ #include <time.h>
+ #include "libc.h"
++#include "kstat.h"
+ 
+ enum linux_aarch64_syscall {
+ 	L_dup = 23,
+@@ -25,6 +27,8 @@ enum linux_aarch64_syscall {
+ 	L_pipe2 = 59,
+ 	L_lseek = 62,
+ 	L_ppoll = 73,
++	L_newfstatat = 79,
++	L_fstat = 80,
+ 	L_openat = 56,
+ 	L_close = 57,
+ 	L_read = 63,
+@@ -65,6 +69,7 @@ enum makos_syscall {
+ 	M_close = 13,
+ 	M_write = 17,
+ 	M_clock_monotonic = 27,
++	M_stat = 36,
+ 	M_create = 43,
+ 	M_unlink = 44,
+ 	M_socket = 47,
+@@ -102,8 +107,19 @@ enum makos_syscall {
+ 	M_fd_control = 89,
+ 	M_pipe2 = 90,
+ 	M_poll = 91,
++	M_fstat_metadata = 92,
+ };
+ 
++struct makos_metadata {
++	unsigned mode;
++	unsigned uid;
++	unsigned gid;
++	unsigned kind;
++	unsigned long long size;
++	unsigned long long modified_ticks;
++	unsigned long long inode;
++};
++
+ struct makos_termios {
+ 	unsigned input_flags;
+ 	unsigned output_flags;
+@@ -157,6 +173,57 @@ static long makos_bool_result(long result, int error)
+ 	return result == 1 ? 0 : -error;
+ }
+ 
++static void metadata_to_kstat(struct kstat *to,
++	const struct makos_metadata *from)
++{
++	long seconds = from->modified_ticks / 100;
++	long nanoseconds = from->modified_ticks % 100 * 10000000;
++	*to = (struct kstat){
++		.st_dev = 1,
++		.st_ino = from->inode,
++		.st_mode = from->mode,
++		.st_nlink = from->kind == 2 ? 2 : 1,
++		.st_uid = from->uid,
++		.st_gid = from->gid,
++		.st_size = from->size,
++		.st_blksize = 4096,
++		.st_blocks = (from->size + 511) / 512,
++		.st_atime_sec = seconds,
++		.st_atime_nsec = nanoseconds,
++		.st_mtime_sec = seconds,
++		.st_mtime_nsec = nanoseconds,
++		.st_ctime_sec = seconds,
++		.st_ctime_nsec = nanoseconds,
++	};
++}
++
++static long makos_fstat(long fd, struct kstat *output)
++{
++	struct makos_metadata metadata;
++	long result = makos_raw(M_fstat_metadata, fd, (long)&metadata, 0, 0, 0, 0);
++	if (result < 0) return result;
++	metadata_to_kstat(output, &metadata);
++	return 0;
++}
++
++static long makos_fstatat(long dirfd, const char *path,
++	struct kstat *output, long flags)
++{
++	struct makos_metadata metadata;
++	long length, result;
++	if (flags == AT_EMPTY_PATH && dirfd >= 0 && !*path)
++		return makos_fstat(dirfd, output);
++	if (dirfd != AT_FDCWD) return -ENOTSUP;
++	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT)) return -ENOTSUP;
++	length = path_length(path);
++	if (!length) return -ENOENT;
++	if (length >= 4096) return -ENAMETOOLONG;
++	result = makos_raw(M_stat, (long)path, length, (long)&metadata, 0, 0, 0);
++	if (result != 1) return -ENOENT;
++	metadata_to_kstat(output, &metadata);
++	return 0;
++}
++
+ static void termios_from_makos(struct termios *to,
+ 	const struct makos_termios *from)
+ {
+@@ -335,6 +401,10 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		    ((const struct timespec *)c)->tv_nsec)
+ 			return -ENOTSUP;
+ 		return makos_raw(M_poll, a, b, 0, 0, 0, 0);
++	case L_newfstatat:
++		return makos_fstatat(a, (const char *)b, (struct kstat *)c, d);
++	case L_fstat:
++		return makos_fstat(a, (struct kstat *)b);
+ 	case L_read:
+ 		result = makos_raw(M_read, a, b, c, 0, 0, 0);
+ 		return result == -1 ? -EBADF : result;

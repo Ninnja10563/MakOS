@@ -1,0 +1,16 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -101,6 +101,11 @@ const fn aligned_by(size: usize, align: usize) -> usize {
+ //
+ // See <https://github.com/mozilla/mtu/issues/82>.
+-#[cfg(any(target_os = "ios", target_os = "tvos", target_os = "visionos"))]
++#[cfg(any(
++    target_os = "ios",
++    target_os = "makos",
++    target_os = "tvos",
++    target_os = "visionos"
++))]
+ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
+     return Err(default_err());
+ }

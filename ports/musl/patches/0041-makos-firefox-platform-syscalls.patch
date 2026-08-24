@@ -1,0 +1,172 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -19,10 +19,12 @@
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <sys/prctl.h>
++#include <sys/resource.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <termios.h>
+ #include <time.h>
++#include <unistd.h>
+ #include "libc.h"
+ #include "kstat.h"
+ 
+@@ -40,6 +42,7 @@
+ 	L_renameat = 38,
+ 	L_ftruncate = 46,
+ 	L_fallocate = 47,
++	L_faccessat = 48,
+ 	L_chdir = 49,
+ 	L_pipe2 = 59,
+ 	L_getdents64 = 61,
+@@ -65,11 +68,15 @@
+ 	L_clock_getres = 114,
+ 	L_clock_nanosleep = 115,
+ 	L_sched_setscheduler = 119,
++	L_sched_getaffinity = 123,
+ 	L_sched_yield = 124,
+ 	L_rt_sigaction = 134,
+ 	L_rt_sigprocmask = 135,
+ 	L_setpgid = 154,
+ 	L_getpgid = 155,
++	L_getrlimit = 163,
++	L_getrusage = 165,
++	L_umask = 166,
+ 	L_prctl = 167,
+ 	L_getpid = 172,
+ 	L_getppid = 173,
+@@ -92,12 +99,15 @@
+ 	L_recvmsg = 212,
+ 	L_brk = 214,
+ 	L_munmap = 215,
++	L_mremap = 216,
+ 	L_clone = 220,
+ 	L_execve = 221,
+ 	L_mmap = 222,
+ 	L_mprotect = 226,
+ 	L_madvise = 233,
+ 	L_getrandom = 278,
++	L_prlimit64 = 261,
++	L_membarrier = 283,
+ };
+ 
+ enum makos_syscall {
+@@ -413,6 +423,56 @@
+ 	return 0;
+ }
+ 
++static long makos_fixed_limit(long resource, struct rlimit *limit)
++{
++	if (!limit || resource < 0 || resource >= RLIMIT_NLIMITS) return -EINVAL;
++	limit->rlim_cur = RLIM_INFINITY;
++	limit->rlim_max = RLIM_INFINITY;
++	if (resource == RLIMIT_NOFILE || resource == RLIMIT_NPROC)
++		limit->rlim_cur = limit->rlim_max = 128;
++	else if (resource == RLIMIT_STACK)
++		limit->rlim_cur = limit->rlim_max = 64 * 1024 * 1024;
++	else if (resource == RLIMIT_CORE)
++		limit->rlim_cur = limit->rlim_max = 0;
++	return 0;
++}
++
++static long makos_prlimit(long pid, long resource,
++	const struct rlimit *requested, struct rlimit *previous)
++{
++	struct rlimit fixed;
++	long current = makos_raw(M_process_identity, 0, 0, 0, 0, 0, 0);
++	if (pid && pid != current) return -ESRCH;
++	if (makos_fixed_limit(resource, &fixed) < 0) return -EINVAL;
++	if (previous) *previous = fixed;
++	if (requested && (requested->rlim_cur != fixed.rlim_cur ||
++	    requested->rlim_max != fixed.rlim_max)) return -EPERM;
++	return 0;
++}
++
++static long makos_faccessat(long dirfd, const char *path, long mode)
++{
++	struct kstat value;
++	unsigned permission;
++	long uid, gid, result;
++	if (mode & ~(R_OK | W_OK | X_OK)) return -EINVAL;
++	result = makos_fstatat(dirfd, path, &value, 0);
++	if (result < 0 || mode == F_OK) return result;
++	uid = makos_raw(M_process_identity, 1, 0, 0, 0, 0, 0);
++	gid = makos_raw(M_process_identity, 2, 0, 0, 0, 0, 0);
++	if (!uid) {
++		if ((mode & X_OK) && !(value.st_mode & 0111)) return -EACCES;
++		return 0;
++	}
++	permission = value.st_mode & 7;
++	if ((unsigned)uid == value.st_uid) permission = value.st_mode >> 6 & 7;
++	else if ((unsigned)gid == value.st_gid) permission = value.st_mode >> 3 & 7;
++	if ((mode & R_OK) && !(permission & 4)) return -EACCES;
++	if ((mode & W_OK) && !(permission & 2)) return -EACCES;
++	if ((mode & X_OK) && !(permission & 1)) return -EACCES;
++	return 0;
++}
++
+ static long makos_getdents(long fd, unsigned char *output, long capacity)
+ {
+ 	struct makos_directory_entry entry;
+@@ -599,6 +659,8 @@
+ 	case L_fallocate:
+ 		/* MakOS sparse RAM/files have no truthful preallocation contract yet. */
+ 		return -EOPNOTSUPP;
++	case L_faccessat:
++		return makos_faccessat(a, (const char *)b, c);
+ 	case L_pselect6:
+ 	{
+ 		long options[3] = {-1, 0, 0};
+@@ -723,6 +785,11 @@
+ 		return makos_ioctl(a, b, c);
+ 	case L_sched_yield:
+ 		return makos_raw(M_yield, 0, 0, 0, 0, 0, 0);
++	case L_sched_getaffinity:
++		if (a < 0 || b < 8 || !c) return -EINVAL;
++		memset((void *)c, 0, b);
++		*(unsigned char *)c = 1;
++		return 8;
+ 	case L_clock_gettime:
+ 		if (a == CLOCK_MONOTONIC) {
+ 			result = makos_raw(M_clock_monotonic, 0, 0, 0, 0, 0, 0);
+@@ -766,6 +833,21 @@
+ 		return makos_raw(M_getpgrp, 0, 0, 0, 0, 0, 0);
+ 	case L_setpgid:
+ 		return makos_raw(M_setpgid, a, b, 0, 0, 0, 0);
++	case L_getrlimit:
++		return makos_prlimit(0, a, 0, (struct rlimit *)b);
++	case L_prlimit64:
++		return makos_prlimit(a, b, (const struct rlimit *)c,
++			(struct rlimit *)d);
++	case L_getrusage:
++		if (!b || (a != RUSAGE_SELF && a != RUSAGE_CHILDREN &&
++		    a != RUSAGE_THREAD)) return -EINVAL;
++		memset((void *)b, 0, sizeof(struct rusage));
++		return 0;
++	case L_umask:
++	{
++		static unsigned current_mask = 022;
++		return __atomic_exchange_n(&current_mask, a & 0777, __ATOMIC_RELAXED);
++	}
+ 	case L_getpid:
+ 		return makos_raw(M_process_identity, 0, 0, 0, 0, 0, 0);
+ 	case L_getppid:
+@@ -846,6 +928,15 @@
+ 		return makos_bool_result(makos_raw(M_mprotect, a, b, c, 0, 0, 0), EINVAL);
+ 	case L_madvise:
+ 		return makos_raw(M_madvise, a, b, c, 0, 0, 0);
++	case L_mremap:
++		return -ENOMEM;
++	case L_membarrier:
++		if (a == 0) return 8 | 16;
++		if ((a == 8 || a == 16) && !b) {
++			__asm__ __volatile__("dmb ish" ::: "memory");
++			return 0;
++		}
++		return -EINVAL;
+ 	case L_prctl:
+ 		if (a != PR_SET_NAME || !b) return -EINVAL;
+ 		result = strnlen((const char *)b, 16);

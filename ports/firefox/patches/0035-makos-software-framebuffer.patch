@@ -1,0 +1,142 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget: present Gecko software frames to MakOS surfaces
+
+Add bounded six-argument surface blit ABI and use a Skia draw target as the
+in-process compositor framebuffer. Pixels stay owned by Gecko; kernel copies
+them synchronously into the caller-owned retained surface.
+
+diff --git a/widget/makos/MakOSSurface.cpp b/widget/makos/MakOSSurface.cpp
+--- a/widget/makos/MakOSSurface.cpp
++++ b/widget/makos/MakOSSurface.cpp
+@@ -16,8 +16,31 @@ enum class Syscall : uint64_t {
+   SurfacePresent = 10,
+   SurfaceClose = 58,
+   SurfaceReadEvent = 60,
++  SurfaceBlit = 113,
+ };
+ 
++uint64_t Svc6(Syscall aNumber, uint64_t aFirst, uint64_t aSecond,
++              uint64_t aThird, uint64_t aFourth, uint64_t aFifth,
++              uint64_t aSixth) {
++#if defined(__aarch64__) && defined(MOZ_WIDGET_MAKOS)
++  register uint64_t x0 __asm__("x0") = aFirst;
++  register uint64_t x1 __asm__("x1") = aSecond;
++  register uint64_t x2 __asm__("x2") = aThird;
++  register uint64_t x3 __asm__("x3") = aFourth;
++  register uint64_t x4 __asm__("x4") = aFifth;
++  register uint64_t x5 __asm__("x5") = aSixth;
++  register uint64_t x8 __asm__("x8") = static_cast<uint64_t>(aNumber);
++  __asm__ volatile("svc #0"
++                   : "+r"(x0)
++                   : "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5),
++                     "r"(x8)
++                   : "memory", "cc");
++  return x0;
++#else
++#  error "MakOS widget backend requires AArch64 and MOZ_WIDGET_MAKOS"
++#endif
++}
++
+ uint64_t Svc4(Syscall aNumber, uint64_t aFirst, uint64_t aSecond,
+               uint64_t aThird, uint64_t aFourth) {
+ #if defined(__aarch64__) && defined(MOZ_WIDGET_MAKOS)
+@@ -52,6 +75,19 @@ bool PresentSurface(SurfaceHandle aSurface) {
+   return Svc4(Syscall::SurfacePresent, aSurface, 0, 0, 0) == 1;
+ }
+ 
++bool BlitSurface(SurfaceHandle aSurface, const uint8_t* aPixels,
++                 uint32_t aWidth, uint32_t aHeight, uint32_t aStride,
++                 uint32_t aDestinationX, uint32_t aDestinationY) {
++  if (!aPixels || !aWidth || !aHeight ||
++      uint64_t(aStride) < uint64_t(aWidth) * 4) {
++    return false;
++  }
++  uint64_t destination = (uint64_t(aDestinationX) << 32) | aDestinationY;
++  return Svc6(Syscall::SurfaceBlit, aSurface,
++              reinterpret_cast<uint64_t>(aPixels), aWidth, aHeight, aStride,
++              destination) == 1;
++}
++
+ bool HideSurface(SurfaceHandle aSurface) {
+   return Svc4(Syscall::SurfaceClose, aSurface, 0, 0, 0) == 1;
+ }
+diff --git a/widget/makos/MakOSSurface.h b/widget/makos/MakOSSurface.h
+--- a/widget/makos/MakOSSurface.h
++++ b/widget/makos/MakOSSurface.h
+@@ -42,6 +42,9 @@ SurfaceHandle CreateSurface(uint32_t aWidth, uint32_t aHeight,
+                             uint64_t aReservedSlot);
+ bool FillSurface(SurfaceHandle aSurface, uint32_t aArgb, uint32_t aX,
+                  uint32_t aY, uint32_t aWidth, uint32_t aHeight);
++bool BlitSurface(SurfaceHandle aSurface, const uint8_t* aPixels,
++                 uint32_t aWidth, uint32_t aHeight, uint32_t aStride,
++                 uint32_t aDestinationX = 0, uint32_t aDestinationY = 0);
+ bool PresentSurface(SurfaceHandle aSurface);
+ // Current close operation hides a retained surface; it does not destroy the
+ // process or release the handle.
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include "HeadlessWidget.h"
+ #include "MakOSSurface.h"
++#include "mozilla/gfx/2D.h"
+ #include "nsIWidget.h"
+ 
+ namespace mozilla::widget {
+@@ -17,6 +18,9 @@ class MakOSWindow final : public HeadlessWidget {
+     if (NS_FAILED(result)) {
+       return result;
+     }
++    if (aParent) {
++      return NS_OK;
++    }
+     mSurface = makos::CreateSurface(aRect.Width(), aRect.Height(),
+                                     makos::kBrowserSurfaceSlot);
+     if (mSurface == makos::kInvalidSurface) {
+@@ -48,9 +49,45 @@ class MakOSWindow final : public HeadlessWidget {
+     HeadlessWidget::Show(aState);
+   }
+ 
++  already_AddRefed<gfx::DrawTarget> StartRemoteDrawing() override {
++    gfx::IntSize size = GetClientSize().ToUnknownSize();
++    if (size.width <= 0 || size.height <= 0 || size.width > 720 ||
++        size.height > 420) {
++      return nullptr;
++    }
++    if (!mDrawTarget || mDrawTarget->GetSize() != size) {
++      mDrawTarget = gfx::Factory::CreateDrawTarget(
++          gfx::BackendType::SKIA, size, gfx::SurfaceFormat::B8G8R8X8);
++    }
++    return do_AddRef(mDrawTarget);
++  }
++
++  void EndRemoteDrawing() override {
++    if (!mDrawTarget || mSurface == makos::kInvalidSurface) {
++      return;
++    }
++    mDrawTarget->Flush();
++    uint8_t* pixels = nullptr;
++    gfx::IntSize size;
++    int32_t stride = 0;
++    gfx::SurfaceFormat format = gfx::SurfaceFormat::UNKNOWN;
++    if (!mDrawTarget->LockBits(&pixels, &size, &stride, &format)) {
++      return;
++    }
++    if (pixels && stride > 0 &&
++        (format == gfx::SurfaceFormat::B8G8R8A8 ||
++         format == gfx::SurfaceFormat::B8G8R8X8)) {
++      (void)makos::BlitSurface(mSurface, pixels, size.width, size.height,
++                               stride);
++    }
++    mDrawTarget->ReleaseBits(pixels);
++    (void)makos::PresentSurface(mSurface);
++  }
++
+  private:
+   ~MakOSWindow() override { Destroy(); }
+   makos::SurfaceHandle mSurface = makos::kInvalidSurface;
++  RefPtr<gfx::DrawTarget> mDrawTarget;
+ };
+ 
+ }  // namespace mozilla::widget

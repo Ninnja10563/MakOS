@@ -1,0 +1,164 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] makos: expose native IPv6 socket ABI and address configuration
+
+Keep sockaddr_in compatibility while passing complete sockaddr_in6 objects to
+the kernel.  Drive AI_ADDRCONFIG from real kernel interface configuration so
+AAAA lookup is enabled only after router advertisement/SLAAC completed.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -195,6 +195,8 @@ enum makos_syscall {
+ 	M_process_wait_status = 126,
+ 	M_sendmsg_rights = 127,
+ 	M_recvmsg_rights = 128,
++	M_socket_name = 134,
++	M_socket_bind = 135,
+ };
+ 
+ struct makos_metadata {
+@@ -251,6 +253,16 @@ hidden int __makos_get_net_config(unsigned char output[12])
+ 	return result == 12 ? 0 : -1;
+ }
+ 
++hidden int __makos_address_family_configured(int family)
++{
++	unsigned char config[56];
++	long result = makos_raw(M_net_config, (long)config, sizeof config, 0, 0, 0, 0);
++	if (result != sizeof config) return family == AF_INET;
++	if (family == AF_INET) return config[0] || config[1] || config[2] || config[3];
++	if (family == AF_INET6) return config[16] & 1;
++	return 0;
++}
++
+ static long path_length(const char *path)
+ {
+ 	long length;
+@@ -334,23 +345,21 @@ static long makos_setsockopt(long fd, long level, long option,
+ static long makos_sockname(long fd, int peer, struct sockaddr *address,
+ 	socklen_t *length)
+ {
+-	struct sockaddr_in ipv4 = {0};
+-	long packed;
+-	if (!address || !length || *length < sizeof ipv4) return -EINVAL;
+-	packed = makos_raw(M_fd_control, fd, peer ? 15 : 14, 0, 0, 0, 0);
+-	if (packed < 0) return packed;
+-	memcpy(&ipv4, &packed, 8);
+-	memcpy(address, &ipv4, sizeof ipv4);
+-	*length = sizeof ipv4;
+-	return 0;
++	if (!address || !length) return -EINVAL;
++	return makos_raw(M_socket_name, fd, peer, (long)address,
++		(long)length, 0, 0);
+ }
+ 
+ static long makos_pack_sockaddr(const struct sockaddr *address,
+ 	socklen_t length, long *packed)
+ {
+-	if (!address || length < 8 || address->sa_family != AF_INET) return -EINVAL;
++	if (!address) return -EINVAL;
++	if ((address->sa_family == AF_INET && length < sizeof(struct sockaddr_in)) ||
++	    (address->sa_family == AF_INET6 && length < sizeof(struct sockaddr_in6)) ||
++	    (address->sa_family != AF_INET && address->sa_family != AF_INET6))
++		return -EINVAL;
+ 	*packed = 0;
+-	memcpy(packed, address, 8);
++	if (address->sa_family == AF_INET) memcpy(packed, address, 8);
+ 	return 0;
+ }
+ 
+@@ -1090,6 +1099,6 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_socket:
+ 	{
+ 		long type = b & 0xf;
+-		if (a != 2) return -EAFNOSUPPORT;
++		if (a != AF_INET && a != AF_INET6) return -EAFNOSUPPORT;
+ 		if (b & ~(0xf | SOCK_NONBLOCK | SOCK_CLOEXEC)) return -EINVAL;
+ 		if (type != SOCK_STREAM && type != SOCK_DGRAM) return -ENOTSUP;
+@@ -1110,20 +1119,25 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		return makos_raw(M_socketpair, a, b, c, d, 0, 0);
+ 	case L_bind:
+ 	{
+-		long packed;
++		long packed = 0;
+ 		result = makos_pack_sockaddr((const struct sockaddr *)b, c, &packed);
+ 		if (result < 0) return result;
+-		return makos_raw(M_fd_control, a, 16, packed, 0, 0, 0);
++		return makos_raw(M_socket_bind, a, b, c, 0, 0, 0);
+ 	}
+ 	case L_connect:
+-		if (c < 8) return -EINVAL;
+-		return makos_bool_result(makos_raw(M_connect, a, b, 8, 0, 0, 0), ECONNREFUSED);
++	{
++		long packed = 0;
++		if (makos_pack_sockaddr((const struct sockaddr *)b, c, &packed) < 0)
++			return -EINVAL;
++		return makos_bool_result(makos_raw(M_connect, a, b, c, 0, 0, 0), ECONNREFUSED);
++	}
+ 	case L_getsockname:
+ 		return makos_sockname(a, 0, (struct sockaddr *)b, (socklen_t *)c);
+ 	case L_getpeername:
+ 		return makos_sockname(a, 1, (struct sockaddr *)b, (socklen_t *)c);
+ 	case L_sendto:
+ 		if (d & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) return -ENOTSUP;
+-		if ((e && f < 8) || (!e && f)) return -EINVAL;
++		if ((e && makos_pack_sockaddr((const struct sockaddr *)e, f, &result) < 0) ||
++		    (!e && f)) return -EINVAL;
+ 		result = makos_raw(M_send, a, b, c, d, e, f);
+ 		return result == -1 ? -EIO : result;
+diff --git a/src/network/getaddrinfo.c b/src/network/getaddrinfo.c
+--- a/src/network/getaddrinfo.c
++++ b/src/network/getaddrinfo.c
+@@ -8,5 +8,7 @@
+ #include <errno.h>
+ #include "lookup.h"
+ 
++hidden int __makos_address_family_configured(int);
++
+ int getaddrinfo(const char *restrict host, const char *restrict serv, const struct addrinfo *restrict hint, struct addrinfo **restrict res)
+ {
+@@ -45,43 +47,7 @@ int getaddrinfo(const char *restrict host, const char *restrict serv, const struct addrinfo *restrict hint, struct addrinfo **restrict res)
+ 	if (flags & AI_ADDRCONFIG) {
+-		/* Define the "an address is configured" condition for address
+-		 * families via ability to create a socket for the family plus
+-		 * routability of the loopback address for the family. */
+-		static const struct sockaddr_in lo4 = {
+-			.sin_family = AF_INET, .sin_port = 65535,
+-			.sin_addr.s_addr = __BYTE_ORDER == __BIG_ENDIAN
+-				? 0x7f000001 : 0x0100007f
+-		};
+-		static const struct sockaddr_in6 lo6 = {
+-			.sin6_family = AF_INET6, .sin6_port = 65535,
+-			.sin6_addr = IN6ADDR_LOOPBACK_INIT
+-		};
+ 		int tf[2] = { AF_INET, AF_INET6 };
+-		const void *ta[2] = { &lo4, &lo6 };
+-		socklen_t tl[2] = { sizeof lo4, sizeof lo6 };
+ 		for (i=0; i<2; i++) {
+ 			if (family==tf[1-i]) continue;
+-			int s = socket(tf[i], SOCK_CLOEXEC|SOCK_DGRAM,
+-				IPPROTO_UDP);
+-			if (s>=0) {
+-				int cs;
+-				pthread_setcancelstate(
+-					PTHREAD_CANCEL_DISABLE, &cs);
+-				int r = connect(s, ta[i], tl[i]);
+-				int saved_errno = errno;
+-				pthread_setcancelstate(cs, 0);
+-				close(s);
+-				if (!r) continue;
+-				errno = saved_errno;
+-			}
+-			switch (errno) {
+-			case EADDRNOTAVAIL:
+-			case EAFNOSUPPORT:
+-			case EHOSTUNREACH:
+-			case ENETDOWN:
+-			case ENETUNREACH:
+-				break;
+-			default:
+-				return EAI_SYSTEM;
+-			}
++			if (__makos_address_family_configured(tf[i])) continue;
+ 			if (family == tf[i]) no_family = 1;
+ 			family = tf[1-i];

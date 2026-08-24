@@ -1,0 +1,26 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget/makos: repaint visible window after size-mode changes
+
+Native window managers repaint after a size-mode transition. MakOS manages its
+single top-level surface directly, so queue the equivalent Gecko invalidation.
+This also ensures chrome loaded after initial native creation receives a real
+paint without synthesizing any browser pixels.
+
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -224,6 +224,14 @@ class MakOSWindow final : public HeadlessWidget {
+     }
+   }
+ 
++  void SetSizeMode(nsSizeMode aMode) override {
++    HeadlessWidget::SetSizeMode(aMode);
++    if (IsVisible()) {
++      Invalidate(
++          LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
++    }
++  }
++
+   void Invalidate(const LayoutDeviceIntRect& aRect) override {
+     LayoutDeviceIntRect rect = aRect.Intersect(
+         LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));

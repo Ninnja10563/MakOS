@@ -1,0 +1,97 @@
+diff --git a/src/new/common/mod.rs b/src/new/common/mod.rs
+--- a/src/new/common/mod.rs
++++ b/src/new/common/mod.rs
+@@ -22,5 +22,6 @@ pub(crate) mod bsd;
+     target_os = "emscripten",
+     target_os = "l4re",
+     target_os = "linux",
++    target_os = "makos",
+ ))]
+ pub(crate) mod linux_like;
+diff --git a/src/new/common/posix/mod.rs b/src/new/common/posix/mod.rs
+--- a/src/new/common/posix/mod.rs
++++ b/src/new/common/posix/mod.rs
+@@ -8,6 +8,7 @@
+     target_os = "emscripten",
+     target_os = "l4re",
+     target_os = "linux",
++    target_os = "makos",
+     target_os = "qurt",
+     target_vendor = "apple",
+ ))]
+diff --git a/src/new/common/linux_like/pthread.rs b/src/new/common/linux_like/pthread.rs
+--- a/src/new/common/linux_like/pthread.rs
++++ b/src/new/common/linux_like/pthread.rs
+@@ -1,25 +1,25 @@
+ use crate::prelude::*;
+ 
+ extern "C" {
+-    #[cfg(any(target_os = "linux", target_os = "l4re"))]
++    #[cfg(any(target_os = "linux", target_os = "l4re", target_os = "makos"))]
+     pub fn pthread_getaffinity_np(
+         thread: crate::pthread_t,
+         cpusetsize: size_t,
+         cpuset: *mut crate::cpu_set_t,
+     ) -> c_int;
+ 
+     pub fn pthread_getattr_np(native: crate::pthread_t, attr: *mut crate::pthread_attr_t) -> c_int;
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "makos"))]
+     pub fn pthread_getname_np(thread: crate::pthread_t, name: *mut c_char, len: size_t) -> c_int;
+ 
+-    #[cfg(any(target_os = "linux", target_os = "l4re"))]
++    #[cfg(any(target_os = "linux", target_os = "l4re", target_os = "makos"))]
+     pub fn pthread_setaffinity_np(
+         thread: crate::pthread_t,
+         cpusetsize: size_t,
+         cpuset: *const crate::cpu_set_t,
+     ) -> c_int;
+ 
+-    #[cfg(any(target_os = "android", target_os = "linux"))]
++    #[cfg(any(target_os = "android", target_os = "linux", target_os = "makos"))]
+     pub fn pthread_setname_np(thread: crate::pthread_t, name: *const c_char) -> c_int;
+ }
+diff --git a/src/new/mod.rs b/src/new/mod.rs
+--- a/src/new/mod.rs
++++ b/src/new/mod.rs
+@@ -87,6 +87,6 @@ cfg_if! {
+     } else if #[cfg(target_os = "l4re")] {
+         mod l4re;
+         // pub(crate) use l4re::*;
+-    } else if #[cfg(target_os = "linux")] {
++    } else if #[cfg(any(target_os = "linux", target_os = "makos"))] {
+         mod linux_uapi;
+         pub(crate) use linux_uapi::*;
+@@ -176,4 +176,4 @@ cfg_if! {
+         pub use linux::types::*;
+         pub use sys::socket::*;
+-    } else if #[cfg(target_os = "linux")] {
++    } else if #[cfg(any(target_os = "linux", target_os = "makos"))] {
+         pub use linux::can::bcm::*;
+@@ -249,4 +249,5 @@ cfg_if! {
+             target_os = "emscripten",
+             target_os = "l4re",
+-            target_os = "linux"
++            target_os = "linux",
++            target_os = "makos"
+         ))]
+diff --git a/src/unix/mod.rs b/src/unix/mod.rs
+--- a/src/unix/mod.rs
++++ b/src/unix/mod.rs
+@@ -2470,3 +2470,4 @@ cfg_if! {
+     } else if #[cfg(any(
+         target_os = "linux",
++        target_os = "makos",
+         target_os = "l4re",
+diff --git a/src/unix/linux_like/mod.rs b/src/unix/linux_like/mod.rs
+--- a/src/unix/linux_like/mod.rs
++++ b/src/unix/linux_like/mod.rs
+@@ -2215,6 +2215,6 @@ cfg_if! {
+     if #[cfg(target_os = "emscripten")] {
+         mod emscripten;
+         pub use self::emscripten::*;
+-    } else if #[cfg(target_os = "linux")] {
++    } else if #[cfg(any(target_os = "linux", target_os = "makos"))] {
+         mod linux;
+         pub use self::linux::*;

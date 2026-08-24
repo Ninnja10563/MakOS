@@ -1,0 +1,26 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] ipc: select generic POSIX launcher on MakOS
+
+Select Gecko's generic POSIX launcher without Linux, GTK, Android, or Darwin
+platform behavior. MakOS already supplies same-PID exec/environment setup, but
+real fork/COW, FD remapping, and wait remain explicit multiprocess runtime gates;
+the launcher must fail through musl `ENOSYS` until those contracts land.
+
+diff --git a/ipc/glue/GeckoChildProcessHost.cpp b/ipc/glue/GeckoChildProcessHost.cpp
+--- a/ipc/glue/GeckoChildProcessHost.cpp
++++ b/ipc/glue/GeckoChildProcessHost.cpp
+@@ -339,6 +339,14 @@ class LinuxProcessLauncher : public PosixProcessLauncher {
+   virtual Result<Ok, LaunchError> DoSetup() override;
+ };
+ typedef LinuxProcessLauncher ProcessLauncher;
++#  elif defined(MOZ_WIDGET_MAKOS)
++class MakOSProcessLauncher : public PosixProcessLauncher {
++ public:
++  MakOSProcessLauncher(GeckoChildProcessHost* aHost,
++                       geckoargs::ChildProcessArgs&& aExtraOpts)
++      : PosixProcessLauncher(aHost, std::move(aExtraOpts)) {}
++};
++typedef MakOSProcessLauncher ProcessLauncher;
+ #  elif defined(MOZ_WIDGET_UIKIT)
+ class IosProcessLauncher : public PosixProcessLauncher {
+  public:

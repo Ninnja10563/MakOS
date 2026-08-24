@@ -1,0 +1,13 @@
+diff --git a/toolkit/moz.configure b/toolkit/moz.configure
+index 00dfebf0a43f..4c6925982f00 100644
+--- a/toolkit/moz.configure
++++ b/toolkit/moz.configure
+@@ -775,7 +775,7 @@ set_define(gl_provider_define, True)
+ # ==============================================================
+ @depends(toolkit)
+ def pdf_printing(toolkit):
+-    if toolkit in ("windows", "gtk", "android"):
++    if toolkit in ("windows", "gtk", "android", "makos"):
+         return True
+ 
+ 

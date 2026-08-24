@@ -1,0 +1,33 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget/makos: defer initial show until frontend size mode
+
+Creating the native surface precedes loading browser chrome. Painting it at
+that point produces a valid but blank frame and prevents the later frontend
+transition from exposing the completed chrome. Keep creation hidden and use
+the first frontend size-mode transition as MakOS's native show notification.
+
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -189,10 +189,6 @@ class MakOSWindow final : public HeadlessWidget {
+     gTopLevelWindow = this;
+     makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, rect.Width(),
+                        rect.Height());
+-    // MakOS owns the browser's single native top-level slot. Make it visible
+-    // as soon as creation succeeds so frontend service initialization cannot
+-    // indefinitely defer the first real Gecko paint.
+-    Show(true);
+     return NS_OK;
+   }
+ 
+@@ -228,7 +224,9 @@ class MakOSWindow final : public HeadlessWidget {
+ 
+   void SetSizeMode(nsSizeMode aMode) override {
+     HeadlessWidget::SetSizeMode(aMode);
+-    if (IsVisible()) {
++    if (!IsVisible()) {
++      Show(true);
++    } else {
+       Invalidate(
+           LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
+     }

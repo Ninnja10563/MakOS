@@ -1,0 +1,71 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] makos: bound fallback message buffers and send one iovec directly
+
+Avoid adding 128 KiB of static TLS to every thread for message scratch space.
+The socket ABI accepts 4 KiB at a time, so use bounded automatic buffers only
+for scatter/gather and SCM_RIGHTS. Send the common single-iovec case directly,
+matching recvmsg's direct path, and retain short-write behavior above 4 KiB.
+
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -15,6 +15,7 @@
+ #include <poll.h>
+ #include <sched.h>
+ #include <stddef.h>
++#include <stdint.h>
+ #include <string.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+@@ -347,7 +348,7 @@
+ 
+ static long makos_sendmsg(long fd, const struct msghdr *message, long flags)
+ {
+-	static __thread unsigned char buffer[65536];
++	unsigned char buffer[4096];
+ 	int passed_rights[200];
+ 	unsigned long long rights[200];
+ 	size_t total = 0;
+@@ -360,8 +361,18 @@
+ 	    makos_pack_sockaddr(message->msg_name, message->msg_namelen, &packed) < 0)
+ 		return -EINVAL;
+ 	(void)packed;
++	if (!message->msg_controllen && message->msg_iovlen == 1) {
++		size_t amount = message->msg_iov[0].iov_len;
++		if (amount && !message->msg_iov[0].iov_base) return -EFAULT;
++		if (!amount) return 0;
++		if (amount > sizeof buffer) amount = sizeof buffer;
++		return makos_raw(M_send, fd, (long)message->msg_iov[0].iov_base,
++			amount, flags, (long)message->msg_name, message->msg_namelen);
++	}
+ 	for (size_t i = 0; i < message->msg_iovlen; i++) {
+ 		size_t amount;
++		if (message->msg_iov[i].iov_len && !message->msg_iov[i].iov_base)
++			return -EFAULT;
+ 		if (total == sizeof buffer) break;
+ 		amount = message->msg_iov[i].iov_len;
+ 		if (amount > sizeof buffer - total) amount = sizeof buffer - total;
+@@ -397,7 +408,7 @@
+ 
+ static long makos_recvmsg(long fd, struct msghdr *message, long flags)
+ {
+-	static __thread unsigned char buffer[65536];
++	unsigned char buffer[4096];
+ 	int received_rights[200];
+ 	unsigned long long rights[200];
+ 	socklen_t name_length;
+@@ -410,10 +421,13 @@
+ 	for (size_t i = 0; i < message->msg_iovlen; i++) {
+ 		if (message->msg_iov[i].iov_len && !message->msg_iov[i].iov_base)
+ 			return -EFAULT;
+-		if (message->msg_iov[i].iov_len > sizeof buffer - capacity)
++		if (message->msg_iov[i].iov_len > SIZE_MAX - capacity)
+ 			return -EMSGSIZE;
+ 		capacity += message->msg_iov[i].iov_len;
+ 	}
++	if ((message->msg_iovlen != 1 || message->msg_controllen) &&
++	    capacity > sizeof buffer)
++		return -EMSGSIZE;
+ 	if (!capacity && !message->msg_controllen) return 0;
+ 	name_length = message->msg_namelen;
+ 	control_capacity = message->msg_controllen;

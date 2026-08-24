@@ -1,0 +1,44 @@
+diff --git a/build.rs b/build.rs
+--- a/build.rs
++++ b/build.rs
+@@ -127,7 +127,7 @@ fn main() {
+     if apple {
+         use_feature("apple");
+     }
+-    if os == "linux" || os == "l4re" || os == "android" || os == "emscripten" {
++    if os == "makos" || os == "linux" || os == "l4re" || os == "android" || os == "emscripten" {
+         use_feature("linux_like");
+     }
+     if os == "solaris" || os == "illumos" {
+diff --git a/src/backend/libc/fs/types.rs b/src/backend/libc/fs/types.rs
+--- a/src/backend/libc/fs/types.rs
++++ b/src/backend/libc/fs/types.rs
+@@ -839,6 +839,7 @@ bitflags! {
+             target_os = "haiku",
+             target_os = "hurd",
+             target_os = "l4re",
++            target_os = "makos",
+             target_os = "linux",
+             target_os = "wasi",
+         )))]
+@@ -971,7 +972,7 @@ bitflags! {
+ ///
+ /// [`statat`]: crate::fs::statat
+ /// [`fstat`]: crate::fs::fstat
+-#[cfg(not(any(linux_like, target_os = "hurd")))]
++#[cfg(any(target_os = "makos", not(any(linux_like, target_os = "hurd"))))]
+ pub type Stat = c::stat;
+ 
+ /// `struct stat` for use with [`statat`] and [`fstat`].
+diff --git a/src/ioctl/mod.rs b/src/ioctl/mod.rs
+--- a/src/ioctl/mod.rs
++++ b/src/ioctl/mod.rs
+@@ -318,7 +318,7 @@ type _RawOpcode = c::c_ulong;
+ // Musl uses `c_int`.
+ #[cfg(all(
+     not(linux_raw),
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "makos"),
+     not(target_env = "gnu"),
+     not(target_env = "uclibc")
+ ))]

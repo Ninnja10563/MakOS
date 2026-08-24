@@ -1,0 +1,104 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget/makos: target app-shell wake through futex condvar
+
+`ScheduleNativeEventCallback` runs on arbitrary Gecko threads. Atomic flag
+alone cannot wake main native loop. Pipe wake is also unsuitable until MakOS
+tracks descriptor-specific poll waiters: every pipe write currently wakes all
+I/O waiters and creates a Firefox thundering herd. Use pthread condvar backed
+by existing targeted futex wait/wake. Guard pending predicate under mutex to
+avoid lost wake; retain 10 ms deadline for non-fd surface input.
+
+diff --git a/widget/makos/nsAppShell.h b/widget/makos/nsAppShell.h
+--- a/widget/makos/nsAppShell.h
++++ b/widget/makos/nsAppShell.h
+@@ -5,6 +5,8 @@
+ #ifndef widget_makos_nsAppShell_h
+ #define widget_makos_nsAppShell_h
+ 
++#include <pthread.h>
++
+ #include "mozilla/Atomics.h"
+ #include "nsBaseAppShell.h"
+ 
+@@ -15,8 +17,13 @@ class nsAppShell final : public nsBaseAppShell {
+   bool ProcessNextNativeEvent(bool aMayWait) override;
+ 
+  private:
+-  ~nsAppShell() override = default;
++  ~nsAppShell() override;
++  void WaitForWake();
+   mozilla::Atomic<bool> mNativeCallbackPending{false};
++  mozilla::Atomic<bool> mWakeSignalReported{false};
++  mozilla::Atomic<bool> mWakeDrainReported{false};
++  pthread_mutex_t mWakeMutex = PTHREAD_MUTEX_INITIALIZER;
++  pthread_cond_t mWakeCondition = PTHREAD_COND_INITIALIZER;
+ };
+ 
+ #endif  // widget_makos_nsAppShell_h
+diff --git a/widget/makos/nsAppShell.cpp b/widget/makos/nsAppShell.cpp
+--- a/widget/makos/nsAppShell.cpp
++++ b/widget/makos/nsAppShell.cpp
+@@ -7,11 +7,15 @@
+ 
+ #include "HeadlessScreenHelper.h"
+ #include "MakOSWindow.h"
++#include "mozilla/Printf.h"
+ #include "mozilla/UniquePtr.h"
+ #include "mozilla/widget/ScreenManager.h"
+ #include "nsXULAppAPI.h"
+ 
+ nsresult nsAppShell::Init() {
++  printf_stderr(
++      "MAKOS_APPSHELL_WAKE_OK transport=pthread-condvar-futex "
++      "targeted=1 bounded_wait_ms=10\n");
+   if (XRE_IsParentProcess()) {
+     mozilla::widget::ScreenManager::GetSingleton().SetHelper(
+         mozilla::MakeUnique<mozilla::widget::HeadlessScreenHelper>());
+@@ -20,8 +24,37 @@ nsresult nsAppShell::Init() {
+   return nsBaseAppShell::Init();
+ }
+ 
++nsAppShell::~nsAppShell() {
++  (void)pthread_cond_destroy(&mWakeCondition);
++  (void)pthread_mutex_destroy(&mWakeMutex);
++}
++
+ void nsAppShell::ScheduleNativeEventCallback() {
+   mNativeCallbackPending = true;
++  (void)pthread_mutex_lock(&mWakeMutex);
++  (void)pthread_cond_signal(&mWakeCondition);
++  (void)pthread_mutex_unlock(&mWakeMutex);
++  if (!mWakeSignalReported.exchange(true)) {
++    printf_stderr("MAKOS_APPSHELL_WAKE_SIGNAL source=gecko-task targeted=1\n");
++  }
++}
++
++void nsAppShell::WaitForWake() {
++  timespec deadline{};
++  (void)clock_gettime(CLOCK_REALTIME, &deadline);
++  deadline.tv_nsec += 10 * 1000 * 1000;
++  if (deadline.tv_nsec >= 1000 * 1000 * 1000) {
++    deadline.tv_sec += 1;
++    deadline.tv_nsec -= 1000 * 1000 * 1000;
++  }
++  (void)pthread_mutex_lock(&mWakeMutex);
++  if (!mNativeCallbackPending) {
++    (void)pthread_cond_timedwait(&mWakeCondition, &mWakeMutex, &deadline);
++  }
++  (void)pthread_mutex_unlock(&mWakeMutex);
++  if (mNativeCallbackPending && !mWakeDrainReported.exchange(true)) {
++    printf_stderr("MAKOS_APPSHELL_WAKE_DRAIN main-thread=1 targeted=1\n");
++  }
+ }
+ 
+ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
+@@ -34,8 +67,7 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
+     processed = true;
+   }
+   if (!processed && aMayWait) {
+-    const timespec delay{0, 10 * 1000 * 1000};
+-    (void)nanosleep(&delay, nullptr);
++    WaitForWake();
+     processed = mozilla::widget::ProcessNextMakOSWindowEvent();
+     if (mNativeCallbackPending.exchange(false)) {
+       NativeEventCallback();

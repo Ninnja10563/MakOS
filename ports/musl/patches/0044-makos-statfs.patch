@@ -1,0 +1,79 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -18,6 +18,7 @@
+ #include <sys/resource.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
++#include <sys/statfs.h>
+ #include <termios.h>
+ #include <time.h>
+ #include <unistd.h>
+@@ -38,6 +39,8 @@ enum linux_aarch64_syscall {
+ 	L_mkdirat = 34,
+ 	L_unlinkat = 35,
+ 	L_renameat = 38,
++	L_statfs = 43,
++	L_fstatfs = 44,
+ 	L_ftruncate = 46,
+ 	L_fallocate = 47,
+ 	L_faccessat = 48,
+@@ -143,6 +146,7 @@ enum makos_syscall {
+ 	M_compat_missing = 118,
+ 	M_process_exit = 119,
+ 	M_mremap_probe = 120,
++	M_filesystem_stats = 121,
+ };
+ 
+ struct makos_metadata {
+@@ -239,6 +243,26 @@ static long makos_bool_result(long result, int error)
+ 	return result == 1 ? 0 : -error;
+ }
+ 
++static long makos_fill_statfs(struct statfs *output)
++{
++	unsigned long long values[5];
++	long result;
++	if (!output) return -EFAULT;
++	result = makos_raw(M_filesystem_stats, (long)values, 0, 0, 0, 0, 0);
++	if (result < 0) return result;
++	memset(output, 0, sizeof *output);
++	output->f_type = 0x4d414b34UL;
++	output->f_bsize = values[0];
++	output->f_blocks = values[1];
++	output->f_bfree = values[2];
++	output->f_bavail = values[2];
++	output->f_files = values[3];
++	output->f_ffree = values[4];
++	output->f_namelen = 255;
++	output->f_frsize = values[0];
++	return 0;
++}
++
+ static long makos_getsockopt(long fd, long level, long option,
+ 	void *value, socklen_t *length)
+ {
+@@ -715,6 +739,23 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		result = makos_raw(M_stat, b, length, (long)&metadata, 0, 0, 0);
+ 		return result == 1 ? -EINVAL : -ENOENT;
+ 	}
++	case L_statfs:
++	{
++		struct makos_metadata metadata;
++		length = path_length((const char *)a);
++		if (!length) return -ENOENT;
++		if (length >= 4096) return -ENAMETOOLONG;
++		result = makos_raw(M_stat, a, length, (long)&metadata, 0, 0, 0);
++		if (result != 1) return -ENOENT;
++		return makos_fill_statfs((struct statfs *)b);
++	}
++	case L_fstatfs:
++	{
++		struct makos_metadata metadata;
++		result = makos_raw(M_fstat_metadata, a, (long)&metadata, 0, 0, 0, 0);
++		if (result != 1) return -EBADF;
++		return makos_fill_statfs((struct statfs *)b);
++	}
+ 	case L_newfstatat:
+ 		return makos_fstatat(a, (const char *)b, (struct kstat *)c, d);
+ 	case L_fstat:

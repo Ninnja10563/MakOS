@@ -1,0 +1,36 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -418,7 +418,6 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		}
+ 	case L_pipe2:
+ 		if (b & ~(O_NONBLOCK | O_CLOEXEC)) return -EINVAL;
+-		if (!(b & O_NONBLOCK)) return -ENOTSUP;
+ 		return makos_raw(M_pipe2, a, b, 0, 0, 0, 0);
+ 	case L_getdents64:
+ 		return makos_getdents(a, (unsigned char *)b, c);
+@@ -432,11 +431,19 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		if (b < 0) return -EINVAL;
+ 		return makos_raw(M_ftruncate, a, b, 0, 0, 0, 0);
+ 	case L_ppoll:
++	{
++		long milliseconds = -1;
+ 		if (d) return -ENOTSUP;
+-		if (!c) return -ENOTSUP;
+-		if (((const struct timespec *)c)->tv_sec ||
+-		    ((const struct timespec *)c)->tv_nsec)
+-			return -ENOTSUP;
+-		return makos_raw(M_poll, a, b, 0, 0, 0, 0);
++		if (c) {
++			const struct timespec *timeout = (const struct timespec *)c;
++			if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 ||
++			    timeout->tv_nsec >= 1000000000L ||
++			    timeout->tv_sec > (LONG_MAX - 999) / 1000)
++				return -EINVAL;
++			milliseconds = timeout->tv_sec * 1000 +
++				(timeout->tv_nsec + 999999L) / 1000000L;
++		}
++		return makos_raw(M_poll, a, b, milliseconds, 0, 0, 0);
++	}
+ 	case L_newfstatat:
+ 		return makos_fstatat(a, (const char *)b, (struct kstat *)c, d);

@@ -1,0 +1,9 @@
+/build/
+/target/
+**/target/
+/outputs/
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+*.vars.fd

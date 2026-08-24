@@ -1,0 +1,20 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -178,6 +178,7 @@ enum makos_syscall {
+ 	M_thread_set_scheduler = 116,
+ 	M_compat_missing = 118,
+ 	M_process_exit = 119,
++	M_mremap_probe = 120,
+ };
+ 
+ struct makos_metadata {
+@@ -929,7 +930,7 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 	case L_madvise:
+ 		return makos_raw(M_madvise, a, b, c, 0, 0, 0);
+ 	case L_mremap:
+-		return -ENOMEM;
++		return makos_raw(M_mremap_probe, a, b, c, d, e, 0);
+ 	case L_membarrier:
+ 		if (a == 0) return 8 | 16;
+ 		if ((a == 8 || a == 16) && !b) {

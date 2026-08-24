@@ -1,0 +1,20 @@
+cargo-features = ["profile-rustflags"]
+
+[package]
+name = "makos-rust-std-probe"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+# Cargo's build-std crates inherit this workspace's profile.  panic_abort must
+# carry abort metadata even while std and panic_unwind retain unwind support.
+[profile.dev.package.panic_abort]
+rustflags = ["-Cpanic=abort"]
+
+[profile.release.package.panic_abort]
+rustflags = ["-Cpanic=abort"]
+
+[[bin]]
+name = "makos-rust-std-probe"
+path = "main.rs"

@@ -1,0 +1,14 @@
+diff --git a/gfx/angle/checkout/src/common/platform.h b/gfx/angle/checkout/src/common/platform.h
+index 39a50eeb0a6a..e5d5a8652f4d 100644
+--- a/gfx/angle/checkout/src/common/platform.h
++++ b/gfx/angle/checkout/src/common/platform.h
+@@ -17,6 +17,9 @@
+ #elif defined(__APPLE__)
+ #    define ANGLE_PLATFORM_APPLE 1
+ #    define ANGLE_PLATFORM_POSIX 1
++#elif defined(__makos__)
++#    define ANGLE_PLATFORM_MAKOS 1
++#    define ANGLE_PLATFORM_POSIX 1
+ #elif defined(ANDROID)
+ #    define ANGLE_PLATFORM_ANDROID 1
+ #    define ANGLE_PLATFORM_POSIX 1

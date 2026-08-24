@@ -1,0 +1,24 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -74,6 +74,7 @@ enum linux_aarch64_syscall {
+ 	L_clock_getres = 114,
+ 	L_clock_nanosleep = 115,
+ 	L_sched_setscheduler = 119,
++	L_sched_getparam = 121,
+ 	L_sched_getaffinity = 123,
+ 	L_sched_yield = 124,
+ 	L_rt_sigaction = 134,
+@@ -1012,6 +1013,12 @@ hidden long __makos_syscall_dispatch(long n, long a, long b, long c,
+ 		if (!c) return -EINVAL;
+ 		return makos_raw(M_thread_set_scheduler, a, b,
+ 			((const struct sched_param *)c)->sched_priority, 0, 0, 0);
++	case L_sched_getparam:
++		if (!b) return -EINVAL;
++		result = makos_raw(M_thread_set_scheduler, a, SCHED_OTHER, 0, 0, 0, 0);
++		if (result < 0) return result;
++		((struct sched_param *)b)->sched_priority = 0;
++		return 0;
+ 	case L_brk:
+ 		result = makos_raw(M_brk, a, 0, 0, 0, 0, 0);
+ 		return result == -1 ? 0 : result;

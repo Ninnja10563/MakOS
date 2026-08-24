@@ -1,0 +1,18 @@
+# Cross answers must describe implemented MakOS semantics, never host values.
+ac_cv_file__dev_ptmx=no
+ac_cv_file__dev_ptc=no
+ac_cv_func_getentropy=no
+ac_cv_func_getrandom=yes
+# Guest-tested musl pthreads use MakOS clone/futex/TLS. Cross configure cannot
+# execute its probe, so record that proven target result explicitly.
+ac_cv_pthread_is_default=yes
+# libc exports several Linux APIs whose MakOS syscall semantics do not exist.
+# Keep CPython from advertising them merely because target link succeeds.
+ac_cv_func_eventfd=no
+ac_cv_func_memfd_create=no
+ac_cv_func_timerfd_create=no
+ac_cv_func_setns=no
+ac_cv_func_unshare=no
+ac_cv_func_sched_setaffinity=no
+ac_cv_func_posix_spawn=no
+ac_cv_func_posix_spawnp=no

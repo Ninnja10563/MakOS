@@ -1,0 +1,26 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -469,8 +469,8 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 	if (dirfd != AT_FDCWD) return -ENOTSUP;
+ 	if (flags & ~supported) return -ENOTSUP;
+ 	access = flags & O_ACCMODE;
+-	if (access == O_RDWR) return -ENOTSUP;
+-	if (access == O_WRONLY && !(flags & O_TRUNC)) return -ENOTSUP;
++	if (access != O_RDONLY && access != O_WRONLY && access != O_RDWR)
++		return -EINVAL;
+ 	if (access == O_RDONLY && (flags & O_TRUNC)) return -EINVAL;
+ 	length = path_length(path);
+ 	if (!length) return -ENOENT;
+@@ -480,8 +480,8 @@ static long makos_openat(long dirfd, const char *path, long flags)
+ 	if (flags & O_CREAT)
+ 		(void)makos_raw(M_create, (long)path, length, 0, 0, 0, 0);
+-	result = makos_raw(M_open, (long)path, length, access == O_WRONLY,
+-		0, 0, 0);
+-	result = makos_path_result(result, access == O_WRONLY ? EACCES : ENOENT);
++	result = makos_raw(M_open, (long)path, length, access,
++		(flags & O_TRUNC) ? 1 : 2, 0, 0);
++	result = makos_path_result(result, access != O_RDONLY ? EACCES : ENOENT);
+ 	if (result < 0) return result;
+ 	if (flags & O_DIRECTORY) {
+ 		struct kstat metadata;

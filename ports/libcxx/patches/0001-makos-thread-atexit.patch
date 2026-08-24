@@ -1,0 +1,25 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] libc++abi: provide thread-local destructors on MakOS
+
+MakOS uses libc++abi's portable pthread-key implementation until libc gains
+__cxa_thread_atexit_impl. Build config forces truthful absence probe.
+
+diff --git a/libcxxabi/src/cxa_thread_atexit.cpp b/libcxxabi/src/cxa_thread_atexit.cpp
+--- a/libcxxabi/src/cxa_thread_atexit.cpp
++++ b/libcxxabi/src/cxa_thread_atexit.cpp
+@@ -106,7 +106,7 @@ namespace {
+ 
+ #endif // HAVE___CXA_THREAD_ATEXIT_IMPL
+ 
+-#if defined(__linux__) || defined(__Fuchsia__)
++#if defined(__linux__) || defined(__Fuchsia__) || defined(__makos__)
+ extern "C" {
+ 
+   _LIBCXXABI_FUNC_VIS int __cxa_thread_atexit(Dtor dtor, void* obj, void* dso_symbol) throw() {
+@@ -142,5 +142,5 @@ extern "C" {
+ #endif // HAVE___CXA_THREAD_ATEXIT_IMPL
+   }
+ } // extern "C"
+-#endif // defined(__linux__) || defined(__Fuchsia__)
++#endif // defined(__linux__) || defined(__Fuchsia__) || defined(__makos__)
+ } // namespace __cxxabiv1

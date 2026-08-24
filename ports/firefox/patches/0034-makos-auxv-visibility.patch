@@ -1,0 +1,19 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] config: wrap sys/auxv.h for MakOS
+
+MakOS uses musl getauxval for executable discovery and AArch64 feature probes.
+Route sys/auxv.h through Firefox's generated system wrapper so declarations
+retain default visibility when source files start under gcc_hidden.h.
+
+diff --git a/config/system-headers.mozbuild b/config/system-headers.mozbuild
+--- a/config/system-headers.mozbuild
++++ b/config/system-headers.mozbuild
+@@ -1377,7 +1377,7 @@ if CONFIG["MOZ_WAYLAND"]:
+         "wayland-util.h",
+     ]
+ 
+-if CONFIG["OS_TARGET"] in ("Android", "Linux", "FreeBSD"):
++if CONFIG["OS_TARGET"] in ("Android", "Linux", "FreeBSD", "MakOS"):
+     system_headers += [
+         "sys/auxv.h",
+     ]

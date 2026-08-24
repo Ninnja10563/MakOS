@@ -1,0 +1,31 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -70,6 +70,8 @@
+ 	L_readv = 65,
+ 	L_writev = 66,
+ 	L_set_tid_address = 96,
++	L_set_robust_list = 99,
++	L_get_robust_list = 100,
+ 	L_nanosleep = 101,
+ 	L_futex = 98,
+ 	L_exit = 93,
+@@ -209,6 +211,7 @@
+ 	M_fstat_extended = 133,
+ 	M_socket_name = 134,
+ 	M_socket_bind = 135,
++	M_robust_list = 141,
+ };
+ 
+ struct makos_metadata {
+@@ -1231,6 +1234,10 @@
+ 		return result == -1 ? 0 : result;
+ 	case L_set_tid_address:
+ 		return makos_raw(M_set_tid_address, a, 0, 0, 0, 0, 0);
++	case L_set_robust_list:
++		return makos_raw(M_robust_list, 0, a, b, 0, 0, 0);
++	case L_get_robust_list:
++		return makos_raw(M_robust_list, 1, a, b, c, 0, 0);
+ 	case L_futex:
+ 		return makos_raw(M_futex, a, b, c, d, e, f);
+ 	case L_gettid:

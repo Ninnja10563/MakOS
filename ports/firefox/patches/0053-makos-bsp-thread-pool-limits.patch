@@ -1,0 +1,37 @@
+diff --git a/dom/indexedDB/ActorsParent.cpp b/dom/indexedDB/ActorsParent.cpp
+--- a/dom/indexedDB/ActorsParent.cpp
++++ b/dom/indexedDB/ActorsParent.cpp
+@@ -303,7 +303,13 @@ const uint32_t kSQLiteGrowthIncrement = kSQLitePageSizeOverride * 2;
+ // The maximum number of threads that can be used for database activity at a
+ // single time. Please keep in sync with the constants in
+ // test_connection_idle_maintenance*.js tests
++#if defined(MOZ_WIDGET_MAKOS)
++// MakOS userspace currently runs on one BSP. Avoid a 20-thread cold-start
++// burst while preserving concurrent connection progress.
++const uint32_t kMaxConnectionThreadCount = 2;
++#else
+ const uint32_t kMaxConnectionThreadCount = 20;
++#endif
+ 
+ static_assert(kMaxConnectionThreadCount, "Must have at least one thread!");
+ 
+diff --git a/netwerk/base/nsStreamTransportService.cpp b/netwerk/base/nsStreamTransportService.cpp
+--- a/netwerk/base/nsStreamTransportService.cpp
++++ b/netwerk/base/nsStreamTransportService.cpp
+@@ -260,9 +260,16 @@ nsresult nsStreamTransportService::Init() {
+ 
+   // Configure the pool
+   mPool->SetName("StreamTrans"_ns);
++#if defined(MOZ_WIDGET_MAKOS)
++  // MakOS userspace is BSP-only. Bound cold-start contention while retaining
++  // enough workers for concurrent DNS, package, and HTTPS stream activity.
++  mPool->SetThreadLimit(4);
++  mPool->SetIdleThreadLimit(1);
++#else
+   // TODO: Make these settings configurable.
+   mPool->SetThreadLimit(25);
+   mPool->SetIdleThreadLimit(4);
++#endif
+   mPool->SetIdleThreadMaximumTimeout(30 * 1000);
+   mPool->SetIdleThreadGraceTimeout(500);
+   MOZ_POP_THREAD_SAFETY

@@ -1,0 +1,20 @@
+# One target-side gate per line. Host-only Python/Rust/Node/build tools excluded.
+general-aarch64-elf-exec-argv-env-auxv
+dynamic-linker-shared-libraries-dlopen-tls
+posix-libc-libm-libdl-libpthread-libcxx
+pthreads-tls-futex-condvar-rwlock-once
+signals-sigaction-sigaltstack-process-groups
+mmap-munmap-mprotect-madvise-shared-memory
+large-files-directories-rename-fsync-profile-storage
+fd-dup-pipe-socketpair-poll-select-readiness
+tcp-udp-ipv4-ipv6-dns-nonblocking-sockets
+aarch64-jit-wx-transitions-icache-flush-fault-handling
+nspr-makos-process-thread-file-socket-port
+nss-makos-time-files-entropy-dynamic-library-port
+gecko-makos-build-configure-target-detection
+widget-makos-window-events-cursor-clipboard-ime
+graphics-shared-surfaces-fonts-skia-webrender-backend
+cubeb-makos-audio-backend
+multiprocess-launch-ipc-shared-memory-sandbox
+ca-certificate-store-profile-permissions
+minimum-runtime-memory-and-scalable-virtual-address-space

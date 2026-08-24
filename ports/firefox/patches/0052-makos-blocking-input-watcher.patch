@@ -1,0 +1,276 @@
+diff --git a/widget/makos/MakOSSurface.h b/widget/makos/MakOSSurface.h
+index 40d9707..b0bbc2e 100644
+--- a/widget/makos/MakOSSurface.h
++++ b/widget/makos/MakOSSurface.h
+@@ -55,6 +55,9 @@ bool PresentSurface(SurfaceHandle aSurface);
+ bool HideSurface(SurfaceHandle aSurface);
+ bool DestroySurface(SurfaceHandle aSurface);
+ bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent);
++// Blocking dequeue for a dedicated widget watcher thread. The main Gecko
++// native pump must retain ReadSurfaceEvent's nonblocking startup semantics.
++bool WaitSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent);
+ void YieldThread();
+ 
+ }  // namespace mozilla::widget::makos
+diff --git a/widget/makos/MakOSSurface.cpp b/widget/makos/MakOSSurface.cpp
+index 2bffa75..ca02626 100644
+--- a/widget/makos/MakOSSurface.cpp
++++ b/widget/makos/MakOSSurface.cpp
+@@ -18,6 +18,7 @@ enum class Syscall : uint64_t {
+   SurfaceReadEvent = 60,
+   SurfaceBlit = 113,
+   SurfaceDestroy = 123,
++  SurfaceWaitEvent = 140,
+ };
+ 
+ uint64_t Svc6(Syscall aNumber, uint64_t aFirst, uint64_t aSecond,
+@@ -105,6 +106,12 @@ bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent) {
+          sizeof(aEvent);
+ }
+ 
++bool WaitSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent) {
++  return Svc4(Syscall::SurfaceWaitEvent, aSurface,
++              reinterpret_cast<uint64_t>(&aEvent), sizeof(aEvent), 0) ==
++         sizeof(aEvent);
++}
++
+ void YieldThread() { (void)Svc4(Syscall::Yield, 0, 0, 0, 0); }
+ 
+ }  // namespace mozilla::widget::makos
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+index 8efb7ab..12f07d5 100644
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -6,6 +6,10 @@
+ #include "HeadlessWidget.h"
+ #include "MakOSSurface.h"
+ #include "MakOSWindow.h"
++#include <pthread.h>
++#include <time.h>
++
++#include "mozilla/Atomics.h"
+ #include "mozilla/TextEvents.h"
+ #include "mozilla/TimeStamp.h"
+ #include "mozilla/Printf.h"
+@@ -14,12 +18,21 @@
+ #include "mozilla/layers/WebRenderLayerManager.h"
+ #include "gfxContext.h"
+ #include "nsIWidget.h"
++#include "nsThreadUtils.h"
+ 
+ namespace mozilla::widget {
+ 
+ class MakOSWindow;
+ static MakOSWindow* gTopLevelWindow;
+ 
++static uint64_t MonotonicNanoseconds() {
++  timespec value{};
++  if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) {
++    return 0;
++  }
++  return uint64_t(value.tv_sec) * 1000 * 1000 * 1000 + value.tv_nsec;
++}
++
+ struct MakOSKeySpec {
+   uint32_t keyCode = 0;
+   KeyNameIndex keyName = KEY_NAME_INDEX_Unidentified;
+@@ -164,6 +177,12 @@ static void DispatchMakOSKey(nsIWidget* aWidget, uint32_t aKey) {
+ }
+ 
+ class MakOSWindow final : public HeadlessWidget {
++  struct QueuedSurfaceEvent {
++    makos::SurfaceEvent event{};
++    uint64_t sequence = 0;
++    uint64_t enqueuedNs = 0;
++  };
++
+  public:
+   NS_INLINE_DECL_REFCOUNTING_INHERITED(MakOSWindow, HeadlessWidget)
+ 
+@@ -189,6 +208,20 @@ class MakOSWindow final : public HeadlessWidget {
+       return NS_ERROR_FAILURE;
+     }
+     gTopLevelWindow = this;
++    mWatcherSurface = mSurface;
++    mEventWatcherRunning = true;
++    if (pthread_create(&mEventWatcher, nullptr, EventWatcherEntry, this) != 0) {
++      mEventWatcherRunning = false;
++      gTopLevelWindow = nullptr;
++      (void)makos::DestroySurface(mSurface);
++      mSurface = makos::kInvalidSurface;
++      HeadlessWidget::Destroy();
++      return NS_ERROR_FAILURE;
++    }
++    mEventWatcherStarted = true;
++    printf_stderr(
++        "MAKOS_WIDGET_INPUT_WAKE_OK transport=blocking-surface-wait "
++        "watcher=1 main_dispatch=gecko-runnable queue=256 ordered=1\n");
+     makos::FillSurface(mSurface, 0xfff0f0f0, 0, 0, rect.Width(),
+                        rect.Height());
+     return NS_OK;
+@@ -198,10 +231,24 @@ class MakOSWindow final : public HeadlessWidget {
+     if (gTopLevelWindow == this) {
+       gTopLevelWindow = nullptr;
+     }
++    mEventWatcherRunning = false;
++    (void)pthread_mutex_lock(&mEventQueueMutex);
++    (void)pthread_cond_broadcast(&mEventQueueNotFull);
++    (void)pthread_mutex_unlock(&mEventQueueMutex);
+     if (mSurface != makos::kInvalidSurface) {
+       makos::DestroySurface(mSurface);
+       mSurface = makos::kInvalidSurface;
+     }
++    if (mEventWatcherStarted) {
++      (void)pthread_join(mEventWatcher, nullptr);
++      mEventWatcherStarted = false;
++    }
++    (void)pthread_mutex_lock(&mEventQueueMutex);
++    mEventQueueHead = 0;
++    mEventQueueTail = 0;
++    mEventQueueCount = 0;
++    mMainDrainScheduled = false;
++    (void)pthread_mutex_unlock(&mEventQueueMutex);
+     HeadlessWidget::Destroy();
+   }
+ 
+@@ -288,14 +335,26 @@ class MakOSWindow final : public HeadlessWidget {
+     if (mSurface == makos::kInvalidSurface) {
+       return false;
+     }
+-    makos::SurfaceEvent event{};
+-    if (!makos::ReadSurfaceEvent(mSurface, event)) {
++    QueuedSurfaceEvent queued{};
++    if (!PopSurfaceEvent(queued)) {
+       // Drain native input/resize/close events before painting. A key dispatch
+       // invalidates the window; painting before the next queued key serialized
+       // every character behind a full synchronous Skia paint and could
+       // overflow MakOS's bounded surface-event queue during normal typing.
+       return ProcessPendingPaint();
+     }
++    const makos::SurfaceEvent& event = queued.event;
++    if (mDispatchTraceCount++ < 64) {
++      uint64_t now = MonotonicNanoseconds();
++      uint64_t latencyMs = queued.enqueuedNs && now >= queued.enqueuedNs
++                               ? (now - queued.enqueuedNs) / (1000 * 1000)
++                               : 0;
++      printf_stderr(
++          "MAKOS_WIDGET_EVENT_DISPATCH seq=%llu kind=%u key=%u "
++          "enqueue_to_main_ms=%llu\n",
++          static_cast<unsigned long long>(queued.sequence), event.kind,
++          event.key, static_cast<unsigned long long>(latencyMs));
++    }
+     switch (static_cast<makos::SurfaceEventKind>(event.kind)) {
+       case makos::SurfaceEventKind::Pointer: {
+         LayoutDeviceIntPoint offset = WidgetToScreenOffset();
+@@ -361,6 +420,89 @@ class MakOSWindow final : public HeadlessWidget {
+   }
+ 
+  private:
++  static constexpr size_t kEventQueueCapacity = 256;
++
++  static void* EventWatcherEntry(void* aWindow) {
++    static_cast<MakOSWindow*>(aWindow)->EventWatcherLoop();
++    return nullptr;
++  }
++
++  void EventWatcherLoop() {
++    while (mEventWatcherRunning) {
++      makos::SurfaceEvent event{};
++      makos::SurfaceHandle surface = mWatcherSurface;
++      if (surface == makos::kInvalidSurface ||
++          !makos::WaitSurfaceEvent(surface, event)) {
++        break;
++      }
++      if (!mEventWatcherRunning) {
++        break;
++      }
++
++      bool scheduleDrain = false;
++      uint64_t sequence = 0;
++      (void)pthread_mutex_lock(&mEventQueueMutex);
++      while (mEventQueueCount == kEventQueueCapacity &&
++             mEventWatcherRunning) {
++        (void)pthread_cond_wait(&mEventQueueNotFull, &mEventQueueMutex);
++      }
++      if (mEventWatcherRunning) {
++        sequence = ++mEventSequence;
++        mEventQueue[mEventQueueHead] = {
++            event, sequence, MonotonicNanoseconds()};
++        mEventQueueHead = (mEventQueueHead + 1) % kEventQueueCapacity;
++        ++mEventQueueCount;
++        if (!mMainDrainScheduled.exchange(true)) {
++          scheduleDrain = true;
++        }
++      }
++      (void)pthread_mutex_unlock(&mEventQueueMutex);
++
++      if (!mEventWatcherRunning) {
++        break;
++      }
++      if (mEnqueueTraceCount++ < 64) {
++        printf_stderr(
++            "MAKOS_WIDGET_EVENT_ENQUEUE seq=%llu kind=%u key=%u "
++            "source=blocking-watcher\n",
++            static_cast<unsigned long long>(sequence), event.kind, event.key);
++      }
++      if (scheduleDrain) {
++        RefPtr<MakOSWindow> self(this);
++        nsresult result = NS_DispatchToMainThread(NS_NewRunnableFunction(
++            "MakOSWindow::DrainSurfaceEvents",
++            [self]() { self->DrainSurfaceEvents(); }));
++        if (NS_FAILED(result)) {
++          mMainDrainScheduled = false;
++          printf_stderr(
++              "MAKOS_WIDGET_EVENT_DISPATCH_FAIL seq=%llu result=0x%08x\n",
++              static_cast<unsigned long long>(sequence),
++              static_cast<unsigned>(result));
++        }
++      }
++    }
++  }
++
++  bool PopSurfaceEvent(QueuedSurfaceEvent& aQueued) {
++    (void)pthread_mutex_lock(&mEventQueueMutex);
++    if (!mEventQueueCount) {
++      mMainDrainScheduled = false;
++      (void)pthread_mutex_unlock(&mEventQueueMutex);
++      return false;
++    }
++    aQueued = mEventQueue[mEventQueueTail];
++    mEventQueueTail = (mEventQueueTail + 1) % kEventQueueCapacity;
++    --mEventQueueCount;
++    (void)pthread_cond_signal(&mEventQueueNotFull);
++    (void)pthread_mutex_unlock(&mEventQueueMutex);
++    return true;
++  }
++
++  void DrainSurfaceEvents() {
++    while (ProcessNextSurfaceEvent()) {
++    }
++  }
++
+   bool ProcessPendingPaint() {
+     nsIWidgetListener* listener =
+         mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
+@@ -440,7 +582,21 @@ class MakOSWindow final : public HeadlessWidget {
+   uint32_t mPaintTraceCount = 0;
+   uint32_t mPaintCycleTraceCount = 0;
+   uint32_t mKeyTraceCount = 0;
++  mozilla::Atomic<uint32_t> mEnqueueTraceCount{0};
++  uint32_t mDispatchTraceCount = 0;
+   uint32_t mPointerButtons = 0;
++  mozilla::Atomic<bool> mEventWatcherRunning{false};
++  mozilla::Atomic<bool> mMainDrainScheduled{false};
++  pthread_t mEventWatcher{};
++  bool mEventWatcherStarted = false;
++  makos::SurfaceHandle mWatcherSurface = makos::kInvalidSurface;
++  pthread_mutex_t mEventQueueMutex = PTHREAD_MUTEX_INITIALIZER;
++  pthread_cond_t mEventQueueNotFull = PTHREAD_COND_INITIALIZER;
++  QueuedSurfaceEvent mEventQueue[kEventQueueCapacity]{};
++  size_t mEventQueueHead = 0;
++  size_t mEventQueueTail = 0;
++  size_t mEventQueueCount = 0;
++  uint64_t mEventSequence = 0;
+ };
+ 
+ bool ProcessNextMakOSWindowEvent() {
