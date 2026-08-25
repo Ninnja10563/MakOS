@@ -4130,13 +4130,19 @@ pub fn spawn_musl_probe() -> Option<u64> {
     Some(pid)
 }
 
-pub fn spawn_toolchain() -> Option<u64> {
+pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool) -> Option<u64> {
     let parent_pid = current_pid();
-    if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
+    if parent_pid == 0
+        || current_app_role() != ProcessRole::Shell
+        || !manifest_path.starts_with(b"/home/user/")
+        || manifest_path.len() <= b"/home/user/".len()
+        || manifest_path.len() >= crate::vfs::MAX_PATH_BYTES
+        || manifest_path.contains(&0)
+    {
         return None;
     }
-    let argv: [&[u8]; 1] = [b"/system/aarch64-toolchain"];
-    let envp: [&[u8]; 1] = [b"MODE=assemble"];
+    let argv: [&[u8]; 2] = [b"/system/aarch64-toolchain", manifest_path];
+    let envp: [&[u8]; 1] = [if fixture { b"MODE=fixture" } else { b"MODE=build" }];
     let (pid, process) = spawn_process_sysv(
         parent_pid,
         TOOLCHAIN_ELF,
@@ -4153,11 +4159,12 @@ pub fn spawn_toolchain() -> Option<u64> {
         return None;
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid={} parent={} elf=1 el=0 entry={:#x} ttbr0={:#x} source=guest-file",
+        "MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid={} parent={} elf=1 el=0 entry={:#x} ttbr0={:#x} source=guest-file startup=sysv argc=2 mode={}",
         pid,
         parent_pid,
         process.entry,
         process.root,
+        if fixture { "fixture" } else { "build" },
     );
     Some(pid)
 }

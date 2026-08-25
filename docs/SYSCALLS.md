@@ -236,6 +236,13 @@ Selector 15 accepts a bounded `/home/user/` path and launches packaged upstream
 GNU nano as a dynamic AArch64 PIE. Kernel assigns a new foreground process
 group, bounded SysV argv/env, session credentials, file-write/console-only
 capabilities, then the shell waits/reaps and restores its foreground group.
+Selector 16 accepts a nonempty `/home/user/` manifest path in arguments two and
+three plus a boolean fixture flag in argument four. The kernel validates the
+entire readable path, rejects non-home/NUL/oversize paths and flags above one,
+then copies `/system/aarch64-toolchain` plus that path into the EL0 toolchain's
+child-owned SysV `argv`. Flag zero supplies `MODE=build` and never seeds inputs;
+flag one supplies `MODE=fixture`, which is reserved for the deterministic
+`selfhost-aarch64` gate.
 
 AArch64 native entry uses a canonical 16-byte-aligned SysV stack: `argc`,
 `argv[]`, NULL, `envp[]`, NULL, then auxiliary-vector pairs ending in

@@ -408,8 +408,11 @@ static void run_musl_probe(void) {
 }
 
 static void run_selfhost_probe(void) {
+    static const char manifest_path[] = "/home/user/generated.build";
     static const char output_path[] = "/home/user/generated-aarch64.elf";
-    uint64_t toolchain = syscall4(SYS_PROCESS_SPAWN, 16, 0, 0, 0);
+    uint64_t toolchain = syscall4(SYS_PROCESS_SPAWN, 16,
+                                  (uintptr_t)manifest_path,
+                                  sizeof(manifest_path) - 1, 1);
     if (toolchain == UINT64_MAX) {
         write_text("selfhost-aarch64: toolchain launch failed\n");
         return;
@@ -471,9 +474,55 @@ static void run_selfhost_probe(void) {
     while ((status = syscall4(SYS_PROCESS_WAIT, generated, 0, 0, 0)) == UINT64_MAX)
         syscall4(SYS_YIELD, 0, 0, 0, 0);
     if (status == 42)
-        write_text("MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=3 languages=aarch64-asm,c-subset-v1 compiler=guest-native assembler=guest-native linker=guest-native objects=3 object_format=elf64-et-rel relocations=R_AARCH64_CALL26:3 symbols=_start,answer,adjust,combine build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3 c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 c_abi=aapcs64-int32-pointer64 c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815 persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17 malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1 output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3 executed=2 status=42\n");
+        write_text("MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=3 languages=aarch64-asm,c-subset-v1 compiler=guest-native assembler=guest-native linker=guest-native objects=3 object_format=elf64-et-rel relocations=R_AARCH64_CALL26:3 symbols=_start,answer,adjust,combine build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3 toolchain_startup=sysv manifest_arg=1 c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 c_abi=aapcs64-int32-pointer64 c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815 persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17 malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1 output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3 executed=2 status=42\n");
     else
         write_text("selfhost-aarch64: startup-vector program failed\n");
+}
+
+static void run_makbuild(const uint8_t *name, size_t name_length) {
+    static const char prefix[] = "/home/user/";
+    uint8_t path[97] = {0};
+    size_t path_length = 0;
+    int absolute = name_length >= sizeof(prefix) - 1;
+    for (size_t index = 0; absolute && index < sizeof(prefix) - 1; ++index)
+        absolute = name[index] == (uint8_t)prefix[index];
+    if (absolute) {
+        if (name_length >= sizeof(path)) {
+            write_text("makbuild: manifest path too long\n");
+            return;
+        }
+        for (size_t index = 0; index < name_length; ++index)
+            path[index] = name[index];
+        path_length = name_length;
+    } else {
+        if (!name_length || sizeof(prefix) - 1 + name_length >= sizeof(path)) {
+            write_text("makbuild: invalid manifest path\n");
+            return;
+        }
+        for (size_t index = 0; index < sizeof(prefix) - 1; ++index)
+            path[index] = (uint8_t)prefix[index];
+        for (size_t index = 0; index < name_length; ++index)
+            path[sizeof(prefix) - 1 + index] = name[index];
+        path_length = sizeof(prefix) - 1 + name_length;
+    }
+    uint64_t pid = syscall4(SYS_PROCESS_SPAWN, 16, (uintptr_t)path,
+                            path_length, 0);
+    if (pid == UINT64_MAX) {
+        write_text("makbuild: launch failed\n");
+        memset(path, 0, sizeof(path));
+        return;
+    }
+    uint64_t status;
+    while ((status = syscall4(SYS_PROCESS_WAIT, pid, 0, 0, 0)) == UINT64_MAX)
+        syscall4(SYS_YIELD, 0, 0, 0, 0);
+    if (status == 42) {
+        write_text("MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=");
+        write_bytes(path, path_length);
+        write_text(" source=existing-makfs seeded=0 startup=sysv status=42\n");
+    } else {
+        write_text("makbuild: build failed\n");
+    }
+    memset(path, 0, sizeof(path));
 }
 
 static void run_musl_crt_probe(void) {
@@ -702,7 +751,7 @@ static const char *completion(const uint8_t *prefix, size_t prefix_length) {
     static const char *commands[] = {
         "help", "status", "clear", "pwd", "ls", "ls -l", "cat note.txt", "cp ", "mv ", "wc ", "echo ",
         "whoami", "uname -a", "uptime", "mem", "ps", "stat note.txt",
-        "touch ", "write ", "rm ", "edit ", "nano ", "python ", "firefox", "firefox-smp", "selfhost-aarch64", "abi-startup", "musl-probe", "musl-crt", "musl-pthread", "musl-dynamic", "musl-shared", "musl-dso", "musl-dlopen", "musl-exec", "pkg-probe-install", "pkg-probe-remove", "pkg-probe-rollback", "pkg-probe-query-v1", "pkg-probe-query-v2", "adduser ", "signout", "exit",
+        "touch ", "write ", "rm ", "edit ", "nano ", "python ", "makbuild ", "firefox", "firefox-smp", "selfhost-aarch64", "abi-startup", "musl-probe", "musl-crt", "musl-pthread", "musl-dynamic", "musl-shared", "musl-dso", "musl-dlopen", "musl-exec", "pkg-probe-install", "pkg-probe-remove", "pkg-probe-rollback", "pkg-probe-query-v1", "pkg-probe-query-v2", "adduser ", "signout", "exit",
     };
     const char *found = 0;
     for (size_t index = 0; index < sizeof(commands) / sizeof(commands[0]); ++index) {
@@ -862,6 +911,13 @@ __attribute__((noreturn)) void _start(void) {
                     add_user(&command[8], command_length - 8, terminal);
                 } else if (exact(command, command_length, "abi-startup")) {
                     run_startup_probe();
+                } else if (command_length > 9 &&
+                           command[0] == 'm' && command[1] == 'a' &&
+                           command[2] == 'k' && command[3] == 'b' &&
+                           command[4] == 'u' && command[5] == 'i' &&
+                           command[6] == 'l' && command[7] == 'd' &&
+                           command[8] == ' ') {
+                    run_makbuild(&command[9], command_length - 9);
                 } else if (exact(command, command_length, "selfhost-aarch64")) {
                     run_selfhost_probe();
                 } else if (exact(command, command_length, "musl-probe")) {

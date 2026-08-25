@@ -54,6 +54,12 @@ static size_t length(const char *text) {
     return count;
 }
 
+static void write_bytes(const void *bytes, size_t count) {
+    syscall4(SYS_WRITE, (uintptr_t)bytes, count, 0, 0);
+}
+
+static void write_text(const char *text) { write_bytes(text, length(text)); }
+
 static size_t align_up(size_t value, size_t alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
 }
@@ -1902,8 +1908,9 @@ static void fail(uint64_t status) {
     for (;;) __asm__ volatile("wfe");
 }
 
-__attribute__((section(".text._start"), noreturn)) void _start(void) {
-    static const char build_manifest_path[] = "/home/user/generated.build";
+__attribute__((section(".text._start"), noreturn)) void _start(
+    uint64_t argc, char **argv, char **envp) {
+    static const char fixture_manifest_path[] = "/home/user/generated.build";
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
     static const char library_source_path[] = "/home/user/generated-library.c";
@@ -2030,7 +2037,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "compiler=guest-native assembler=guest-native objects=3 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
-        "build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3 "
+        "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=3 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -2043,26 +2050,47 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
 
-    if (!write_file(build_manifest_path, sizeof(build_manifest_path) - 1,
-                    (const uint8_t *)build_manifest_source,
-                    sizeof(build_manifest_source) - 1) ||
-        !write_file(main_source_path, sizeof(main_source_path) - 1,
-                    (const uint8_t *)main_source, sizeof(main_source) - 1) ||
-        !write_file(program_source_path, sizeof(program_source_path) - 1,
-                    (const uint8_t *)program_source,
-                    sizeof(program_source) - 1) ||
-        !write_file(library_source_path, sizeof(library_source_path) - 1,
-                    (const uint8_t *)library_source,
-                    sizeof(library_source) - 1))
+    if (argc != 2 || !argv || !argv[0] || !argv[1] || argv[2] || !envp ||
+        !envp[0] || envp[1] ||
+        !same_name(argv[0], length(argv[0]), "/system/aarch64-toolchain", 25))
+        fail(79);
+    size_t build_manifest_path_length = length(argv[1]);
+    if (!build_manifest_path_length ||
+        build_manifest_path_length > MAX_BUILD_PATH_BYTES || argv[1][0] != '/')
+        fail(79);
+    for (size_t index = 0; index < build_manifest_path_length; ++index)
+        if (!build_path_byte(argv[1][index])) fail(79);
+    int fixture_mode = same_name(envp[0], length(envp[0]), "MODE=fixture", 12);
+    int build_mode = same_name(envp[0], length(envp[0]), "MODE=build", 10);
+    if ((!fixture_mode && !build_mode) ||
+        (fixture_mode &&
+         !same_name(argv[1], build_manifest_path_length,
+                    fixture_manifest_path, sizeof(fixture_manifest_path) - 1)))
+        fail(79);
+    const char *build_manifest_path = argv[1];
+
+    if (fixture_mode &&
+        (!write_file(build_manifest_path, build_manifest_path_length,
+                     (const uint8_t *)build_manifest_source,
+                     sizeof(build_manifest_source) - 1) ||
+         !write_file(main_source_path, sizeof(main_source_path) - 1,
+                     (const uint8_t *)main_source, sizeof(main_source) - 1) ||
+         !write_file(program_source_path, sizeof(program_source_path) - 1,
+                     (const uint8_t *)program_source,
+                     sizeof(program_source) - 1) ||
+         !write_file(library_source_path, sizeof(library_source_path) - 1,
+                     (const uint8_t *)library_source,
+                     sizeof(library_source) - 1)))
         fail(80);
     uint8_t manifest_input[512] = {0};
     uint8_t source_input[512] = {0}, program_input[768] = {0};
     uint8_t library_input[128] = {0};
     size_t manifest_length = read_file(
-        build_manifest_path, sizeof(build_manifest_path) - 1,
+        build_manifest_path, build_manifest_path_length,
         manifest_input, sizeof(manifest_input));
     struct build_manifest build = {0}, malformed_build = {0};
-    if (manifest_length != sizeof(build_manifest_source) - 1 ||
+    if (!manifest_length ||
+        (fixture_mode && manifest_length != sizeof(build_manifest_source) - 1) ||
         !parse_build_manifest((const char *)manifest_input, manifest_length,
                               &build) ||
         parse_build_manifest(malformed_build_header,
@@ -2461,7 +2489,14 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         !write_file(build.output_path, build.output_path_length,
                     (const uint8_t *)image, image_length))
         fail(90);
-    syscall4(SYS_WRITE, (uintptr_t)marker, sizeof(marker) - 1, 0, 0);
+    write_text("MAKOS_AARCH64_MAKBUILD_OK mode=");
+    write_text(fixture_mode ? "fixture" : "build");
+    write_text(" manifest=");
+    write_bytes(build_manifest_path, build_manifest_path_length);
+    write_text(fixture_mode
+                   ? " startup=sysv argc=2 envc=1 seeded=1 status=42\n"
+                   : " startup=sysv argc=2 envc=1 seeded=0 status=42\n");
+    write_bytes(marker, sizeof(marker) - 1);
     syscall4(SYS_EXIT, 42, 0, 0, 0);
     __builtin_unreachable();
 }

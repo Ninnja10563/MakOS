@@ -3586,7 +3586,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             }
         }
         SYS_PROCESS_SPAWN => match frame.registers[0] {
-            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17)
+            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17)
                 if crate::aarch64_process::process_control_allowed() =>
             {
                 match selector {
@@ -3604,11 +3604,28 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     13 => crate::aarch64_process::spawn_musl_exec_probe(),
                     14 => crate::aarch64_process::spawn_firefox(),
                     15 => crate::aarch64_process::spawn_stack_protector_probe(),
-                    16 => crate::aarch64_process::spawn_toolchain(),
                     17 => crate::aarch64_process::spawn_firefox_smp_probe(),
                     _ => None,
                 }
                 .unwrap_or(ERROR_INVALID)
+            }
+            16 if crate::aarch64_process::process_control_allowed() => {
+                let address = frame.registers[1];
+                let length = frame.registers[2] as usize;
+                let fixture = frame.registers[3];
+                if length == 0
+                    || length >= crate::vfs::MAX_PATH_BYTES
+                    || fixture > 1
+                    || !user_range_readable(address, length)
+                {
+                    ERROR_INVALID
+                } else {
+                    let path = unsafe {
+                        core::slice::from_raw_parts(address as *const u8, length)
+                    };
+                    crate::aarch64_process::spawn_toolchain(path, fixture == 1)
+                        .unwrap_or(ERROR_INVALID)
+                }
             }
             2 if matches!(
                 crate::aarch64_process::current_app_role(),

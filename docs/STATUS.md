@@ -182,7 +182,13 @@ Last updated: 2026-08-26.
   `_start` entry symbol; these fields drive source reads, object persistence,
   linking, and the final write. It accepts only the bounded `asm,c,c` graph,
   absolute non-colliding paths, and one terminal link record. Bad version,
-  relative path, collision, and missing-link manifests fail closed. Each bounded C
+  relative path, collision, and missing-link manifests fail closed. The
+  authenticated `makbuild <manifest>` terminal command now validates a
+  `/home/user/` path in the kernel, copies it into the EL0 toolchain's real SysV
+  `argv[1]`, and uses `MODE=build` to consume existing MakFS inputs without
+  seeding or overwriting them. `selfhost-aarch64` explicitly selects the
+  separate deterministic `MODE=fixture` path. Focused Pi/TCG runtime executes
+  both modes and reaps both status 42. Each bounded C
   translation unit accepts up to three
   AAPCS64 `int` functions, each with one or two typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
@@ -250,7 +256,7 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and fresh visible login pass. This is a real but deliberately bounded seed, not a
-  general C/Rust compiler/linker, dependency-aware build system, debugger, or substantial
+  general C/Rust compiler/linker, dependency-aware or variable-graph build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
@@ -876,6 +882,10 @@ Last updated: 2026-08-26.
   The subsequent manifest-build run routes the same graph through a real
   versioned MakFS build description and denies four malformed manifests before
   preserving every artifact size, relocation, execution, and loader result.
+  The latest focused run first seeds that fixture, then invokes the authenticated
+  `makbuild` CLI against the persisted manifest. Kernel-built SysV `argc=2`/
+  `argv[1]`, distinct fixture/build modes, `seeded=0` for the CLI process, and
+  two status-42 toolchain reaps all pass without changing the graph's results.
   A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The

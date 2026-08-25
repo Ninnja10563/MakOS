@@ -60,6 +60,14 @@ for fragment in (
     "malformed_build_relative",
     "malformed_build_duplicate",
     "malformed_build_missing_link",
+    "uint64_t argc, char **argv, char **envp",
+    '"/system/aarch64-toolchain", 25',
+    '"MODE=fixture", 12',
+    '"MODE=build", 10',
+    "const char *build_manifest_path = argv[1]",
+    "if (fixture_mode &&",
+    "MAKOS_AARCH64_MAKBUILD_OK mode=",
+    '" startup=sysv argc=2 envc=1 seeded=0 status=42\\n"',
     "static int c_compile_function(",
     "static int c_find_parameter(",
     "static int c_variable_register(",
@@ -198,6 +206,11 @@ for fragment in (
     "pub fn spawn_path_with_arguments(path: &[u8], bytes: &[u8])",
     "startup.argv_offsets[argc..].iter().any",
     '"sysv-v1"',
+    "pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool)",
+    'manifest_path.starts_with(b"/home/user/")',
+    'b"MODE=fixture"',
+    'b"MODE=build"',
+    'b"/system/aarch64-toolchain", manifest_path',
 ):
     require(PROCESS, fragment)
 
@@ -209,7 +222,9 @@ for fragment in (
     "const ABI_FEATURE_PROCESS_STARTUP: u64 = 1 << 19;",
     "arguments_length != crate::aarch64_process::SPAWN_ARGUMENTS_BYTES",
     "crate::aarch64_process::spawn_path(path)",
-    "16 => crate::aarch64_process::spawn_toolchain()",
+    "16 if crate::aarch64_process::process_control_allowed()",
+    "fixture > 1",
+    "crate::aarch64_process::spawn_toolchain(path, fixture == 1)",
 ):
     require(ARCH, fragment)
 
@@ -222,6 +237,11 @@ require(TOOLCHAIN, "local.pointer_bound = local.array_length")
 require(TOOLCHAIN, '"        return adjust(values + 1, 1);\\n"')
 require(TOOLCHAIN, '"        *(pointer + delta) = pointer[0] + count + 1;\\n"')
 require(SHELL, "MAKOS_AARCH64_SELFHOST_LINK_OK")
+require(SHELL, "static void run_makbuild(")
+require(SHELL, '"makbuild "')
+require(SHELL, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
+require(SHELL, "source=existing-makfs seeded=0 startup=sysv status=42")
+require(SHELL, "toolchain_startup=sysv manifest_arg=1")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
@@ -242,9 +262,15 @@ require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
 require(SECURITY, "SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE")
 require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
+require(RUNTIME, 'send_command(stream, "makbuild /home/user/generated.build")')
+require(RUNTIME, "MAKOS_AARCH64_MAKBUILD_OK mode=build")
+require(RUNTIME, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
+require(FOCUSED_RUNTIME, "FIXTURE_BUILD_MARKER")
+require(FOCUSED_RUNTIME, "CLI_BUILD_MARKER")
+require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "malformed_c_denied=17")
 require(FOCUSED_RUNTIME, "malformed_build_denied=4")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")

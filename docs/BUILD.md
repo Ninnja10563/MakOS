@@ -112,8 +112,9 @@ to `PATH` and set `MAKOS_NM`, `MAKOS_REAL_CLANG`, `MAKOS_REAL_CLANGXX`, and
 own `MAKOS_CC` wrapper to the Firefox audit, so it cannot replace the bare-metal
 compiler used by MicroPython during the same `make unit check` run.
 
-After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
-linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
+After login, `selfhost-aarch64` runs the deterministic guest-native
+compiler/assembler/static-linker gate. Its fixture mode writes an A64 startup to
+`/home/user/generated.s` and valid C to
 `/home/user/generated-program.c` plus `/home/user/generated-library.c`, then
 rereads all three from MakFS. It also writes and rereads the build description
 `/home/user/generated.build`:
@@ -214,8 +215,14 @@ addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than three functions per translation unit, general object
-count/relocation repertoire, dependency discovery, incremental rules, or a
-general command-line build driver. It is not a
+count/relocation repertoire, dependency discovery, or incremental rules. The
+authenticated shell command `makbuild <manifest>` accepts either a name under
+`/home/user/` or an absolute `/home/user/` path. The kernel validates and copies
+that path into the sandboxed toolchain's child-owned SysV `argv[1]`; build mode
+reads the existing MakFS manifest and sources without seeding or overwriting
+them. The deterministic self-host fixture uses a separate `MODE=fixture` startup
+and is the only path that seeds the documented files. The current CLI still
+accepts only the fixed `asm,c,c` graph. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build.
 

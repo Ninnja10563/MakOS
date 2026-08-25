@@ -25,7 +25,7 @@ LINKER_MARKER = (
     b"compiler=guest-native assembler=guest-native objects=3 "
     b"format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
     b"symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
-    b"build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3 "
+    b"build_manifest=argv1 build_driver=makbuild-v1 build_inputs=3 "
     b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
     b"c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -37,13 +37,28 @@ LINKER_MARKER = (
     b"malformed_relocation_denied=1 unresolved_symbol_denied=1 "
     b"duplicate_definition_denied=1"
 )
+FIXTURE_BUILD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=fixture "
+    b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
+    b"seeded=1 status=42"
+)
+CLI_BUILD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 status=42"
+)
+CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated.build "
+    b"source=existing-makfs seeded=0 startup=sysv status=42"
+)
 EXECUTION_MARKER = (
     b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=3 "
     b"languages=aarch64-asm,c-subset-v1 compiler=guest-native "
     b"assembler=guest-native linker=guest-native objects=3 "
     b"object_format=elf64-et-rel relocations=R_AARCH64_CALL26:3 "
     b"symbols=_start,answer,adjust,combine build_manifest=/home/user/generated.build "
-    b"build_driver=makbuild-v1 build_inputs=3 c_sources=/home/user/generated-program.c,/home/user/generated-library.c "
+    b"build_driver=makbuild-v1 build_inputs=3 toolchain_startup=sysv manifest_arg=1 "
+    b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c "
     b"translation_unit_functions=2,1 c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
     b"max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
@@ -174,10 +189,22 @@ def main() -> int:
                 )
                 common.send_command(stream, "selfhost-aarch64")
                 common.wait_for_output(
+                    selector, process, output, FIXTURE_BUILD_MARKER, 60
+                )
+                common.wait_for_output(
                     selector, process, output, LINKER_MARKER, 60
                 )
                 common.wait_for_output(
                     selector, process, output, EXECUTION_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, CLI_BUILD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, CLI_REAP_MARKER, 60
                 )
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
@@ -193,7 +220,8 @@ def main() -> int:
         f"accel={accel} sources=3 languages=aarch64-asm,c-subset-v1 "
         "compiler=guest-native assembler=guest-native objects=3 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
-        "symbols=_start,answer,adjust,combine build_driver=makbuild-v1 build_inputs=3 translation_unit_functions=2,1 "
+        "symbols=_start,answer,adjust,combine build_driver=makbuild-v1 build_inputs=3 "
+        "toolchain_startup=sysv manifest_arg=1 cli_build=1 seeded_modes=fixture,existing translation_unit_functions=2,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "

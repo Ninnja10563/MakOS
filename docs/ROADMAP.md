@@ -158,6 +158,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   unresolved symbols and duplicate definitions, emits `ET_EXEC`, and executes
   the result twice under Pi/QEMU TCG. A versioned `MAKBUILD1` manifest now
   supplies all three source/object paths, the output path, and entry symbol;
-  four malformed forms fail closed. Full C/Rust compiler semantics, general
+  four malformed forms fail closed. An authenticated `makbuild <manifest>`
+  command passes the validated home path through the kernel-built SysV startup
+  vector and consumes existing MakFS inputs without fixture seeding. Full C/Rust compiler semantics, general
   assembler/linker, dependency-aware build system, debugger, package
   delivery, and an in-OS MakOS rebuild remain.
