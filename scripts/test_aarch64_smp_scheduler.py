@@ -11,9 +11,11 @@ INPUT = (ROOT / "kernel/src/aarch64_virtio_input.rs").read_text()
 TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
 SOCKET = (ROOT / "kernel/src/aarch64_socket.rs").read_text()
 NET = (ROOT / "kernel/src/aarch64_virtio_net.rs").read_text()
+BLOCK = (ROOT / "kernel/src/aarch64_virtio_blk.rs").read_text()
 MAIN = (ROOT / "kernel/src/main.rs").read_text()
 BUILD_RS = (ROOT / "kernel/build.rs").read_text()
 NETWORK_PROBE = (ROOT / "user/aarch64_smp_network_rx_probe.S").read_text()
+BLOCK_PROBE = (ROOT / "user/aarch64_smp_block_probe.S").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
@@ -74,6 +76,18 @@ for token in (
     "if length > TX_SERVICE_PAYLOAD",
 ):
     assert token in NET, token
+assert "AArch64 virtio-blk request attempted from non-owner CPU" in BLOCK
+for token in (
+    "SERVICE_SLOTS",
+    "fn queue_request(",
+    "pub fn service_requests()",
+    "OWNER_COMPLETIONS",
+    "NONOWNER_REQUESTS",
+    "OWNER_FLUSH_COMPLETIONS",
+    "match (kind, input.as_ref(), output.as_ref())",
+    "matches!(length, 512 | SERVICE_DATA_BYTES)",
+):
+    assert token in BLOCK, token
 
 for token in (
     "fn scheduler_cpu() -> usize",
@@ -131,6 +145,8 @@ for token in (
     "input_service_affinity_evidence",
     "pub fn run_smp_input_device_self_test()",
     "pub fn run_smp_network_rx_self_test()",
+    "pub fn run_smp_block_io_self_test()",
+    "MAKOS_AARCH64_SMP_BLOCK_OK",
     "MAKOS_AARCH64_SMP_NETWORK_RX_READY",
     "MAKOS_AARCH64_SMP_NETWORK_RX_OK",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
@@ -152,11 +168,16 @@ for token in (
 for token in (
     "aarch64_smp_network_rx_probe.S",
     "aarch64-smp-network-rx-probe.elf",
+    "aarch64_smp_block_probe.S",
+    "aarch64-smp-block-probe.elf",
 ):
     assert token in BUILD_RS, token
 assert "run_smp_network_rx_self_test();" in MAIN
+assert "run_smp_block_io_self_test();" in MAIN
 for token in ("mov x8, #47", "mov x8, #49", "mov x8, #50", "mov x0, #63"):
     assert token in NETWORK_PROBE, token
+for token in ('"/boot-count.txt"', "mov x8, #97", "mov x0, #65"):
+    assert token in BLOCK_PROBE, token
 
 # Any CPU0 compatibility wrapper here would silently mutate CPU0 ownership
 # when same syscall/exception path executes on an AP.
@@ -185,6 +206,10 @@ for token in (
     "rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
     "tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits=",
     "tcp_ap_tx=fail-closed free_balance=1",
+    "MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0",
+    "device=virtio-blk request=fsync ring_activity=real",
+    "mmio_owner=cpu0 transport=bounded-copy-queue owner_completions=",
+    "ap_requests=1 flush_completions=1 wait=bounded-el1-wfe status=65",
 ):
     assert token in INPUT_RUNTIME, token
 

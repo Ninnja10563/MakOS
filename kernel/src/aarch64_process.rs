@@ -77,6 +77,10 @@ static SMP_NETWORK_RX_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-network-rx-probe.elf"
 ));
+static SMP_BLOCK_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-block-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -1403,6 +1407,103 @@ pub fn run_smp_network_rx_self_test() {
         ap_tx_requests,
         idle,
         resumed,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_block_io_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    crate::aarch64_virtio_blk::reset_service_affinity_evidence();
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let waiter = spawn_process(0, SMP_BLOCK_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP block waiter spawn failed"))
+        .0;
+    let sentinel = spawn_process(
+        0,
+        SMP_CONCURRENT_EXIT_PROBE_ELF,
+        66,
+        ProcessRole::SmpProbe,
+    )
+    .unwrap_or_else(|| crate::fatal("AArch64 SMP block sentinel spawn failed"))
+    .0;
+    SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(waiter, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        crate::aarch64_virtio_blk::service_requests();
+        let complete = with_state(|state| {
+            state.table.get(waiter).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP block completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let mut reaped = [(0u64, 0u64, 0u64); 2];
+    with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, waiter)
+        else {
+            crate::fatal("AArch64 SMP block waiter reap failed");
+        };
+        reaped[0] = (waiter, resource, exit_status);
+        if state.table.terminate(sentinel, 66).is_none() {
+            crate::fatal("AArch64 SMP block sentinel terminate failed");
+        }
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, sentinel)
+        else {
+            crate::fatal("AArch64 SMP block sentinel reap failed");
+        };
+        reaped[1] = (sentinel, resource, exit_status);
+        for tid in [waiter, sentinel] {
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == tid) {
+                *slot = ContextSlot::EMPTY;
+            }
+        }
+    });
+    for (pid, resource, status) in reaped {
+        cleanup_reaped(pid, resource, status);
+    }
+
+    let (owner_completions, ap_requests, flush_completions) =
+        crate::aarch64_virtio_blk::service_affinity_evidence();
+    if reaped[0].2 != 65
+        || reaped[1].2 != 66
+        || owner_completions == 0
+        || owner_completions != ap_requests
+        || flush_completions != 1
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP block userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0 device=virtio-blk request=fsync ring_activity=real mmio_owner=cpu0 transport=bounded-copy-queue owner_completions={} ap_requests={} flush_completions={} wait=bounded-el1-wfe status=65 read_write_proxy=structural free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        owner_completions,
+        ap_requests,
+        flush_completions,
     );
     reset_scheduler();
 }

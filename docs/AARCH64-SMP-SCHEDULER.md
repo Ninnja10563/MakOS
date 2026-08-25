@@ -114,6 +114,17 @@ remains fail-closed and unqualified. The AP waits for its UDP completion in a
 bounded EL1 `WFE` loop, so only the following receive phase proves scheduler
 block/idle/wake behavior.
 
+A ninth opt-in fixture qualifies one real virtio-blk operation. AP1 opens the
+world-readable persistent `/boot-count.txt`, invokes syscall 97 `fsync`, and
+copies a FLUSH request into an eight-slot service queue. CPU0 alone submits the
+virtio request and returns the result; AP1 closes the descriptor and exits 65.
+Runtime requires one AP request, one CPU0 completion, one successful FLUSH, and
+exact frame balance. The same queue implements bounded 512-byte and 4 KiB read
+and write copying, and low-level ring submission fails closed off CPU0, but
+read/write are structural evidence only. The request wait is a bounded EL1
+`WFE`, not scheduler block/idle/wake evidence, and production CPU0 service-point
+contention remains open.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -150,8 +161,10 @@ safe general process migration.
   servicing pass the bounded probe. Virtio input now has exclusive CPU0 MMIO
   ownership plus measured AP deferral. Virtio-net now has CPU0-only low-level
   TX/RX ownership, copied AP UDPv4/v6 service, and a real AP DNS receive wake.
-  Stateful AP TCP TX, block, and GPU service ownership/contention remain to be
-  qualified.
+  Virtio-blk now has CPU0-only ring submission and a real AP `fsync`/FLUSH
+  service proof; AP read/write and production service-point contention remain
+  structural. Stateful AP TCP TX and GPU service ownership/contention remain to
+  be qualified.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -189,8 +202,11 @@ a GICv2 SGI only after publishing its enabled state.
      would make wall time advance fourfold.
    - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net low-level
      TX/RX ring service are explicitly CPU0-owned and guarded against AP entry.
-     AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX, block,
-     and GPU paths remain pending equivalent qualification.
+     AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX and GPU
+     paths remain pending equivalent qualification. Virtio-blk ring submission
+     is also CPU0-only through a bounded copied-request service; a real AP FLUSH
+     passes, while AP read/write runtime and production servicing remain
+     pending.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one

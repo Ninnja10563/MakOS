@@ -185,6 +185,15 @@ marker reports `tx_transport=bounded-copy-queue` and
 is not. The UDP completion wait is bounded in EL1; the receive phase separately
 proves AP scheduler idle/wake.
 
+The focused image also runs an AP1 block-service phase before networking. The
+guest opens persistent `/boot-count.txt`, calls `fsync`, and requires CPU0 to
+complete the actual virtio-blk FLUSH through an eight-slot copied-request queue.
+The marker requires one AP request, one owner completion, one successful flush,
+status 65, and balanced frames. Low-level ring submission fails closed off CPU0.
+The queue also bounds 512-byte/4 KiB reads and writes, but those paths currently
+have structural coverage only. The AP's request wait is bounded EL1 `WFE`, not a
+scheduler idle/wake result, and general desktop SMP remains closed.
+
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
 data memory type for an ELF entry would fault immediately after

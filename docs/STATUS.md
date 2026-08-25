@@ -73,10 +73,20 @@ Last updated: 2026-08-25.
   fails closed off CPU0, copied UDPv4/v6 is qualified, and stateful AP TCP TX
   remains fail-closed and pending. The AP UDP completion wait is a bounded EL1
   `WFE` loop, not a scheduler-idle proof.
+  A ninth fixture opens the real mode-0644 persistent `/boot-count.txt` on AP1
+  and invokes syscall 97 `fsync`. An eight-slot copied-request queue lets CPU0
+  exclusively submit virtio-blk operations; low-level submission fails closed
+  off CPU0. Two passing Pi/TCG runs each report one AP request, one CPU0
+  completion, one successful FLUSH, status 65, and exact frame balance. The
+  intervening repeat failed earlier in the unchanged EL1 exit-group rendezvous
+  and never reached block initialization. Queue implementations for 512-byte
+  and 4 KiB read/write pass compile/structural gates but lack guest runtime.
+  The AP FLUSH wait is bounded EL1 `WFE`, not scheduler-idle proof; production
+  service-point contention is still open.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending stateful TCP TX, block, and GPU service
-  affinity/contention proof, so the
+  scheduling remains gated pending stateful TCP TX, block read/write and
+  production servicing, and GPU service affinity/contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
@@ -472,10 +482,10 @@ Last updated: 2026-08-25.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
   state are CPU-indexed; multicore userspace still needs AP run queues,
-  stateful TCP/block/GPU service qualification, forced migration, and load
-  balancing before the desktop gate can open. CPU0-only virtio input and
-  virtio-net TX/RX ownership now have focused AP runtime evidence for keyboard
-  wake and copied UDPv4 DNS send/receive.
+  stateful TCP/block-read-write/GPU service qualification, forced migration,
+  and load balancing before the desktop gate can open. CPU0-only virtio input,
+  virtio-net TX/RX, and virtio-blk submission now have focused AP runtime
+  evidence for keyboard wake, copied UDPv4 DNS send/receive, and `fsync` FLUSH.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID
@@ -666,7 +676,11 @@ Last updated: 2026-08-25.
   passed three runs with CPU0-owned UDP TX, DNS RX wake, and exact frame
   balance (two before and one after the final malformed-length guard). One
   intervening post-guard run completed the network proof but missed the later
-  QMP-injected Ctrl-K; its immediate unchanged repeat passed the full gate.
+  QMP-injected Ctrl-K; its immediate unchanged repeat passed the full gate. The
+  later block-service image passed twice with a real AP1 `fsync`/CPU0 FLUSH.
+  One intervening run failed in the earlier unchanged EL1 exit-group
+  rendezvous and never reached block initialization; the exact immediate
+  repeat passed block, network, input, and boot completion.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,

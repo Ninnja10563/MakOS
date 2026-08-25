@@ -1,5 +1,5 @@
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering, compiler_fence};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering, compiler_fence};
 
 const MMIO_BASE: u64 = 0x0a00_0000;
 const MMIO_STRIDE: u64 = 0x200;
@@ -51,6 +51,13 @@ const REQUEST_WRITE: u32 = 1;
 const REQUEST_FLUSH: u32 = 4;
 const FAST_COMPLETION_SPINS: u32 = 10_000_000;
 const MAX_COMPLETION_SPINS: u32 = 200_000_000;
+const SERVICE_SLOTS: usize = 8;
+const SERVICE_DATA_BYTES: usize = 4096;
+const SLOT_FREE: u8 = 0;
+const SLOT_WRITING: u8 = 1;
+const SLOT_READY: u8 = 2;
+const SLOT_SERVICING: u8 = 3;
+const SLOT_DONE: u8 = 4;
 
 #[derive(Clone, Copy)]
 struct State {
@@ -89,6 +96,49 @@ static STATE: LockedState = LockedState {
     count: UnsafeCell::new(0),
 };
 static SOURCE_WRITES_FROZEN: AtomicBool = AtomicBool::new(false);
+static NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static OWNER_FLUSH_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy)]
+struct ServiceRequest {
+    kind: u32,
+    device: u8,
+    lba: u32,
+    length: u16,
+    data: [u8; SERVICE_DATA_BYTES],
+}
+
+impl ServiceRequest {
+    const EMPTY: Self = Self {
+        kind: u32::MAX,
+        device: 0,
+        lba: 0,
+        length: 0,
+        data: [0; SERVICE_DATA_BYTES],
+    };
+}
+
+struct ServiceSlot {
+    state: AtomicU8,
+    request: UnsafeCell<ServiceRequest>,
+    result: UnsafeCell<bool>,
+}
+
+unsafe impl Sync for ServiceSlot {}
+
+impl ServiceSlot {
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(SLOT_FREE),
+            request: UnsafeCell::new(ServiceRequest::EMPTY),
+            result: UnsafeCell::new(false),
+        }
+    }
+}
+
+static SERVICE: [ServiceSlot; SERVICE_SLOTS] =
+    [const { ServiceSlot::new() }; SERVICE_SLOTS];
 
 pub struct SourceWriteFreeze {
     thaw_on_drop: bool,
@@ -178,11 +228,22 @@ pub fn read_sector(lba: u32, output: &mut [u8; 512]) -> bool {
 }
 
 pub fn read_sector_on(device: usize, lba: u32, output: &mut [u8; 512]) -> bool {
+    if crate::arch::cpu_index() != 0 {
+        return queue_request(REQUEST_READ, device, lba, None, Some(output));
+    }
+    read_on_owner(device, lba, output)
+}
+
+fn read_on_owner(device: usize, lba: u32, output: &mut [u8]) -> bool {
+    if !matches!(output.len(), 512 | 4096) {
+        return false;
+    }
     with_device(device, |state| {
-        if u64::from(lba) >= state.sectors {
+        let sectors = (output.len() / 512) as u64;
+        if u64::from(lba).saturating_add(sectors) > state.sectors {
             return false;
         }
-        if !submit(state, REQUEST_READ, u64::from(lba), 512) {
+        if !submit(state, REQUEST_READ, u64::from(lba), output.len() as u32) {
             return false;
         }
         for (index, byte) in output.iter_mut().enumerate() {
@@ -198,19 +259,10 @@ pub fn read_sectors_8(lba: u32, output: &mut [u8; 4096]) -> bool {
 }
 
 pub fn read_sectors_8_on(device: usize, lba: u32, output: &mut [u8; 4096]) -> bool {
-    with_device(device, |state| {
-        if u64::from(lba).saturating_add(8) > state.sectors {
-            return false;
-        }
-        if !submit(state, REQUEST_READ, u64::from(lba), 4096) {
-            return false;
-        }
-        for (index, byte) in output.iter_mut().enumerate() {
-            *byte = read8_memory(state.queue_frame + DATA_OFFSET + index as u64);
-        }
-        true
-    })
-    .unwrap_or(false)
+    if crate::arch::cpu_index() != 0 {
+        return queue_request(REQUEST_READ, device, lba, None, Some(output));
+    }
+    read_on_owner(device, lba, output)
 }
 
 pub fn write_sector(lba: u32, input: &[u8; 512]) -> bool {
@@ -218,33 +270,36 @@ pub fn write_sector(lba: u32, input: &[u8; 512]) -> bool {
 }
 
 pub fn write_sector_on(device: usize, lba: u32, input: &[u8; 512]) -> bool {
+    if crate::arch::cpu_index() != 0 {
+        return queue_request(REQUEST_WRITE, device, lba, Some(input), None);
+    }
+    write_on_owner(device, lba, input)
+}
+
+fn write_on_owner(device: usize, lba: u32, input: &[u8]) -> bool {
+    if !matches!(input.len(), 512 | 4096) {
+        return false;
+    }
     with_device(device, |state| {
+        let sectors = (input.len() / 512) as u64;
         if (device == 0 && SOURCE_WRITES_FROZEN.load(Ordering::Acquire))
-            || u64::from(lba) >= state.sectors
+            || u64::from(lba).saturating_add(sectors) > state.sectors
         {
             return false;
         }
         for (index, byte) in input.iter().copied().enumerate() {
             write8_memory(state.queue_frame + DATA_OFFSET + index as u64, byte);
         }
-        submit(state, REQUEST_WRITE, u64::from(lba), 512)
+        submit(state, REQUEST_WRITE, u64::from(lba), input.len() as u32)
     })
     .unwrap_or(false)
 }
 
 pub fn write_sectors_8_on(device: usize, lba: u32, input: &[u8; 4096]) -> bool {
-    with_device(device, |state| {
-        if (device == 0 && SOURCE_WRITES_FROZEN.load(Ordering::Acquire))
-            || u64::from(lba).saturating_add(8) > state.sectors
-        {
-            return false;
-        }
-        for (index, byte) in input.iter().copied().enumerate() {
-            write8_memory(state.queue_frame + DATA_OFFSET + index as u64, byte);
-        }
-        submit(state, REQUEST_WRITE, u64::from(lba), 4096)
-    })
-    .unwrap_or(false)
+    if crate::arch::cpu_index() != 0 {
+        return queue_request(REQUEST_WRITE, device, lba, Some(input), None);
+    }
+    write_on_owner(device, lba, input)
 }
 
 pub fn flush() -> bool {
@@ -252,10 +307,150 @@ pub fn flush() -> bool {
 }
 
 pub fn flush_on(device: usize) -> bool {
+    if crate::arch::cpu_index() != 0 {
+        return queue_request(REQUEST_FLUSH, device, 0, None, None);
+    }
+    flush_on_owner(device)
+}
+
+fn flush_on_owner(device: usize) -> bool {
     with_device(device, |state| {
         state.flush_supported && submit(state, REQUEST_FLUSH, 0, 0)
     })
     .unwrap_or(false)
+}
+
+fn queue_request(
+    kind: u32,
+    device: usize,
+    lba: u32,
+    input: Option<&[u8]>,
+    output: Option<&mut [u8]>,
+) -> bool {
+    let length = match (kind, input.as_ref(), output.as_ref()) {
+        (REQUEST_READ, None, Some(bytes)) => bytes.len(),
+        (REQUEST_WRITE, Some(bytes), None) => bytes.len(),
+        (REQUEST_FLUSH, None, None) => 0,
+        _ => return false,
+    };
+    if device >= MAX_DEVICES
+        || !matches!(kind, REQUEST_READ | REQUEST_WRITE | REQUEST_FLUSH)
+        || (kind == REQUEST_FLUSH && length != 0)
+        || (kind != REQUEST_FLUSH && !matches!(length, 512 | SERVICE_DATA_BYTES))
+    {
+        return false;
+    }
+    let Some(slot) = SERVICE.iter().find(|slot| {
+        slot.state
+            .compare_exchange(
+                SLOT_FREE,
+                SLOT_WRITING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }) else {
+        return false;
+    };
+    let mut request = ServiceRequest::EMPTY;
+    request.kind = kind;
+    request.device = device as u8;
+    request.lba = lba;
+    request.length = length as u16;
+    if let Some(input) = input {
+        request.data[..length].copy_from_slice(input);
+    }
+    unsafe {
+        slot.request.get().write(request);
+        slot.result.get().write(false);
+    }
+    NONOWNER_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    slot.state.store(SLOT_READY, Ordering::Release);
+    unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+
+    let deadline = crate::arch::counter_deadline_millis(5_000);
+    while slot.state.load(Ordering::Acquire) != SLOT_DONE {
+        if crate::arch::counter_deadline_expired(deadline) {
+            crate::fatal("AArch64 block owner request timeout");
+        }
+        unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+    }
+    let result = unsafe { slot.result.get().read() };
+    if result && kind == REQUEST_READ {
+        let request = unsafe { slot.request.get().read() };
+        let Some(output) = output else {
+            crate::fatal("AArch64 block read service output absent");
+        };
+        output.copy_from_slice(&request.data[..length]);
+    }
+    slot.state.store(SLOT_FREE, Ordering::Release);
+    result
+}
+
+pub fn service_requests() -> usize {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 block service attempted from non-owner CPU");
+    }
+    let mut completed = 0usize;
+    for slot in &SERVICE {
+        if slot
+            .state
+            .compare_exchange(
+                SLOT_READY,
+                SLOT_SERVICING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            continue;
+        }
+        let mut request = unsafe { slot.request.get().read() };
+        let device = usize::from(request.device);
+        let length = usize::from(request.length);
+        let result = if device >= MAX_DEVICES
+            || (request.kind == REQUEST_FLUSH && length != 0)
+            || (request.kind != REQUEST_FLUSH
+                && !matches!(length, 512 | SERVICE_DATA_BYTES))
+        {
+            false
+        } else {
+            match request.kind {
+                REQUEST_READ => read_on_owner(device, request.lba, &mut request.data[..length]),
+                REQUEST_WRITE => write_on_owner(device, request.lba, &request.data[..length]),
+                REQUEST_FLUSH => flush_on_owner(device),
+                _ => false,
+            }
+        };
+        unsafe {
+            slot.request.get().write(request);
+            slot.result.get().write(result);
+        }
+        OWNER_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+        if result && request.kind == REQUEST_FLUSH {
+            OWNER_FLUSH_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+        }
+        slot.state.store(SLOT_DONE, Ordering::Release);
+        completed += 1;
+    }
+    if completed != 0 {
+        unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+    }
+    completed
+}
+
+pub fn reset_service_affinity_evidence() {
+    NONOWNER_REQUESTS.store(0, Ordering::Release);
+    OWNER_COMPLETIONS.store(0, Ordering::Release);
+    OWNER_FLUSH_COMPLETIONS.store(0, Ordering::Release);
+}
+
+pub fn service_affinity_evidence() -> (u64, u64, u64) {
+    (
+        OWNER_COMPLETIONS.load(Ordering::Acquire),
+        NONOWNER_REQUESTS.load(Ordering::Acquire),
+        OWNER_FLUSH_COMPLETIONS.load(Ordering::Acquire),
+    )
 }
 
 pub fn freeze_source_writes() -> Option<SourceWriteFreeze> {
@@ -337,6 +532,9 @@ fn configure(base: u64) -> State {
 }
 
 fn submit(state: &mut State, request_type: u32, sector: u64, data_length: u32) -> bool {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-blk request attempted from non-owner CPU");
+    }
     write32_memory(state.queue_frame + REQUEST_OFFSET, request_type);
     write32_memory(state.queue_frame + REQUEST_OFFSET + 4, 0);
     write64_memory(state.queue_frame + REQUEST_OFFSET + 8, sector);
