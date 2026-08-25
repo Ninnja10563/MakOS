@@ -185,6 +185,18 @@ marker reports `tx_transport=bounded-copy-queue` and
 is not. The UDP completion wait is bounded in EL1; the receive phase separately
 proves AP scheduler idle/wake.
 
+The same image now also runs an AP1 native-graphics phase. A kernel-only
+pre-login binding grants its immutable probe only `CAP_GRAPHICS`; the probe
+uses the ordinary surface create/fill/present syscalls. Off-owner composition
+publishes retained scene state into one coalesced deferred action. CPU0's
+production 100 Hz timer consumes that action and must complete real
+`TRANSFER_TO_HOST_2D` and `RESOURCE_FLUSH` commands. The runtime requires
+nonzero AP deferrals, CPU0 deferred compositions, control-queue submissions,
+transfer completions and flush completions, status 67, surface reap, and exact
+frame balance. Every low-level virtio-GPU MMIO submission fails closed off
+CPU0; this qualifies graphics service ownership, not accelerated rendering or
+general desktop AP scheduling.
+
 The focused image also runs an AP1 block-service phase before networking. The
 kernel creates a private uid/gid-1000 fixture inode; an immutable minimally
 authorized probe uses normal VFS/MakFS4 calls to write and `fsync` 4 KiB, close,
@@ -192,8 +204,8 @@ reopen, read and verify 4 KiB, and finally remove the inode. Every AP block
 operation crosses an eight-slot copied-request queue. CPU0's 100 Hz timer bottom
 half exclusively submits the real virtio-blk requests and defers a tick instead
 of recursively taking an owner lock interrupted during direct CPU0 I/O. Current
-Pi/TCG evidence is 33 requests/completions: 18 reads, 10 writes, 5 flushes, and
-33 timer-service completions, with status 65 and balanced frames. Low-level ring
+Latest Pi/TCG evidence is 22 requests/completions: 13 reads, 6 writes, 3
+flushes, and 22 timer-service completions, with status 65 and balanced frames. Low-level ring
 submission fails closed off CPU0. The AP request wait is bounded EL1 `WFE`, not
 a scheduler idle/wake result, and general desktop SMP remains closed.
 

@@ -85,6 +85,12 @@ static SMP_BLOCK_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-block-owner-probe.elf"
 ));
+static SMP_GPU_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-gpu-probe.elf"));
+static SMP_GPU_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-gpu-owner-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -1554,6 +1560,128 @@ pub fn run_smp_block_io_self_test() {
         write_completions,
         flush_completions,
         timer_completions,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_gpu_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    crate::graphics::reset_gpu_service_affinity_evidence();
+    crate::aarch64_virtio_gpu::reset_service_affinity_evidence();
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let presenter = spawn_process(0, SMP_GPU_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP GPU presenter spawn failed"))
+        .0;
+    let sentinel = spawn_process(0, SMP_GPU_OWNER_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP GPU owner sentinel spawn failed"))
+        .0;
+    if !crate::security::register_smp_graphics_probe(presenter) {
+        crate::fatal("AArch64 SMP GPU probe credential binding failed");
+    }
+    SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(presenter, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP GPU CPU0 sentinel absent"));
+        if process.pid != sentinel {
+            crate::fatal("AArch64 SMP GPU CPU0 affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == sentinel)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP GPU CPU0 context absent"))
+            .context
+    });
+    smp_probe_enter(sentinel);
+    crate::arch::switch_address_space(context.ttbr0);
+    let sentinel_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if sentinel_status != 68 {
+        crate::fatal("AArch64 SMP GPU CPU0 sentinel status invalid");
+    }
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let complete = with_state(|state| {
+            state.table.get(presenter).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP GPU completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let (owner_composes, ap_deferrals, compose_pending) =
+        crate::graphics::gpu_service_affinity_evidence();
+    let (owner_submissions, transfer_completions, flush_completions) =
+        crate::aarch64_virtio_gpu::service_affinity_evidence();
+    let mut reaped = [(0u64, 0u64, 0u64); 2];
+    with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, presenter)
+        else {
+            crate::fatal("AArch64 SMP GPU presenter reap failed");
+        };
+        reaped[0] = (presenter, resource, exit_status);
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, sentinel)
+        else {
+            crate::fatal("AArch64 SMP GPU sentinel reap failed");
+        };
+        reaped[1] = (sentinel, resource, exit_status);
+        for tid in [presenter, sentinel] {
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == tid) {
+                *slot = ContextSlot::EMPTY;
+            }
+        }
+    });
+    for (pid, resource, status) in reaped {
+        cleanup_reaped(pid, resource, status);
+    }
+
+    if reaped[0].2 != 67
+        || reaped[1].2 != 68
+        || owner_composes == 0
+        || ap_deferrals == 0
+        || compose_pending
+        || owner_submissions < 2
+        || transfer_completions == 0
+        || flush_completions == 0
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP GPU userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_GPU_OK presenter_cpu=1 service_cpu=0 device=virtio-gpu request=surface-create,fill,present ring_activity=real mmio_owner=cpu0 contention=ap-deferred service_point=cpu0-timer-bottom-half owner_composes={} ap_deferrals={} owner_submissions={} transfer_completions={} flush_completions={} status=67 surface_lifecycle=create,fill,present,reap free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        owner_composes,
+        ap_deferrals,
+        owner_submissions,
+        transfer_completions,
+        flush_completions,
     );
     reset_scheduler();
 }

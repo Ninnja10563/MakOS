@@ -89,6 +89,12 @@ static TASKBAR_CLOCK_MINUTE: AtomicU64 = AtomicU64::new(u64::MAX);
 static MONITOR_NEXT_REFRESH_MS: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_arch = "aarch64")]
 static MONITOR_LIVE_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_arch = "aarch64")]
+static DEFERRED_COMPOSE_PENDING: AtomicBool = AtomicBool::new(false);
+#[cfg(target_arch = "aarch64")]
+static GPU_NONOWNER_COMPOSE_DEFERRALS: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_arch = "aarch64")]
+static GPU_OWNER_DEFERRED_COMPOSES: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 struct TerminalCell {
@@ -1808,12 +1814,20 @@ fn compose_key_feedback(state: &mut State) {
     compose(state);
 }
 
-/// Executes blocking compositor work from process syscall context, never from
-/// keyboard or tablet IRQ handlers.
+/// Executes CPU0-owned blocking compositor work from the timer bottom half
+/// when its IRQ interrupted EL0. Keyboard/tablet IRQ handlers only publish
+/// logical input and never enter this service directly.
 #[cfg(target_arch = "aarch64")]
 pub fn service_deferred_actions() {
     if !GRAPHICS.ready.load(Ordering::Acquire) {
         return;
+    }
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 deferred compositor service attempted from non-owner CPU");
+    }
+    if DEFERRED_COMPOSE_PENDING.swap(false, Ordering::AcqRel) {
+        with_lock(compose_owner);
+        GPU_OWNER_DEFERRED_COMPOSES.fetch_add(1, Ordering::AcqRel);
     }
     if current_pid() == 1 {
         let signout = with_lock(|state| {
@@ -2126,6 +2140,10 @@ pub fn present(handle: u64) -> bool {
         }
         state.surfaces[index].dirty = false;
         state.presents += 1;
+        #[cfg(target_arch = "aarch64")]
+        let immediate_scanout = crate::arch::cpu_index() == 0;
+        #[cfg(target_arch = "x86_64")]
+        let immediate_scanout = true;
         compose(state);
         let windows = state
             .surfaces
@@ -2133,11 +2151,13 @@ pub fn present(handle: u64) -> bool {
             .filter(|surface| surface.presented)
             .count();
         crate::serial_println!(
-            "MAKOS_M7_OK graphics_abi=1 surface={}x{} compositor=1 present={} scanout=1 windows={} z_order=1 clipping=1",
+            "MAKOS_M7_OK graphics_abi=1 surface={}x{} compositor=1 present={} scanout={} windows={} z_order=1 clipping=1 deferred={}",
             state.surfaces[index].width,
             state.surfaces[index].height,
             state.presents,
-            windows
+            u8::from(immediate_scanout),
+            windows,
+            u8::from(!immediate_scanout),
         );
         true
     })
@@ -2263,6 +2283,16 @@ pub fn destroy(handle: u64) -> bool {
 }
 
 fn compose(state: &mut State) {
+    #[cfg(target_arch = "aarch64")]
+    if crate::arch::cpu_index() != 0 {
+        DEFERRED_COMPOSE_PENDING.store(true, Ordering::Release);
+        GPU_NONOWNER_COMPOSE_DEFERRALS.fetch_add(1, Ordering::AcqRel);
+        return;
+    }
+    compose_owner(state);
+}
+
+fn compose_owner(state: &mut State) {
     let Some(mut screen) = crate::framebuffer::Screen::new(state.framebuffer) else {
         return;
     };
@@ -2362,6 +2392,22 @@ fn compose(state: &mut State) {
     capture_cursor_under(state, &screen);
     draw_cursor(&mut screen, state.cursor_x, state.cursor_y);
     flush_scanout();
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn reset_gpu_service_affinity_evidence() {
+    DEFERRED_COMPOSE_PENDING.store(false, Ordering::Release);
+    GPU_NONOWNER_COMPOSE_DEFERRALS.store(0, Ordering::Release);
+    GPU_OWNER_DEFERRED_COMPOSES.store(0, Ordering::Release);
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn gpu_service_affinity_evidence() -> (u64, u64, bool) {
+    (
+        GPU_OWNER_DEFERRED_COMPOSES.load(Ordering::Acquire),
+        GPU_NONOWNER_COMPOSE_DEFERRALS.load(Ordering::Acquire),
+        DEFERRED_COMPOSE_PENDING.load(Ordering::Acquire),
+    )
 }
 
 pub fn mouse_packet(x: u32, y: u32, buttons: u8) {

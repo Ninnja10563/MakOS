@@ -128,6 +128,17 @@ flushes, all 33 serviced by the timer, status 65, exact content, inode cleanup,
 and frame balance. The AP request wait remains bounded EL1 `WFE`, not scheduler
 block/idle/wake evidence.
 
+An additional opt-in fixture qualifies the production virtio-GPU owner path.
+The immutable AP1 process receives only `CAP_GRAPHICS` and uses the ordinary
+native surface create/fill/present ABI. Any `compose` requested off CPU0 retains
+the new scene and publishes one coalesced deferred action; it never takes the
+device lock or touches MMIO. CPU0's ordinary timer bottom half consumes that
+action. Low-level control and cursor submission entry points fail closed on an
+AP. The first Pi/TCG runtime reports one AP deferral, one CPU0 owner compose,
+two real control-queue completions (one transfer and one resource flush),
+status 67, surface reap, exact frame balance, and continued block/network/input
+and boot success.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -166,8 +177,9 @@ safe general process migration.
   TX/RX ownership, copied AP UDPv4/v6 service, and a real AP DNS receive wake.
   Virtio-blk now has CPU0-only ring submission and a production timer-bottom-
   half service proof for real AP 4 KiB reads, 4 KiB writes, and `fsync`/FLUSH
-  through VFS/MakFS4. Stateful AP TCP TX and GPU service ownership/contention
-  remain to be qualified.
+  through VFS/MakFS4. Virtio-GPU now has CPU0-only low-level submission and a
+  production timer-bottom-half proof for composition requested through the AP
+  native surface ABI. Stateful AP TCP TX remains to be qualified.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -205,11 +217,13 @@ a GICv2 SGI only after publishing its enabled state.
      would make wall time advance fourfold.
    - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net low-level
      TX/RX ring service are explicitly CPU0-owned and guarded against AP entry.
-     AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX and GPU
-     paths remain pending equivalent qualification. Virtio-blk ring submission
-     is also CPU0-only through a bounded copied-request service. CPU0's timer
-     bottom half now passes real AP VFS/MakFS4 read, write, and FLUSH traffic,
-     while recursively interrupted CPU0 ownership defers one tick.
+     AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX remains
+     pending equivalent qualification. Virtio-blk ring submission is also
+     CPU0-only through a bounded copied-request service. CPU0's timer bottom
+     half passes real AP VFS/MakFS4 read, write, and FLUSH traffic, while
+     recursively interrupted CPU0 ownership defers one tick. Retained graphics
+     composition requested by an AP is coalesced and serviced by that same CPU0
+     timer path; low-level virtio-GPU submissions fail closed off-owner.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one

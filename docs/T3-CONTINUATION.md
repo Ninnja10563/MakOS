@@ -27,19 +27,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `0868b79`:
-  PID 214025, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-JZAZKK`, private data clone
-  `build/makos-pi-visible-JZAZKK/data.img`, private variables
-  `build/makos-pi-visible-JZAZKK/vars.fd`, QMP
-  `build/makos-pi-visible-JZAZKK/qmp.sock`, serial
-  `build/makos-pi-visible-JZAZKK/serial.log`, and PID file
-  `build/makos-pi-visible-JZAZKK/qemu.pid`. It is the sole QEMU process and the
+- Active visible Pi/QEMU 10.0.11 TCG milestone for the GPU-owner working tree:
+  PID 224308, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-TMvEbm`, private data clone
+  `build/makos-pi-visible-TMvEbm/data.img`, private variables
+  `build/makos-pi-visible-TMvEbm/vars.fd`, QMP
+  `build/makos-pi-visible-TMvEbm/qmp.sock`, serial
+  `build/makos-pi-visible-TMvEbm/serial.log`, PID file
+  `build/makos-pi-visible-TMvEbm/qemu.pid`, and QMP framebuffer capture
+  `build/makos-pi-visible-TMvEbm/login-2.png`. It is the sole QEMU process and the
   ordinary config reports `smp_input_probe=0`, four online PEs,
   `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`, with no fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
-  for user testing; use QMP `quit` before any later runtime gate.
+  for user testing; the framebuffer capture visibly shows the native login
+  dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 214025/session `build/makos-pi-visible-JZAZKK` was stopped cleanly
+  through QMP before this build; its private session files remain.
+  Intermediate PID 221943/session `build/makos-pi-visible-M60s26` was likewise
+  stopped through QMP before the final marker rebuild; its files remain.
   Prior PID 193461/session `build/makos-pi-visible-ncttcL` and PID
   203938/session `build/makos-pi-visible-w5JUu3` were stopped cleanly through
   QMP before focused testing/building; their private session files remain.
@@ -92,8 +98,7 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending stateful TCP TX and GPU service-affinity/contention gates,
-  plus migration and load balancing.
+  remains pending stateful TCP TX, migration, and load balancing.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -142,6 +147,24 @@ Preserve existing files and changes.
   and `make check`, release/image artifact checks, the updated structural
   guard, focused runtime, and ordinary visible login pass for core commit
   `0868b79`.
+  A subsequent immutable AP1 graphics fixture receives only `CAP_GRAPHICS`
+  and calls the normal surface create/fill/present ABI. Its retained compose is
+  deferred to CPU0's production timer bottom half; low-level virtio-GPU
+  control/cursor submission now fails closed off CPU0. The first focused
+  Pi/TCG pass reports `owner_composes=1`, `ap_deferrals=1`, two real queue
+  submissions, one transfer, one resource flush, status 67, surface reap, and
+  exact frame balance. The same run then passes block with 22/22 requests
+  (13 reads, 6 writes, 3 flushes), network DNS RX wake, injected Ctrl-K input,
+  and final boot. Full `make unit check`, focused/normal image artifact checks,
+  and the fresh visible login pass. GPU ownership is closed as a scheduler-row
+  subitem; acceleration and broad graphics work remain Partial.
+  The surface-present marker was then tightened to say
+  `scanout=0 ... deferred=1` before the separate CPU0 completion marker. Two
+  exact unchanged 90-second Pi/TCG repeats passed that final-source GPU proof
+  (`1/1` compose/deferral and `2/1/1` submission/transfer/flush) but exhausted
+  the combined harness window before input readiness under slower host
+  throughput; neither emitted fatal/panic. Do not lengthen or weaken the
+  harness. The prior same-behavior combined pass remains regression evidence.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -151,7 +174,7 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 214025 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 224308 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Core production block-service commit `0868b79` is the implementation state
@@ -228,11 +251,9 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
-2. Continue the AArch64 userspace SMP row with the next real service-ownership
-   gate. Implement stateful CPU0 TCP service without sharing mutable connection
-   state across PEs, or qualify GPU service ownership/contention; then add
-   forced migration and load balancing. Stop the visible QEMU through QMP
-   before any focused runtime.
+2. Continue the AArch64 userspace SMP row with stateful CPU0 TCP service without
+   sharing mutable connection state across PEs; then add forced migration and
+   load balancing. Stop the visible QEMU through QMP before any focused runtime.
 3. Boot a fresh visible login milestone after the next verified behavior change
    and record PID/session/data clone/QMP. Preserve real implementation
    requirements—no fake/spoofed apps.

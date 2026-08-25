@@ -1,5 +1,5 @@
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering, compiler_fence};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering, compiler_fence};
 use makos_boot_api::{FramebufferInfo, PixelFormat};
 
 const MMIO_BASE: u64 = 0x0a00_0000;
@@ -82,6 +82,9 @@ static mut FRAMEBUFFER: AlignedFramebuffer = AlignedFramebuffer([0; MAX_PIXELS])
 static mut CURSOR: AlignedCursor = AlignedCursor([0; CURSOR_SIZE as usize * CURSOR_SIZE as usize]);
 static WIDTH: AtomicU32 = AtomicU32::new(800);
 static HEIGHT: AtomicU32 = AtomicU32::new(600);
+static OWNER_SUBMISSIONS: AtomicU64 = AtomicU64::new(0);
+static OWNER_TRANSFERS: AtomicU64 = AtomicU64::new(0);
+static OWNER_FLUSHES: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 struct State {
@@ -129,6 +132,7 @@ static STATE: LockedState = LockedState {
 };
 
 pub fn init(width: u32, height: u32) -> FramebufferInfo {
+    require_owner_cpu();
     let mut found = None;
     for slot in 0..MMIO_SLOTS {
         let base = MMIO_BASE + slot as u64 * MMIO_STRIDE;
@@ -187,6 +191,7 @@ pub fn dimensions() -> (u32, u32) {
 }
 
 pub fn set_mode(width: u32, height: u32) -> Option<FramebufferInfo> {
+    require_owner_cpu();
     if !valid_mode(width, height) {
         return None;
     }
@@ -216,6 +221,7 @@ pub fn flush() {
 }
 
 pub fn flush_rect(x: u32, y: u32, width: u32, height: u32) {
+    require_owner_cpu();
     with_state(|state| {
         if !state.ready || width == 0 || height == 0 {
             return;
@@ -234,6 +240,7 @@ pub fn flush_rect(x: u32, y: u32, width: u32, height: u32) {
 }
 
 pub fn move_cursor(x: u32, y: u32) {
+    require_owner_cpu();
     with_state(|state| {
         if !state.ready || !state.cursor_ready {
             return;
@@ -252,6 +259,20 @@ pub fn move_cursor(x: u32, y: u32) {
             fail(state.base, "virtio-gpu cursor move failed");
         }
     });
+}
+
+pub fn reset_service_affinity_evidence() {
+    OWNER_SUBMISSIONS.store(0, Ordering::Release);
+    OWNER_TRANSFERS.store(0, Ordering::Release);
+    OWNER_FLUSHES.store(0, Ordering::Release);
+}
+
+pub fn service_affinity_evidence() -> (u64, u64, u64) {
+    (
+        OWNER_SUBMISSIONS.load(Ordering::Acquire),
+        OWNER_TRANSFERS.load(Ordering::Acquire),
+        OWNER_FLUSHES.load(Ordering::Acquire),
+    )
 }
 
 fn valid_mode(width: u32, height: u32) -> bool {
@@ -475,7 +496,11 @@ fn transfer(state: &mut State, x: u32, y: u32, width: u32, height: u32) -> bool 
     write64_memory(request + 40, offset);
     write32_memory(request + 48, state.resource_id);
     write32_memory(request + 52, 0);
-    expect_nodata(state, 56).is_some()
+    let complete = expect_nodata(state, 56).is_some();
+    if complete {
+        OWNER_TRANSFERS.fetch_add(1, Ordering::AcqRel);
+    }
+    complete
 }
 
 fn resource_flush(state: &mut State, x: u32, y: u32, width: u32, height: u32) -> bool {
@@ -485,7 +510,11 @@ fn resource_flush(state: &mut State, x: u32, y: u32, width: u32, height: u32) ->
     write_rect(request + 24, x, y, width, height);
     write32_memory(request + 40, state.resource_id);
     write32_memory(request + 44, 0);
-    expect_nodata(state, 48).is_some()
+    let complete = expect_nodata(state, 48).is_some();
+    if complete {
+        OWNER_FLUSHES.fetch_add(1, Ordering::AcqRel);
+    }
+    complete
 }
 
 fn expect_nodata(state: &mut State, request_length: u32) -> Option<()> {
@@ -525,6 +554,7 @@ fn clear_cursor_request(state: &State) {
 }
 
 fn submit(state: &mut State, request_length: u32, response_length: u32) -> Option<u32> {
+    require_owner_cpu();
     write_descriptor(
         state.queue_frame + DESC_OFFSET,
         state.queue_frame + REQUEST_OFFSET,
@@ -570,10 +600,12 @@ fn submit(state: &mut State, request_length: u32, response_length: u32) -> Optio
         write32(state.base + REG_INTERRUPT_ACK, interrupt);
     }
     memory_barrier();
+    OWNER_SUBMISSIONS.fetch_add(1, Ordering::AcqRel);
     Some(read32_memory(state.queue_frame + RESPONSE_OFFSET))
 }
 
 fn cursor_submit(state: &mut State, request_length: u32) -> bool {
+    require_owner_cpu();
     let frame = state.cursor_queue_frame;
     write_descriptor(
         frame + DESC_OFFSET,
@@ -609,6 +641,12 @@ fn cursor_submit(state: &mut State, request_length: u32) -> bool {
         core::hint::spin_loop();
     }
     false
+}
+
+fn require_owner_cpu() {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-gpu MMIO attempted from non-owner CPU");
+    }
 }
 
 fn write_rect(address: u64, x: u32, y: u32, width: u32, height: u32) {

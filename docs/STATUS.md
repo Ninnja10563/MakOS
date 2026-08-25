@@ -89,12 +89,26 @@ Last updated: 2026-08-25.
   second retained 100 timer opportunities and every counter requirement, then
   passed block, network, input, and boot. The AP request wait is bounded EL1
   `WFE`, not scheduler-idle proof.
+  An additional immutable AP1 fixture receives only `CAP_GRAPHICS` and uses
+  ordinary syscalls 8/9/10 to create, fill, and present a 96x64 retained
+  surface. Any composition requested off CPU0 now publishes one coalesced
+  deferred action rather than touching virtio-GPU state. CPU0's production
+  timer bottom half consumes it, and every low-level control/cursor queue
+  submission fails closed off-owner. The first Pi/QEMU 10.0.11 TCG pass reports
+  one AP deferral, one CPU0 deferred composition, two real control-queue
+  completions (one transfer and one resource flush), status 67, surface reap,
+  exact frame balance, and all later block/network/input/boot gates passing.
+  After the marker was tightened to report the AP syscall as
+  `scanout=0 deferred=1`, two unchanged 90-second Pi/TCG repeats again passed
+  the complete GPU proof but exhausted the combined harness window before the
+  later input-ready phase. Neither reported a guest fatal/panic; thresholds
+  were not changed. The earlier same-behavior combined run remains the full
+  block/network/input/boot regression evidence.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending stateful TCP TX and GPU service
-  affinity/contention proof, plus migration and load balancing, so the
-  scheduler audit row remains Partial and still reports one desktop scheduler
-  CPU.
+  scheduling remains gated pending stateful TCP TX, migration, and load
+  balancing, so the scheduler audit row remains Partial and still reports one
+  desktop scheduler CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment
@@ -488,11 +502,12 @@ Last updated: 2026-08-25.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
   state are CPU-indexed; multicore userspace still needs AP run queues,
-  stateful TCP/GPU service qualification, forced migration, and load balancing
+  stateful TCP service qualification, forced migration, and load balancing
   before the desktop gate can open. CPU0-only virtio input, virtio-net TX/RX,
-  and virtio-blk submission now have focused AP runtime evidence for keyboard
-  wake, copied UDPv4 DNS send/receive, and timer-serviced 4 KiB filesystem
-  read/write plus `fsync`/FLUSH.
+  virtio-blk, and virtio-GPU submission now have focused AP runtime evidence
+  for keyboard wake, copied UDPv4 DNS send/receive, timer-serviced 4 KiB
+  filesystem read/write plus `fsync`/FLUSH, and deferred retained-surface
+  transfer/resource-flush completion.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID
@@ -694,6 +709,11 @@ Last updated: 2026-08-25.
   readiness marker; its exact repeat entered the block phase but exhausted the
   same window before the marker. A one-guest-second window retained exact
   timer-owner counter proof and passed the complete unchanged 90-second gate.
+  The next focused Pi/TCG run added AP1 native surface create/fill/present and
+  passed one CPU0 deferred composition, two real virtio-GPU submissions, one
+  transfer, one resource flush, exact surface/frame cleanup, all existing
+  device phases, and boot. A fresh normal-config visible QEMU then reached and
+  visibly captured the 800x600 native login dialog.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,

@@ -148,6 +148,16 @@ def main() -> int:
                     b"MAKOS_CONFIG_OK source=fat",
                     b"smp_input_probe=1",
                     b"MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices=2",
+                    b"MAKOS_M7_OK graphics_abi=1 surface=96x64 compositor=1 present=1 scanout=0 windows=1 z_order=1 clipping=1 deferred=1",
+                    b"MAKOS_AARCH64_SMP_GPU_OK presenter_cpu=1 service_cpu=0",
+                    b"device=virtio-gpu request=surface-create,fill,present ring_activity=real",
+                    b"mmio_owner=cpu0 contention=ap-deferred service_point=cpu0-timer-bottom-half",
+                    b"owner_composes=",
+                    b"ap_deferrals=",
+                    b"owner_submissions=",
+                    b"transfer_completions=",
+                    b"flush_completions=",
+                    b"status=67 surface_lifecycle=create,fill,present,reap free_balance=1",
                     b"MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0",
                     b"device=virtio-blk requests=read4k,write4k,fsync ring_activity=real",
                     b"mmio_owner=cpu0 transport=bounded-copy-queue service_point=cpu0-timer-bottom-half",
@@ -209,6 +219,7 @@ def main() -> int:
         "MAKOS_AARCH64_SMP_INPUT_RUNTIME_OK "
         f"accel={accel} waiter_cpu=1 poller_cpu=0 device=virtio-keyboard "
         "event=ctrl-k mmio_owner=cpu0 contention=ap-deferred "
+        "gpu=cpu0-owned-transfer-flush,timer-serviced,ap-deferred "
         "block=cpu0-owned-read4k-write4k-fsync,timer-serviced,ap-idle-input "
         "wake=device-ring,sgi "
         "network=cpu0-owned-udp-tx,dns-rx-wake "

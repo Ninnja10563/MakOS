@@ -474,6 +474,38 @@ pub(crate) fn register_smp_block_probe(pid: u64) -> bool {
     })
 }
 
+/// Bind the immutable opt-in SMP graphics fixture to only the native graphics
+/// capability while no login session exists. Ordinary session policy remains
+/// closed and reap clears this kernel-only binding.
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn register_smp_graphics_probe(pid: u64) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    with_session(|session| {
+        if session.active {
+            return false;
+        }
+        let Some(binding) = session
+            .bindings
+            .iter_mut()
+            .find(|binding| binding.pid == pid || binding.pid == 0)
+        else {
+            return false;
+        };
+        *binding = CredentialBinding {
+            pid,
+            credentials: Credentials {
+                uid: INIT_UID,
+                gid: INIT_GID,
+                capabilities: CAP_GRAPHICS,
+            },
+            generation: session.generation,
+        };
+        true
+    })
+}
+
 #[cfg(target_arch = "aarch64")]
 pub fn clear_process_credentials(pid: u64) {
     with_session(|session| {

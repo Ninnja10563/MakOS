@@ -12,12 +12,16 @@ TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
 SOCKET = (ROOT / "kernel/src/aarch64_socket.rs").read_text()
 NET = (ROOT / "kernel/src/aarch64_virtio_net.rs").read_text()
 BLOCK = (ROOT / "kernel/src/aarch64_virtio_blk.rs").read_text()
+GPU = (ROOT / "kernel/src/aarch64_virtio_gpu.rs").read_text()
+GRAPHICS = (ROOT / "kernel/src/graphics.rs").read_text()
 SECURITY = (ROOT / "kernel/src/security.rs").read_text()
 MAIN = (ROOT / "kernel/src/main.rs").read_text()
 BUILD_RS = (ROOT / "kernel/build.rs").read_text()
 NETWORK_PROBE = (ROOT / "user/aarch64_smp_network_rx_probe.S").read_text()
 BLOCK_PROBE = (ROOT / "user/aarch64_smp_block_probe.S").read_text()
 BLOCK_OWNER_PROBE = (ROOT / "user/aarch64_smp_block_owner_probe.S").read_text()
+GPU_PROBE = (ROOT / "user/aarch64_smp_gpu_probe.S").read_text()
+GPU_OWNER_PROBE = (ROOT / "user/aarch64_smp_gpu_owner_probe.S").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
@@ -96,6 +100,27 @@ for token in (
     "matches!(length, 512 | SERVICE_DATA_BYTES)",
 ):
     assert token in BLOCK, token
+for token in (
+    "AArch64 virtio-gpu MMIO attempted from non-owner CPU",
+    "OWNER_SUBMISSIONS",
+    "OWNER_TRANSFERS",
+    "OWNER_FLUSHES",
+    "require_owner_cpu();",
+    "pub fn reset_service_affinity_evidence()",
+    "pub fn service_affinity_evidence()",
+):
+    assert token in GPU, token
+for token in (
+    "DEFERRED_COMPOSE_PENDING",
+    "GPU_NONOWNER_COMPOSE_DEFERRALS",
+    "GPU_OWNER_DEFERRED_COMPOSES",
+    "if crate::arch::cpu_index() != 0",
+    "with_lock(compose_owner);",
+    "pub fn reset_gpu_service_affinity_evidence()",
+    "pub fn gpu_service_affinity_evidence()",
+    "scanout={} windows={} z_order=1 clipping=1 deferred={}",
+):
+    assert token in GRAPHICS, token
 
 for token in (
     "fn scheduler_cpu() -> usize",
@@ -154,6 +179,8 @@ for token in (
     "pub fn run_smp_input_device_self_test()",
     "pub fn run_smp_network_rx_self_test()",
     "pub fn run_smp_block_io_self_test()",
+    "pub fn run_smp_gpu_self_test()",
+    "MAKOS_AARCH64_SMP_GPU_OK",
     "MAKOS_AARCH64_SMP_BLOCK_OK",
     "register_smp_block_probe(waiter)",
     "create_inode(",
@@ -184,10 +211,17 @@ for token in (
     "aarch64-smp-block-probe.elf",
     "aarch64_smp_block_owner_probe.S",
     "aarch64-smp-block-owner-probe.elf",
+    "aarch64_smp_gpu_probe.S",
+    "aarch64-smp-gpu-probe",
+    "aarch64_smp_gpu_owner_probe.S",
+    "aarch64-smp-gpu-owner-probe",
 ):
     assert token in BUILD_RS, token
+for token in ("aarch64-smp-gpu-probe.elf", "aarch64-smp-gpu-owner-probe.elf"):
+    assert token in PROCESS, token
 assert "run_smp_network_rx_self_test();" in MAIN
 assert "run_smp_block_io_self_test();" in MAIN
+assert "run_smp_gpu_self_test();" in MAIN
 for token in ("mov x8, #47", "mov x8, #49", "mov x8, #50", "mov x0, #63"):
     assert token in NETWORK_PROBE, token
 for token in (
@@ -200,7 +234,21 @@ for token in (
     assert token in BLOCK_PROBE, token
 for token in ("add x19, x0, #100", "mov x0, #66"):
     assert token in BLOCK_OWNER_PROBE, token
-for token in ("pub(crate) fn register_smp_block_probe", "capabilities: CAP_FILE_WRITE"):
+for token in (
+    "mov x8, #8",
+    "mov x8, #9",
+    "mov x8, #10",
+    "mov x0, #67",
+):
+    assert token in GPU_PROBE, token
+for token in ("add x19, x0, #100", "mov x0, #68"):
+    assert token in GPU_OWNER_PROBE, token
+for token in (
+    "pub(crate) fn register_smp_block_probe",
+    "capabilities: CAP_FILE_WRITE",
+    "pub(crate) fn register_smp_graphics_probe",
+    "capabilities: CAP_GRAPHICS",
+):
     assert token in SECURITY, token
 
 # Any CPU0 compatibility wrapper here would silently mutate CPU0 ownership
@@ -238,6 +286,11 @@ for token in (
     "flush_completions=",
     "timer_completions=",
     "wait=bounded-el1-wfe status=65",
+    "MAKOS_AARCH64_SMP_GPU_OK presenter_cpu=1 service_cpu=0",
+    "device=virtio-gpu request=surface-create,fill,present ring_activity=real",
+    "mmio_owner=cpu0 contention=ap-deferred service_point=cpu0-timer-bottom-half",
+    "owner_composes=",
+    "transfer_completions=",
 ):
     assert token in INPUT_RUNTIME, token
 
