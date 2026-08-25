@@ -75,6 +75,16 @@ match the BSP at 1 MiB, and the boot contract requires
 `stack_bytes=1048576`. This is necessary before general AP syscalls, not merely
 for the fixture.
 
+A sixth fixture clones a shared-address-space sibling and rendezvous-holds the
+leader on CPU0 and worker on AP1 inside syscall 119 with distinct requested
+statuses 59 and 60. Exactly one caller owns the coordinator; the other joins
+the already-published group teardown. The joiner transitions its own task to
+Zombie under the process lock, switches to the kernel root, publishes the
+early-stop/ack bits after an inner-shareable barrier, and returns through its
+per-CPU kernel frame without running duplicate cleanup. Runtime proves
+`cpu_mask=0x3`, one owner bit, the complementary joined bit, first-owner status
+for both callers, one shared-root reap, and exact frame recovery.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -103,10 +113,10 @@ safe general process migration.
 - CPU0-initiated `exit_group` now stops and acknowledges both a remote-running
   EL0 sibling and a sibling inside a returning SVC/page-fault EL1 path before
   reap. Simultaneous unrelated groups now serialize without holding the
-  process-table lock. Simultaneous callers within the same group still need a
-  cooperative join path, and a permanently non-returning EL1 driver path would
-  require a cancellable safe point. Administrative `terminate` correctly
-  continues to reject a task owned by another CPU.
+  process-table lock, while simultaneous callers within one group cooperate
+  through a first-owner-wins join path. A permanently non-returning EL1 driver
+  path would still require a cancellable safe point. Administrative `terminate`
+  correctly continues to reject a task owned by another CPU.
 - AP banked virtual-timer PPI enable/programming and CPU0-only global tick/device
   servicing pass the bounded probe. General AP syscalls still require a complete
   device/service ownership audit.

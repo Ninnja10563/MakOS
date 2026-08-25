@@ -43,11 +43,17 @@ Last updated: 2026-08-25.
   exposed the former 64 KiB AP stack overwriting the adjacent kernel-root word;
   every AP now has a runtime-reported 1 MiB EL1 stack, and the full fixture plus
   visible login pass with exact frame balance.
+  A sixth fixture concurrently enters group exit from a shared-root leader on
+  CPU0 and worker on AP1 with distinct statuses 59/60. One caller owns teardown;
+  the other transitions itself to Zombie, switches to the kernel root, joins
+  the acknowledgement contract, and does not duplicate cleanup. Runtime proves
+  complementary owner/join masks, first-owner-wins status, one shared-root
+  reap, exact frame balance, and subsequent visible login.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
   desktop/Firefox AP scheduling remains gated pending input/device-triggered
-  idle returns, simultaneous same-group exit joining, device affinity
+  idle returns, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.

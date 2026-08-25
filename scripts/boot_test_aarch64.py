@@ -768,6 +768,7 @@ def main() -> int:
                 b"MAKOS_AARCH64_SMP_EXIT_GROUP_OK caller_cpu=0 stopped_cpu_mask=0x2 ack_mask=0x2",
                 b"MAKOS_AARCH64_SMP_EXIT_GROUP_EL1_OK caller_cpu=0 stopped_cpu_mask=0x2 ack_mask=0x2 entered_el1_mask=0x2 deferred_ack_mask=0x2",
                 b"MAKOS_AARCH64_SMP_CONCURRENT_EXIT_GROUP_OK callers=2 cpu_mask=0x3 rendezvous_mask=0x3 serialized_acquire_mask=0x3 statuses=57,58",
+                b"MAKOS_AARCH64_SMP_SAME_GROUP_EXIT_OK callers=2 cpu_mask=0x3",
                 b"aps=3 psci=",
                 b"conduit=hvc cpu_on=64 per_cpu_stacks=1 stack_bytes=1048576 per_cpu_vbar=1 coherent_parallel_el1=1",
                 b"userspace_scheduler_cpus=1 aps_after_test=idle scheduler_gate=closed ap_idle=wfi",
