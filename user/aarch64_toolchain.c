@@ -312,12 +312,17 @@ static size_t assemble(const char *source, size_t source_length,
 /*
  * Source-driven C subset compiler.  The accepted translation-unit grammar is:
  *
- *   int identifier(int identifier) { return expression; }
+ *   int identifier(int identifier) {
+ *       int identifier = expression;
+ *       if (expression == expression) { return expression; }
+ *       return expression;
+ *   }
  *
  * Expressions contain the parameter, unsigned 16-bit constants,
- * parentheses, and left-associative *, +, and -.  The output follows the
- * AArch64 integer calling convention and is later wrapped in a genuine
- * ELF64 ET_REL object by emit_object().  Unsupported syntax fails closed.
+ * parentheses, left-associative *, +, and -, and a bounded one-argument
+ * external call.  The output follows AAPCS64, including a non-leaf save
+ * frame, and is wrapped in a genuine ELF64 ET_REL object by emit_object().
+ * Unsupported syntax fails closed.
  */
 enum { MAX_C_LOCALS = 4 };
 
@@ -337,6 +342,8 @@ struct c_compiler {
     size_t parameter_length;
     struct c_local locals[MAX_C_LOCALS];
     size_t local_count;
+    struct relocation *relocations;
+    size_t *relocation_count;
 };
 
 static void c_space(struct c_compiler *compiler) {
@@ -418,10 +425,28 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
     char identifier[MAX_LABEL_BYTES];
     size_t identifier_length;
     if (!c_identifier(compiler, identifier, &identifier_length)) return 0;
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '(') {
+        if (destination != 0 || !compiler->relocations ||
+            !compiler->relocation_count ||
+            *compiler->relocation_count == MAX_RELOCATIONS)
+            return 0;
+        ++compiler->cursor;
+        if (!c_additive(compiler, 0) || !c_punct(compiler, ')')) return 0;
+        struct relocation *relocation =
+            &compiler->relocations[*compiler->relocation_count];
+        for (size_t index = 0; index < identifier_length; ++index)
+            relocation->name[index] = identifier[index];
+        relocation->length = identifier_length;
+        relocation->offset = compiler->output;
+        ++*compiler->relocation_count;
+        return c_emit(compiler, UINT32_C(0x94000000));
+    }
     uint32_t source_register = 0;
     if (same_name(identifier, identifier_length, compiler->parameter,
                   compiler->parameter_length)) {
-        source_register = 9;
+        source_register = 23;
     } else {
         size_t local = 0;
         while (local < compiler->local_count &&
@@ -430,7 +455,7 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
                           compiler->locals[local].length))
             ++local;
         if (local == compiler->local_count) return 0;
-        source_register = 10 + (uint32_t)local;
+        source_register = 19 + (uint32_t)local;
     }
     return c_emit(compiler, UINT32_C(0x2a0003e0) |
                             (source_register << 16) | destination);
@@ -480,9 +505,17 @@ static int c_equality(struct c_compiler *compiler) {
     return 1;
 }
 
+static int c_epilogue(struct c_compiler *compiler) {
+    return c_emit(compiler, UINT32_C(0xf9401bf7)) &&
+           c_emit(compiler, UINT32_C(0xa9425bf5)) &&
+           c_emit(compiler, UINT32_C(0xa94153f3)) &&
+           c_emit(compiler, UINT32_C(0xa8c47bfd)) &&
+           c_emit(compiler, UINT32_C(0xd65f03c0));
+}
+
 static int c_return_statement(struct c_compiler *compiler) {
     return c_additive(compiler, 0) && c_punct(compiler, ';') &&
-           c_emit(compiler, UINT32_C(0xd65f03c0));
+           c_epilogue(compiler);
 }
 
 static int c_declaration(struct c_compiler *compiler) {
@@ -499,7 +532,7 @@ static int c_declaration(struct c_compiler *compiler) {
     if (!c_punct(compiler, '=') || !c_additive(compiler, 0) ||
         !c_punct(compiler, ';'))
         return 0;
-    uint32_t register_index = 10 + (uint32_t)compiler->local_count;
+    uint32_t register_index = 19 + (uint32_t)compiler->local_count;
     if (!c_emit(compiler, UINT32_C(0x2a0003e0) | register_index)) return 0;
     compiler->locals[compiler->local_count++] = local;
     return 1;
@@ -526,12 +559,17 @@ static int c_if_return(struct c_compiler *compiler) {
 static size_t compile_c(const char *source, size_t source_length,
                         volatile uint8_t *code, size_t capacity,
                         char function[MAX_LABEL_BYTES],
-                        size_t *function_length) {
+                        size_t *function_length,
+                        struct relocation relocations[MAX_RELOCATIONS],
+                        size_t *relocation_count) {
+    if (relocation_count) *relocation_count = 0;
     struct c_compiler compiler = {
         .source = source,
         .source_length = source_length,
         .code = code,
         .capacity = capacity,
+        .relocations = relocations,
+        .relocation_count = relocation_count,
     };
     if (!function_length || !c_keyword(&compiler, "int") ||
         !c_identifier(&compiler, function, function_length) ||
@@ -540,8 +578,14 @@ static size_t compile_c(const char *source, size_t source_length,
                       &compiler.parameter_length) ||
         !c_punct(&compiler, ')') || !c_punct(&compiler, '{'))
         return 0;
-    /* mov w9, w0 preserves the sole AAPCS64 int parameter. */
-    if (!c_emit(&compiler, UINT32_C(0x2a0003e9))) return 0;
+    /* Preserve FP/LR and w19-w23 so emitted functions may call other objects. */
+    if (!c_emit(&compiler, UINT32_C(0xa9bc7bfd)) ||
+        !c_emit(&compiler, UINT32_C(0x910003fd)) ||
+        !c_emit(&compiler, UINT32_C(0xa90153f3)) ||
+        !c_emit(&compiler, UINT32_C(0xa9025bf5)) ||
+        !c_emit(&compiler, UINT32_C(0xf9001bf7)) ||
+        !c_emit(&compiler, UINT32_C(0x2a0003f7)))
+        return 0;
     int terminal_return = 0;
     size_t statement_count = 0;
     for (;;) {
@@ -620,30 +664,55 @@ static void symbol(volatile uint8_t *object, size_t symbols, size_t index,
 static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
                           const uint8_t *code, size_t code_length,
                           const char *definition, size_t definition_length,
-                          const struct relocation *relocation,
+                          const struct relocation *relocations,
                           size_t relocation_count) {
-    static const uint8_t strings[] = "\0_start\0answer\0";
     static const uint8_t section_strings[] =
         "\0.text\0.rela.text\0.symtab\0.strtab\0.shstrtab\0";
-    if (relocation_count > 1 || code_length == 0) return 0;
-    uint32_t definition_name;
-    if (same_name(definition, definition_length, "_start", 6))
-        definition_name = 1;
-    else if (same_name(definition, definition_length, "answer", 6))
-        definition_name = 8;
-    else
+    if (code_length == 0 || definition_length == 0 ||
+        definition_length > MAX_LABEL_BYTES || relocation_count > MAX_RELOCATIONS ||
+        (relocation_count != 0 && !relocations))
         return 0;
-    if (relocation_count == 1 &&
-        !same_name(relocation->name, relocation->length, "answer", 6))
-        return 0;
+    for (size_t index = 0; index < definition_length; ++index)
+        if (!name_byte(definition[index], index == 0)) return 0;
+
+    struct relocation undefined[MAX_RELOCATIONS] = {0};
+    size_t undefined_count = 0;
+    uint32_t relocation_symbols[MAX_RELOCATIONS] = {0};
+    uint32_t undefined_name_offsets[MAX_RELOCATIONS] = {0};
+    size_t string_length = 1 + definition_length + 1;
+    for (size_t index = 0; index < relocation_count; ++index) {
+        if (relocations[index].length == 0 ||
+            relocations[index].length > MAX_LABEL_BYTES ||
+            relocations[index].offset % 4 != 0 ||
+            relocations[index].offset > code_length ||
+            code_length - relocations[index].offset < 4 ||
+            get32(code, relocations[index].offset) != UINT32_C(0x94000000) ||
+            same_name(relocations[index].name, relocations[index].length,
+                      definition, definition_length))
+            return 0;
+        for (size_t byte = 0; byte < relocations[index].length; ++byte)
+            if (!name_byte(relocations[index].name[byte], byte == 0)) return 0;
+        size_t match = 0;
+        while (match < undefined_count &&
+               !same_name(relocations[index].name, relocations[index].length,
+                          undefined[match].name, undefined[match].length))
+            ++match;
+        if (match == undefined_count) {
+            undefined[undefined_count] = relocations[index];
+            undefined_name_offsets[undefined_count] = (uint32_t)string_length;
+            string_length += relocations[index].length + 1;
+            ++undefined_count;
+        }
+        relocation_symbols[index] = 2 + (uint32_t)match;
+    }
 
     size_t text_offset = ELF_HEADER_SIZE;
     size_t rela_offset = align_up(text_offset + code_length, 8);
     size_t rela_length = relocation_count * RELA_SIZE;
     size_t symbol_offset = align_up(rela_offset + rela_length, 8);
-    size_t symbol_count = relocation_count ? 3 : 2;
+    size_t symbol_count = 2 + undefined_count;
     size_t string_offset = symbol_offset + symbol_count * SYMBOL_SIZE;
-    size_t section_string_offset = string_offset + sizeof(strings) - 1;
+    size_t section_string_offset = string_offset + string_length;
     size_t section_headers = align_up(section_string_offset +
                                       sizeof(section_strings) - 1, 8);
     size_t object_length = section_headers + 6 * SECTION_HEADER_SIZE;
@@ -661,15 +730,27 @@ static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
     put16(object, 60, 6);
     put16(object, 62, 5);
     copy_bytes(object + text_offset, code, code_length);
-    if (relocation_count) {
-        put64(object, rela_offset, relocation->offset);
-        put64(object, rela_offset + 8,
-              (UINT64_C(2) << 32) | R_AARCH64_CALL26);
-        put64(object, rela_offset + 16, 0);
+    for (size_t index = 0; index < relocation_count; ++index) {
+        size_t entry = rela_offset + index * RELA_SIZE;
+        put64(object, entry, relocations[index].offset);
+        put64(object, entry + 8,
+              ((uint64_t)relocation_symbols[index] << 32) | R_AARCH64_CALL26);
+        put64(object, entry + 16, 0);
     }
-    symbol(object, symbol_offset, 1, definition_name, 1, 0, code_length);
-    if (relocation_count) symbol(object, symbol_offset, 2, 8, 0, 0, 0);
-    copy_bytes(object + string_offset, strings, sizeof(strings) - 1);
+    symbol(object, symbol_offset, 1, 1, 1, 0, code_length);
+    for (size_t index = 0; index < undefined_count; ++index)
+        symbol(object, symbol_offset, 2 + index,
+               undefined_name_offsets[index], 0, 0, 0);
+    size_t string_cursor = string_offset + 1;
+    copy_bytes(object + string_cursor, (const uint8_t *)definition,
+               definition_length);
+    string_cursor += definition_length + 1;
+    for (size_t index = 0; index < undefined_count; ++index) {
+        copy_bytes(object + string_cursor,
+                   (const uint8_t *)undefined[index].name,
+                   undefined[index].length);
+        string_cursor += undefined[index].length + 1;
+    }
     copy_bytes(object + section_string_offset, section_strings,
                sizeof(section_strings) - 1);
 
@@ -680,7 +761,7 @@ static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
     section(object, section_headers, 3, 18, 2, 0, symbol_offset,
             symbol_count * SYMBOL_SIZE, 4, 1, 8, SYMBOL_SIZE);
     section(object, section_headers, 4, 26, 3, 0, string_offset,
-            sizeof(strings) - 1, 0, 0, 1, 0);
+            string_length, 0, 0, 1, 0);
     section(object, section_headers, 5, 34, 3, 0, section_string_offset,
             sizeof(section_strings) - 1, 0, 0, 1, 0);
     return object_length;
@@ -774,10 +855,40 @@ static int parse_object(const uint8_t *bytes, size_t length,
     return 1;
 }
 
-static int find_symbol(const struct object_view *object, const char *name,
-                       int definition, size_t *index_out, uint64_t *value_out) {
-    size_t found = object->symbol_count;
-    uint64_t found_value = 0;
+static int object_string_valid(const struct object_view *object,
+                               uint32_t offset) {
+    if (offset == 0 || offset >= object->string_length) return 0;
+    for (size_t index = offset; index < object->string_length; ++index)
+        if (object->bytes[object->string_offset + index] == 0)
+            return index != offset;
+    return 0;
+}
+
+static int symbol_names_equal(const struct object_view *first,
+                              size_t first_symbol,
+                              const struct object_view *second,
+                              size_t second_symbol) {
+    size_t first_entry = first->symbol_offset + first_symbol * SYMBOL_SIZE;
+    size_t second_entry = second->symbol_offset + second_symbol * SYMBOL_SIZE;
+    uint32_t first_offset = get32(first->bytes, first_entry);
+    uint32_t second_offset = get32(second->bytes, second_entry);
+    if (!object_string_valid(first, first_offset) ||
+        !object_string_valid(second, second_offset))
+        return 0;
+    for (size_t index = 0;; ++index) {
+        uint8_t first_byte = first->bytes[first->string_offset + first_offset + index];
+        uint8_t second_byte = second->bytes[second->string_offset + second_offset + index];
+        if (first_byte != second_byte) return 0;
+        if (first_byte == 0) return 1;
+    }
+}
+
+static int validate_symbols(const struct object_view *object) {
+    if (object->rela_count > MAX_RELOCATIONS ||
+        object->symbol_count > MAX_RELOCATIONS + 2)
+        return 0;
+    for (size_t byte = 0; byte < SYMBOL_SIZE; ++byte)
+        if (object->bytes[object->symbol_offset + byte] != 0) return 0;
     for (size_t index = 1; index < object->symbol_count; ++index) {
         size_t entry = object->symbol_offset + index * SYMBOL_SIZE;
         uint32_t name_offset = get32(object->bytes, entry);
@@ -785,74 +896,143 @@ static int find_symbol(const struct object_view *object, const char *name,
         uint64_t value = get64(object->bytes, entry + 8);
         uint64_t symbol_size = get64(object->bytes, entry + 16);
         if (object->bytes[entry + 4] != 0x12 ||
+            !object_string_valid(object, name_offset) ||
             (section_index != 0 && section_index != 1) ||
+            (section_index == 0 && (value != 0 || symbol_size != 0)) ||
             (section_index == 1 &&
-             (value > object->text_length ||
+             (value >= object->text_length ||
               symbol_size > object->text_length - (size_t)value)))
             return 0;
-        if (string_is(object, name_offset, name) &&
-            ((section_index == 1) == definition)) {
-            if (found != object->symbol_count) return 0;
-            found = index;
-            found_value = value;
-        }
     }
-    if (found == object->symbol_count) return 0;
-    *index_out = found;
-    *value_out = found_value;
     return 1;
 }
 
-static size_t link_objects(const uint8_t *main_bytes, size_t main_length,
-                           const uint8_t *answer_bytes, size_t answer_length,
-                           uint8_t *output, size_t capacity, size_t *entry_out) {
-    struct object_view main_object, answer_object;
-    if (!parse_object(main_bytes, main_length, &main_object) ||
-        !parse_object(answer_bytes, answer_length, &answer_object) ||
-        main_object.rela_count != 1 || answer_object.rela_count != 0 ||
-        main_object.symbol_count != 3 || answer_object.symbol_count != 2)
-        return 0;
-    size_t start_index, undefined_index, answer_index;
-    uint64_t start_value, undefined_value, answer_value;
-    if (!find_symbol(&main_object, "_start", 1, &start_index, &start_value) ||
-        !find_symbol(&main_object, "answer", 0, &undefined_index,
-                     &undefined_value) ||
-        !find_symbol(&answer_object, "answer", 1, &answer_index,
-                     &answer_value) ||
-        undefined_value != 0 || start_index != 1 || undefined_index != 2 ||
-        answer_index != 1)
-        return 0;
-    size_t answer_base = align_up(main_object.text_length, 4);
-    size_t output_length = answer_base + answer_object.text_length;
-    if (output_length > capacity || start_value >= output_length ||
-        answer_value >= answer_object.text_length)
-        return 0;
-    memset(output, 0, output_length);
-    copy_bytes(output, main_object.bytes + main_object.text_offset,
-               main_object.text_length);
-    copy_bytes(output + answer_base,
-               answer_object.bytes + answer_object.text_offset,
-               answer_object.text_length);
+enum { MAX_LINK_OBJECTS = 3 };
 
-    size_t relocation = main_object.rela_offset;
-    uint64_t relocation_offset = get64(main_object.bytes, relocation);
-    uint64_t relocation_info = get64(main_object.bytes, relocation + 8);
-    int64_t addend = (int64_t)get64(main_object.bytes, relocation + 16);
-    if ((uint32_t)relocation_info != R_AARCH64_CALL26 ||
-        (uint32_t)(relocation_info >> 32) != undefined_index || addend != 0 ||
-        relocation_offset > main_object.text_length ||
-        main_object.text_length - (size_t)relocation_offset < 4)
+static size_t link_objects(const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
+                           const size_t object_lengths[MAX_LINK_OBJECTS],
+                           size_t object_count, uint8_t *output,
+                           size_t capacity, const char *entry_name,
+                           size_t *entry_out) {
+    if (!entry_out || !entry_name || object_count == 0 ||
+        object_count > MAX_LINK_OBJECTS)
         return 0;
-    uint32_t instruction = get32(output, (size_t)relocation_offset);
-    if (instruction != UINT32_C(0x94000000)) return 0;
-    int64_t target = (int64_t)answer_base + (int64_t)answer_value + addend;
-    int64_t delta = target - (int64_t)relocation_offset;
-    if (delta % 4 != 0) return 0;
-    int64_t immediate = delta / 4;
-    if (immediate < -33554432 || immediate > 33554431) return 0;
-    instruction |= (uint32_t)immediate & UINT32_C(0x03ffffff);
-    put32(output, (size_t)relocation_offset, instruction);
-    *entry_out = (size_t)start_value;
+    struct object_view objects[MAX_LINK_OBJECTS] = {0};
+    size_t bases[MAX_LINK_OBJECTS] = {0};
+    size_t output_length = 0;
+    for (size_t object = 0; object < object_count; ++object) {
+        if (!parse_object(object_bytes[object], object_lengths[object],
+                          &objects[object]) ||
+            !validate_symbols(&objects[object]))
+            return 0;
+        bases[object] = align_up(output_length, 4);
+        if (bases[object] > capacity ||
+            objects[object].text_length > capacity - bases[object])
+            return 0;
+        output_length = bases[object] + objects[object].text_length;
+    }
+    if (output_length == 0 || output_length > capacity) return 0;
+
+    size_t entry_matches = 0;
+    size_t entry_offset = 0;
+    for (size_t first_object = 0; first_object < object_count; ++first_object) {
+        for (size_t first_symbol = 1;
+             first_symbol < objects[first_object].symbol_count; ++first_symbol) {
+            size_t first_entry = objects[first_object].symbol_offset +
+                                 first_symbol * SYMBOL_SIZE;
+            if (get16(objects[first_object].bytes, first_entry + 6) != 1)
+                continue;
+            if (string_is(&objects[first_object],
+                          get32(objects[first_object].bytes, first_entry),
+                          entry_name)) {
+                ++entry_matches;
+                entry_offset = bases[first_object] +
+                               (size_t)get64(objects[first_object].bytes,
+                                             first_entry + 8);
+            }
+            for (size_t second_object = first_object;
+                 second_object < object_count; ++second_object) {
+                size_t start_symbol = second_object == first_object
+                                          ? first_symbol + 1
+                                          : 1;
+                for (size_t second_symbol = start_symbol;
+                     second_symbol < objects[second_object].symbol_count;
+                     ++second_symbol) {
+                    size_t second_entry = objects[second_object].symbol_offset +
+                                          second_symbol * SYMBOL_SIZE;
+                    if (get16(objects[second_object].bytes,
+                              second_entry + 6) == 1 &&
+                        symbol_names_equal(&objects[first_object], first_symbol,
+                                           &objects[second_object], second_symbol))
+                        return 0;
+                }
+            }
+        }
+    }
+    if (entry_matches != 1 || entry_offset >= output_length) return 0;
+
+    memset(output, 0, output_length);
+    for (size_t object = 0; object < object_count; ++object)
+        copy_bytes(output + bases[object],
+                   objects[object].bytes + objects[object].text_offset,
+                   objects[object].text_length);
+
+    for (size_t object = 0; object < object_count; ++object) {
+        for (size_t relocation_index = 0;
+             relocation_index < objects[object].rela_count;
+             ++relocation_index) {
+            size_t relocation = objects[object].rela_offset +
+                                relocation_index * RELA_SIZE;
+            uint64_t offset64 = get64(objects[object].bytes, relocation);
+            uint64_t info = get64(objects[object].bytes, relocation + 8);
+            int64_t addend = (int64_t)get64(objects[object].bytes,
+                                             relocation + 16);
+            size_t symbol_index = (size_t)(info >> 32);
+            if ((uint32_t)info != R_AARCH64_CALL26 ||
+                addend != 0 ||
+                symbol_index == 0 ||
+                symbol_index >= objects[object].symbol_count ||
+                offset64 > objects[object].text_length ||
+                objects[object].text_length - (size_t)offset64 < 4)
+                return 0;
+            size_t symbol_entry = objects[object].symbol_offset +
+                                  symbol_index * SYMBOL_SIZE;
+            if (get16(objects[object].bytes, symbol_entry + 6) != 0) return 0;
+
+            size_t target_matches = 0;
+            int64_t target = 0;
+            for (size_t target_object = 0; target_object < object_count;
+                 ++target_object) {
+                for (size_t target_symbol = 1;
+                     target_symbol < objects[target_object].symbol_count;
+                     ++target_symbol) {
+                    size_t target_entry = objects[target_object].symbol_offset +
+                                          target_symbol * SYMBOL_SIZE;
+                    if (get16(objects[target_object].bytes,
+                              target_entry + 6) == 1 &&
+                        symbol_names_equal(&objects[object], symbol_index,
+                                           &objects[target_object], target_symbol)) {
+                        ++target_matches;
+                        target = (int64_t)bases[target_object] +
+                                 (int64_t)get64(objects[target_object].bytes,
+                                                target_entry + 8) + addend;
+                    }
+                }
+            }
+            if (target_matches != 1) return 0;
+            size_t source = bases[object] + (size_t)offset64;
+            uint32_t instruction = get32(output, source);
+            if (instruction != UINT32_C(0x94000000)) return 0;
+            int64_t delta = target - (int64_t)source;
+            if (delta % 4 != 0) return 0;
+            int64_t immediate = delta / 4;
+            if (immediate < -33554432 || immediate > 33554431) return 0;
+            put32(output, source,
+                  instruction |
+                      ((uint32_t)immediate & UINT32_C(0x03ffffff)));
+        }
+    }
+    *entry_out = entry_offset;
     return output_length;
 }
 
@@ -908,8 +1088,10 @@ static void fail(uint64_t status) {
 __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char main_source_path[] = "/home/user/generated.s";
     static const char answer_source_path[] = "/home/user/generated-answer.c";
+    static const char adjust_source_path[] = "/home/user/generated-adjust.c";
     static const char main_object_path[] = "/home/user/generated-main.o";
     static const char answer_object_path[] = "/home/user/generated-answer.o";
+    static const char adjust_object_path[] = "/home/user/generated-adjust.o";
     static const char output_path[] = "/home/user/generated-aarch64.elf";
     static const char main_source[] =
         "_start:\n"
@@ -938,9 +1120,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int answer(int value) {\n"
         "    int normalized = (value * 3) - 20;\n"
         "    if (normalized == 40) {\n"
-        "        return normalized + 2;\n"
+        "        return adjust(normalized);\n"
         "    }\n"
         "    return 86;\n"
+        "}\n";
+    static const char adjust_source[] =
+        "int adjust(int value) {\n"
+        "    return value + 2;\n"
         "}\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value / 2; }\n";
@@ -948,62 +1134,90 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int answer(int value) { if (value == 1) { return 42; } }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
-        "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
-        "compiler=guest-native assembler=guest-native objects=2 "
-        "format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
-        "symbols=_start,answer output=/home/user/generated-aarch64.elf "
+        "MAKOS_AARCH64_LINKER_OK sources=3 languages=aarch64-asm,c-subset-v1 "
+        "compiler=guest-native assembler=guest-native objects=3 "
+        "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:2 "
+        "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
         "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 "
-        "c_features=parameter,local,if,equality,return "
-        "c_operators=mul,sub,add branch_results=42,86 code_bytes=76,68 "
-        "object_bytes=688,632 linked_bytes=144 output_bytes=559 "
+        "c_features=parameter,local,if,equality,call,return nonleaf_frame=64 "
+        "c_operators=mul,sub,add branch_results=42,86 code_bytes=76,116,56 "
+        "object_bytes=688,728,608 linked_bytes=248 output_bytes=559 "
         "persisted_reopened=1 malformed_c_denied=2 "
-        "malformed_object_denied=1 segments=2 "
+        "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
+        "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
 
     if (!write_file(main_source_path, sizeof(main_source_path) - 1,
                     (const uint8_t *)main_source, sizeof(main_source) - 1) ||
         !write_file(answer_source_path, sizeof(answer_source_path) - 1,
-                    (const uint8_t *)answer_source, sizeof(answer_source) - 1))
+                    (const uint8_t *)answer_source, sizeof(answer_source) - 1) ||
+        !write_file(adjust_source_path, sizeof(adjust_source_path) - 1,
+                    (const uint8_t *)adjust_source, sizeof(adjust_source) - 1))
         fail(80);
     uint8_t source_input[512] = {0}, answer_input[256] = {0};
+    uint8_t adjust_input[128] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
     size_t answer_source_length = read_file(answer_source_path,
                                             sizeof(answer_source_path) - 1,
                                             answer_input, sizeof(answer_input));
+    size_t adjust_source_length = read_file(adjust_source_path,
+                                            sizeof(adjust_source_path) - 1,
+                                            adjust_input, sizeof(adjust_input));
     if (source_length != sizeof(main_source) - 1 ||
-        answer_source_length != sizeof(answer_source) - 1)
+        answer_source_length != sizeof(answer_source) - 1 ||
+        adjust_source_length != sizeof(adjust_source) - 1)
         fail(81);
 
-    uint8_t main_code[128] = {0}, answer_code[128] = {0};
-    struct relocation relocations[MAX_RELOCATIONS] = {0};
-    size_t relocation_count = 0;
+    uint8_t main_code[128] = {0}, answer_code[128] = {0}, adjust_code[128] = {0};
+    struct relocation main_relocations[MAX_RELOCATIONS] = {0};
+    struct relocation answer_relocations[MAX_RELOCATIONS] = {0};
+    struct relocation adjust_relocations[MAX_RELOCATIONS] = {0};
+    size_t main_relocation_count = 0, answer_relocation_count = 0;
+    size_t adjust_relocation_count = 0;
     size_t main_code_length = assemble((const char *)source_input, source_length,
-                                       main_code, sizeof(main_code), relocations,
-                                       &relocation_count);
-    char function[MAX_LABEL_BYTES] = {0};
-    size_t function_length = 0;
+                                       main_code, sizeof(main_code),
+                                       main_relocations,
+                                       &main_relocation_count);
+    char answer_function[MAX_LABEL_BYTES] = {0};
+    size_t answer_function_length = 0;
+    char adjust_function[MAX_LABEL_BYTES] = {0};
+    size_t adjust_function_length = 0;
     uint8_t malformed_code[128] = {0};
     char malformed_function[MAX_LABEL_BYTES] = {0};
     size_t malformed_function_length = 0;
     if (compile_c(malformed_c_source, sizeof(malformed_c_source) - 1,
                   malformed_code, sizeof(malformed_code), malformed_function,
-                  &malformed_function_length) != 0)
+                  &malformed_function_length, 0, 0) != 0)
         fail(82);
     malformed_function_length = 0;
     if (compile_c(malformed_control_source,
                   sizeof(malformed_control_source) - 1, malformed_code,
                   sizeof(malformed_code), malformed_function,
-                  &malformed_function_length) != 0)
+                  &malformed_function_length, 0, 0) != 0)
         fail(82);
     size_t answer_code_length = compile_c((const char *)answer_input,
                                           answer_source_length, answer_code,
-                                          sizeof(answer_code), function,
-                                          &function_length);
-    if (main_code_length != 76 || answer_code_length != 68 ||
-        !same_name(function, function_length, "answer", 6) ||
-        relocation_count != 1 || relocations[0].offset != 52)
+                                          sizeof(answer_code), answer_function,
+                                          &answer_function_length,
+                                          answer_relocations,
+                                          &answer_relocation_count);
+    size_t adjust_code_length = compile_c((const char *)adjust_input,
+                                          adjust_source_length, adjust_code,
+                                          sizeof(adjust_code), adjust_function,
+                                          &adjust_function_length,
+                                          adjust_relocations,
+                                          &adjust_relocation_count);
+    if (main_code_length != 76 || answer_code_length != 116 ||
+        adjust_code_length != 56 ||
+        !same_name(answer_function, answer_function_length, "answer", 6) ||
+        !same_name(adjust_function, adjust_function_length, "adjust", 6) ||
+        main_relocation_count != 1 || main_relocations[0].offset != 52 ||
+        answer_relocation_count != 1 || answer_relocations[0].offset != 68 ||
+        !same_name(answer_relocations[0].name,
+                   answer_relocations[0].length, "adjust", 6) ||
+        adjust_relocation_count != 0)
         fail(82);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -1018,42 +1232,55 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     uint64_t jit_result = ((uint64_t (*)(void))(uintptr_t)jit)();
     if (jit_result != 42) fail(84);
 
-    uint8_t *compiled_jit =
-        (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
-    if ((uintptr_t)compiled_jit == UINT64_MAX) fail(84);
-    copy_bytes(compiled_jit, answer_code, answer_code_length);
-    if (syscall4(SYS_VM_PROTECT, (uintptr_t)compiled_jit,
-                 PROT_READ | PROT_WRITE | PROT_EXEC, 0, 0) != 0 ||
-        syscall4(SYS_VM_PROTECT, (uintptr_t)compiled_jit,
-                 PROT_READ | PROT_EXEC, 0, 0) != 1)
-        fail(84);
-    uint64_t (*compiled_answer)(uint64_t) =
-        (uint64_t (*)(uint64_t))(uintptr_t)compiled_jit;
-    if (compiled_answer(20) != 42 || compiled_answer(0) != 86) fail(84);
+    uint8_t rejected_object[OBJECT_CAPACITY];
+    struct relocation invalid_emit = main_relocations[0];
+    invalid_emit.offset = main_code_length;
+    if (emit_object(rejected_object, main_code, main_code_length, "_start", 6,
+                    &invalid_emit, 1) != 0)
+        fail(85);
 
     uint8_t main_object[OBJECT_CAPACITY], answer_object[OBJECT_CAPACITY];
+    uint8_t adjust_object[OBJECT_CAPACITY];
     size_t main_object_length = emit_object(main_object, main_code,
                                             main_code_length, "_start", 6,
-                                            relocations, relocation_count);
+                                            main_relocations,
+                                            main_relocation_count);
     size_t answer_object_length = emit_object(answer_object, answer_code,
-                                              answer_code_length, function,
-                                              function_length, 0, 0);
-    if (main_object_length != 688 || answer_object_length != 632 ||
+                                              answer_code_length,
+                                              answer_function,
+                                              answer_function_length,
+                                              answer_relocations,
+                                              answer_relocation_count);
+    size_t adjust_object_length = emit_object(adjust_object, adjust_code,
+                                              adjust_code_length,
+                                              adjust_function,
+                                              adjust_function_length,
+                                              adjust_relocations,
+                                              adjust_relocation_count);
+    if (main_object_length != 688 || answer_object_length != 728 ||
+        adjust_object_length != 608 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(answer_object_path, sizeof(answer_object_path) - 1,
-                    answer_object, answer_object_length))
+                    answer_object, answer_object_length) ||
+        !write_file(adjust_object_path, sizeof(adjust_object_path) - 1,
+                    adjust_object, adjust_object_length))
         fail(85);
 
     memset(main_object, 0, sizeof(main_object));
     memset(answer_object, 0, sizeof(answer_object));
+    memset(adjust_object, 0, sizeof(adjust_object));
     main_object_length = read_file(main_object_path,
                                    sizeof(main_object_path) - 1,
                                    main_object, sizeof(main_object));
     answer_object_length = read_file(answer_object_path,
                                      sizeof(answer_object_path) - 1,
                                      answer_object, sizeof(answer_object));
-    if (!main_object_length || !answer_object_length) fail(86);
+    adjust_object_length = read_file(adjust_object_path,
+                                     sizeof(adjust_object_path) - 1,
+                                     adjust_object, sizeof(adjust_object));
+    if (!main_object_length || !answer_object_length || !adjust_object_length)
+        fail(86);
 
     struct object_view corrupt_view;
     if (!parse_object(main_object, main_object_length, &corrupt_view)) fail(87);
@@ -1062,16 +1289,52 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1);
     uint8_t linked_code[256] = {0};
     size_t entry_offset = 0;
-    if (link_objects(main_object, main_object_length, answer_object,
-                     answer_object_length, linked_code, sizeof(linked_code),
-                     &entry_offset) != 0)
+    const uint8_t *objects[MAX_LINK_OBJECTS] = {
+        main_object, answer_object, adjust_object,
+    };
+    size_t object_lengths[MAX_LINK_OBJECTS] = {
+        main_object_length, answer_object_length, adjust_object_length,
+    };
+    if (link_objects(objects, object_lengths, 3, linked_code,
+                     sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
     main_object[corrupt_info] = saved_type;
-    size_t linked_length = link_objects(main_object, main_object_length,
-                                        answer_object, answer_object_length,
-                                        linked_code, sizeof(linked_code),
+    size_t corrupt_addend = corrupt_view.rela_offset + 16;
+    if (main_object[corrupt_addend] != 0) fail(88);
+    main_object[corrupt_addend] = 1;
+    if (link_objects(objects, object_lengths, 3, linked_code,
+                     sizeof(linked_code), "_start", &entry_offset) != 0)
+        fail(88);
+    main_object[corrupt_addend] = 0;
+    if (link_objects(objects, object_lengths, 2, linked_code,
+                     sizeof(linked_code), "_start", &entry_offset) != 0)
+        fail(88);
+    const uint8_t *duplicate_objects[MAX_LINK_OBJECTS] = {
+        main_object, answer_object, answer_object,
+    };
+    size_t duplicate_lengths[MAX_LINK_OBJECTS] = {
+        main_object_length, answer_object_length, answer_object_length,
+    };
+    if (link_objects(duplicate_objects, duplicate_lengths, 3, linked_code,
+                     sizeof(linked_code), "_start", &entry_offset) != 0)
+        fail(88);
+    size_t linked_length = link_objects(objects, object_lengths, 3, linked_code,
+                                        sizeof(linked_code), "_start",
                                         &entry_offset);
-    if (linked_length != 144 || entry_offset != 0) fail(89);
+    if (linked_length != 248 || entry_offset != 0) fail(89);
+
+    uint8_t *compiled_jit =
+        (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
+    if ((uintptr_t)compiled_jit == UINT64_MAX) fail(89);
+    copy_bytes(compiled_jit, linked_code, linked_length);
+    if (syscall4(SYS_VM_PROTECT, (uintptr_t)compiled_jit,
+                 PROT_READ | PROT_WRITE | PROT_EXEC, 0, 0) != 0 ||
+        syscall4(SYS_VM_PROTECT, (uintptr_t)compiled_jit,
+                 PROT_READ | PROT_EXEC, 0, 0) != 1)
+        fail(89);
+    uint64_t (*compiled_answer)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 76);
+    if (compiled_answer(20) != 42 || compiled_answer(0) != 86) fail(89);
 
     volatile uint8_t image[IMAGE_CAPACITY];
     size_t image_length = emit_elf(image, linked_code, linked_length,

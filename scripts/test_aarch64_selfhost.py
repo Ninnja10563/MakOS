@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural guard for guest-native AArch64 assembly, ET_REL, and linking."""
+"""Structural guard for three-object guest-native AArch64 compilation/linking."""
 
 from pathlib import Path
 
@@ -32,8 +32,10 @@ for fragment in (
     '"int answer(int value) {\\n"',
     '"    int normalized = (value * 3) - 20;\\n"',
     '"    if (normalized == 40) {\\n"',
-    '"        return normalized + 2;\\n"',
+    '"        return adjust(normalized);\\n"',
     '"    return 86;\\n"',
+    '"int adjust(int value) {\\n"',
+    '"    return value + 2;\\n"',
     "static size_t assemble(",
     "static size_t compile_c(",
     "static int c_additive(",
@@ -45,7 +47,10 @@ for fragment in (
     "UINT32_C(0x0b000000)",
     "UINT32_C(0x4b000000)",
     "UINT32_C(0x52800000)",
-    "UINT32_C(0x2a0003e9)",
+    "UINT32_C(0xa9bc7bfd)",
+    "UINT32_C(0xa8c47bfd)",
+    "UINT32_C(0x2a0003f7)",
+    "UINT32_C(0x94000000)",
     "UINT32_C(0x6b00001f)",
     "UINT32_C(0x54000001)",
     "malformed_c_source",
@@ -54,24 +59,38 @@ for fragment in (
     "static size_t emit_object(",
     "static int parse_object(",
     "static size_t link_objects(",
+    "MAX_LINK_OBJECTS = 3",
     "R_AARCH64_CALL26 = 283",
-    "(UINT64_C(2) << 32) | R_AARCH64_CALL26",
+    "((uint64_t)relocation_symbols[index] << 32) | R_AARCH64_CALL26",
     "main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1)",
     "main_object[corrupt_info] = saved_type",
-    "main_object_length != 688 || answer_object_length != 632",
-    "linked_length != 144",
+    "invalid_emit.offset = main_code_length",
+    "main_object[corrupt_addend] = 1",
+    "main_object[corrupt_addend] = 0",
+    "bases[object] > capacity",
+    "addend != 0",
+    "link_objects(objects, object_lengths, 2",
+    "link_objects(duplicate_objects, duplicate_lengths, 3",
+    "answer_relocations[0].offset != 68",
+    "compiled_answer(20) != 42 || compiled_answer(0) != 86",
+    "main_object_length != 688 || answer_object_length != 728",
+    "adjust_object_length != 608",
+    "linked_length != 248",
     "image_length != 559",
     "format=elf64-et-rel",
     "persisted_reopened=1 malformed_c_denied=2",
-    "malformed_object_denied=1",
+    "malformed_relocation_denied=1 unresolved_symbol_denied=1",
+    "duplicate_definition_denied=1",
     "PF_R | PF_X",
     "deliberately NX",
     "PROT_READ | PROT_WRITE | PROT_EXEC",
     "MAKOS_AARCH64_LINKER_OK",
     "/home/user/generated.s",
     "/home/user/generated-answer.c",
+    "/home/user/generated-adjust.c",
     "/home/user/generated-main.o",
     "/home/user/generated-answer.o",
+    "/home/user/generated-adjust.o",
     "/home/user/generated-aarch64.elf",
 ):
     require(TOOLCHAIN, fragment)
@@ -106,15 +125,15 @@ require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
 require(SHELL, "sizeof(startup) - 1")
-require(SHELL, "objects=2 object_format=elf64-et-rel")
+require(SHELL, "objects=3 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
-require(SHELL, "relocation=R_AARCH64_CALL26 symbols=_start,answer")
+require(SHELL, "relocations=R_AARCH64_CALL26:2 symbols=_start,answer,adjust")
 require(SHELL, "c_abi=aapcs64-int32")
-require(SHELL, "c_features=parameter,local,if,equality,return")
+require(SHELL, "c_features=parameter,local,if,equality,call,return nonleaf_frame=64")
 require(SHELL, "c_operators=mul,sub,add branch_results=42,86")
-require(SHELL, "code_bytes=76,68 object_bytes=688,632 linked_bytes=144 output_bytes=559")
+require(SHELL, "code_bytes=76,116,56 object_bytes=688,728,608 linked_bytes=248 output_bytes=559")
 require(SHELL, "malformed_c_denied=2")
-require(SHELL, "malformed_object_denied=1")
+require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
 require(SECURITY, "SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE")
@@ -122,7 +141,9 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_c_denied=2 malformed_object_denied=1")
+require(FOCUSED_RUNTIME, "malformed_c_denied=2")
+require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
+require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")
 
 print("AArch64 guest self-hosting structural test passed")

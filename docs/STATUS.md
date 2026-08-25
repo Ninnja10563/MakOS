@@ -174,27 +174,28 @@ Last updated: 2026-08-25.
   records simultaneous distinct TIDs on AP1/AP3. Automatic migration and the
   same overlap/contention from the genuine Firefox process are still open, so
   the scheduler row stays Partial.
-- 2026-08-25 the AArch64 guest-native toolchain now crosses both a genuine
-  source/compiler boundary and the existing object/link boundary. It writes an
-  assembly startup and valid C source to MakFS and rereads them. The bounded C
-  subset parser accepts one AAPCS64 `int` function/parameter, up to four
+- 2026-08-25 the AArch64 guest-native toolchain now crosses a genuine
+  three-source/three-object build boundary. It writes and rereads an assembly
+  startup plus `answer` and `adjust` C sources through MakFS. Each bounded C
+  translation unit accepts one AAPCS64 `int` function/parameter, up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
-  `*`/`+`/`-`, and an equality `if` block with a required terminal return. It
-  emits 32-bit A64 instructions plus a patched `B.NE`, and rejects unsupported
-  syntax or a missing all-path return. The exercised multi-statement `answer`
-  computes local `(value * 3) - 20`, returns local+2 when it equals 40, and
-  otherwise returns 86. RX JIT calls prove 20→42 and 0→86. The function becomes
-  68 code bytes and a 632-byte ELF64 `ET_REL`; the assembler produces 76 code
-  bytes and a 688-byte `ET_REL`. Both objects contain real section/symbol/string tables, are
-  persisted and reopened, and link through a validated `R_AARCH64_CALL26` into
-  144 code bytes and a 559-byte two-`PT_LOAD` `ET_EXEC`. The runtime rejects a
-  malformed C division expression, a non-total conditional function, and copied relocation type 282 before the
-  valid build. Focused Pi/QEMU 10.0.11 TCG executes/reaps the final ELF twice
-  with status 42 through syscalls 56/57. Release artifact validation, focused
-  runtime, structural guard, and full `make unit check` pass. This is a real but
-  deliberately bounded C compiler/static-linker seed, not a general C/Rust
-  compiler or linker, build system, debugger, or substantial in-guest MakOS build, so
-  self-hosting remains Partial.
+  `*`/`+`/`-`, an equality `if`, and a one-argument cross-object call. Emitted
+  non-leaf functions preserve FP/LR and x19-x23 in a 64-byte frame. The compiler
+  produces 116-byte `answer` and 56-byte `adjust` code in 728/608-byte ELF64
+  `ET_REL` objects; the assembler produces 76 bytes in a 688-byte object. All
+  three persist and reopen. The bounded general linker concatenates up to three
+  objects, discovers global definitions/undefined symbols, applies two validated
+  `R_AARCH64_CALL26` relocations (`_start`→`answer`→`adjust`), and emits 248 code
+  bytes in a 559-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
+  site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
+  and duplicate `answer` definitions. Division syntax
+  and a non-total conditional function also fail closed. RX execution of the
+  fully linked C graph proves 20→42 and 0→86; focused Pi/QEMU 10.0.11 TCG then
+  executes/reaps the final ELF twice with status 42 through syscalls 56/57.
+  Release artifact validation, focused runtime, structural guard, and full
+  `make unit check` pass. This is a real but deliberately bounded seed, not a
+  general C/Rust compiler/linker, build system, debugger, or substantial
+  in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment
@@ -790,8 +791,9 @@ Last updated: 2026-08-25.
   full gate pass. A later unchanged run additionally passed the new guest
   assembler, persisted-ELF loader/execution/status-42 lifecycle, typed IPC,
   musl and Python before slow TCG again produced Settings resize `560x360`
-  instead of the required `450x290` marker. A later focused run passed the new
-  two-object ELF64 `ET_REL` linker and both final-ELF executions. Thresholds
+  instead of the required `450x290` marker. A later focused run passed the
+  three-object ELF64 `ET_REL` linker, both cross-object calls, both linked C
+  paths, and both final-ELF executions. Thresholds
   and expected geometry remain unchanged. This is functional Pi evidence only,
   not Apple-HVF performance
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to

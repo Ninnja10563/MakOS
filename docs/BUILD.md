@@ -105,21 +105,24 @@ runtimes when using an extracted, non-system QEMU installation.
 
 After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
 linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
-`/home/user/generated-answer.c`, then rereads both from MakFS. The bounded C
-subset accepts one `int` function with one `int` parameter, 0..65535 constants,
+`/home/user/generated-answer.c` and `/home/user/generated-adjust.c`, then
+rereads all three from MakFS. Each bounded C translation unit accepts one `int`
+function with one `int` parameter, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
-and one equality `if` block containing a return. A final unconditional return
-is required so every accepted path returns. It follows the AAPCS64 32-bit
-integer calling convention. The current C file computes local
-`normalized = (value * 3) - 20`, conditionally returns `normalized + 2` when it
-equals 40, and otherwise returns 86. RX JIT calls require results 42 and 86 for
-inputs 20 and 0. Unsupported division and a conditional-only function without a
-terminal return are separately required to fail closed. The compiler emits 68 code bytes in a 632-byte
-`/home/user/generated-answer.o`; the assembler emits 76 code bytes in a
-688-byte `/home/user/generated-main.o`. These genuine ELF64 `ET_REL` files have
-section and symbol tables, persist/reopen, and link through a validated
-`R_AARCH64_CALL26` into 144 code bytes in the 559-byte
-`/home/user/generated-aarch64.elf`. A copied invalid relocation is also denied.
+one equality `if` block containing a return, and a one-argument function call.
+A final unconditional return is required so every accepted path returns.
+Non-leaf functions preserve FP/LR and x19-x23 in a 64-byte AAPCS64 frame. The
+current `answer` computes `normalized = (value * 3) - 20`, calls `adjust` when
+it equals 40, and otherwise returns 86; `adjust` returns its input plus 2. The
+compiler emits 116/56 code bytes in 728/608-byte `generated-answer.o` and
+`generated-adjust.o`; the assembler emits 76 code bytes in the 688-byte
+`generated-main.o`. These genuine ELF64 `ET_REL` files persist/reopen. The
+bounded linker discovers definitions and undefined symbols across all three,
+applies two `R_AARCH64_CALL26` relocations, and emits 248 code bytes in the
+559-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require 42
+and 86 for inputs 20 and 0. Invalid relocation type, unresolved `adjust`, and
+duplicate `answer` inputs are denied, as are unsupported division and a
+conditional-only function without a terminal return.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
 both forms, passes 20 to compiled `answer`, and exits with its result 42. Three
@@ -132,9 +135,10 @@ make test-aarch64-selfhost-runtime
 ```
 
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
-has no pointer/memory expressions, loops, multiple C functions, or general
-symbol graph. It is not a full C/Rust compiler, general linker, build system, debugger, or
-end-to-end in-guest OS build.
+has no pointer/memory expressions, loops, multiple functions per translation
+unit, general object count/relocation repertoire, or build driver. It is not a
+full C/Rust compiler, general linker, build system, debugger, or end-to-end
+in-guest OS build.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.
