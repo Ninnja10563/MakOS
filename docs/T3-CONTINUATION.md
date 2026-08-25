@@ -27,14 +27,14 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `5c570d8`:
-  PID 148982, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-rc2yxX`, private data clone
-  `build/makos-pi-visible-rc2yxX/data.img`, private variables
-  `build/makos-pi-visible-rc2yxX/vars.fd`, QMP
-  `build/makos-pi-visible-rc2yxX/qmp.sock`, serial
-  `build/makos-pi-visible-rc2yxX/serial.log`, and PID file
-  `build/makos-pi-visible-rc2yxX/qemu.pid`. It is the sole QEMU process and
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `82bba86`:
+  PID 155994, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-kp25oT`, private data clone
+  `build/makos-pi-visible-kp25oT/data.img`, private variables
+  `build/makos-pi-visible-kp25oT/vars.fd`, QMP
+  `build/makos-pi-visible-kp25oT/qmp.sock`, serial
+  `build/makos-pi-visible-kp25oT/serial.log`, and PID file
+  `build/makos-pi-visible-kp25oT/qemu.pid`. It is the sole QEMU process and
   passes the four-PE EL0 marker, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
   before any later runtime gate.
@@ -63,9 +63,18 @@ Preserve existing files and changes.
   the shared root, and waits for acknowledgement mask `0x2` before reap. The
   fixture passes parent status 55, single-root cleanup, exact frame balance,
   and subsequent visible boot/login.
+  A fourth fixture publishes a user flag only after its AP1 worker has entered
+  the real yield SVC, then holds the syscall until CPU0 publishes group exit
+  status 56. The safe outer-exception return detaches AP1 under the scheduler
+  lock, switches to the kernel root, and acknowledges after a barrier. Runtime
+  requires target/ack, `entered_el1_mask`, and `deferred_ack_mask` all `0x2`,
+  single-root cleanup, exact frame balance, and subsequent login. A scheduler
+  exception that entered just before publication is handled by the same locked
+  stop contract and contributes an early-stop bit rather than losing the
+  target.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending input/device-triggered blocking proof, in-flight-EL1 and
-  concurrent group-exit completion, device-affinity and contention gates.
+  remains pending input/device-triggered blocking proof, concurrent group-exit
+  serialization, device-affinity and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
