@@ -29,8 +29,19 @@ for fragment in (
     '"mov x8, #5\\n"',
     '"svc #0\\n"',
     '"bl answer\\n"',
-    '"answer:\\n"',
+    '"int answer(int value) {\\n"',
+    '"    return value * 2 + 2;\\n"',
     "static size_t assemble(",
+    "static size_t compile_c(",
+    "static int c_additive(",
+    "static int c_multiplicative(",
+    "UINT32_C(0x1b007c00)",
+    "UINT32_C(0x0b000000)",
+    "UINT32_C(0x4b000000)",
+    "UINT32_C(0x52800000)",
+    "UINT32_C(0x2a0003e9)",
+    "malformed_c_source",
+    "compile_c(malformed_c_source",
     "static size_t emit_object(",
     "static int parse_object(",
     "static size_t link_objects(",
@@ -38,14 +49,18 @@ for fragment in (
     "(UINT64_C(2) << 32) | R_AARCH64_CALL26",
     "main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1)",
     "main_object[corrupt_info] = saved_type",
+    "main_object_length != 688 || answer_object_length != 592",
+    "linked_length != 104",
+    "image_length != 559",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_object_denied=1",
+    "persisted_reopened=1 malformed_c_denied=1",
+    "malformed_object_denied=1",
     "PF_R | PF_X",
     "deliberately NX",
     "PROT_READ | PROT_WRITE | PROT_EXEC",
     "MAKOS_AARCH64_LINKER_OK",
     "/home/user/generated.s",
-    "/home/user/generated-answer.s",
+    "/home/user/generated-answer.c",
     "/home/user/generated-main.o",
     "/home/user/generated-answer.o",
     "/home/user/generated-aarch64.elf",
@@ -83,7 +98,12 @@ require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
 require(SHELL, "sizeof(startup) - 1")
 require(SHELL, "objects=2 object_format=elf64-et-rel")
+require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocation=R_AARCH64_CALL26 symbols=_start,answer")
+require(SHELL, "c_abi=aapcs64-int32")
+require(SHELL, "c_parameter=value c_operators=mul,add")
+require(SHELL, "code_bytes=76,28 object_bytes=688,592 linked_bytes=104 output_bytes=559")
+require(SHELL, "malformed_c_denied=1")
 require(SHELL, "malformed_object_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -92,6 +112,7 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_object_denied=1 executed=2 status=42")
+require(FOCUSED_RUNTIME, "malformed_c_denied=1 malformed_object_denied=1")
+require(FOCUSED_RUNTIME, "executed=2 status=42")
 
 print("AArch64 guest self-hosting structural test passed")

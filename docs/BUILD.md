@@ -103,18 +103,23 @@ open gates.
 `MAKOS_QEMU_DATA_DIR` supplies QEMU's `-L` data directory to focused AArch64
 runtimes when using an extracted, non-system QEMU installation.
 
-After login, `selfhost-aarch64` runs the guest-native assembler/static-linker
-gate. It writes and rereads two A64 sources from MakFS, emits
-`/home/user/generated-main.o` and `/home/user/generated-answer.o` as ELF64
-`ET_REL` files with real section and symbol tables, persists and reopens both,
-resolves the undefined `answer` global, validates and applies
-`R_AARCH64_CALL26`, and writes `/home/user/generated-aarch64.elf`. Before the
-valid link it corrupts a copied relocation type and requires fail-closed
-rejection. The shell launches the final ELF through validated syscall 56 with
-default `argc=1`, then syscall 57 with three arguments and one environment
-string; generated `_start` validates both forms, calls the separately linked
-`answer`, and exits 42. The shell also requires three malformed startup-vector
-denials.
+After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
+linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
+`/home/user/generated-answer.c`, then rereads both from MakFS. The bounded C
+subset accepts one `int` function with one `int` parameter, 0..65535 constants,
+parentheses, and precedence-correct `*`, `+`, and `-`. It follows the AAPCS64
+32-bit integer calling convention. The current C file computes
+`value * 2 + 2`; unsupported division is separately required to fail closed.
+The compiler emits 28 code bytes in a 592-byte
+`/home/user/generated-answer.o`; the assembler emits 76 code bytes in a
+688-byte `/home/user/generated-main.o`. These genuine ELF64 `ET_REL` files have
+section and symbol tables, persist/reopen, and link through a validated
+`R_AARCH64_CALL26` into 104 code bytes in the 559-byte
+`/home/user/generated-aarch64.elf`. A copied invalid relocation is also denied.
+The shell launches the final ELF through syscall 56 with default `argc=1`, then
+syscall 57 with three arguments and one environment string; `_start` validates
+both forms, passes 20 to compiled `answer`, and exits with its result 42. Three
+malformed startup-vector forms must be denied.
 
 Run the focused gate with:
 
@@ -122,9 +127,9 @@ Run the focused gate with:
 make test-aarch64-selfhost-runtime
 ```
 
-The gate is a bounded A64 assembler/static-linker seed, not a general-purpose
-linker, C/Rust compiler, build system, debugger, or end-to-end in-guest OS
-build.
+The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
+is not a full C/Rust compiler, general linker, build system, debugger, or
+end-to-end in-guest OS build.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.

@@ -309,6 +309,178 @@ static size_t assemble(const char *source, size_t source_length,
     return output;
 }
 
+/*
+ * Source-driven C subset compiler.  The accepted translation-unit grammar is:
+ *
+ *   int identifier(int identifier) { return expression; }
+ *
+ * Expressions contain the parameter, unsigned 16-bit constants,
+ * parentheses, and left-associative *, +, and -.  The output follows the
+ * AArch64 integer calling convention and is later wrapped in a genuine
+ * ELF64 ET_REL object by emit_object().  Unsupported syntax fails closed.
+ */
+struct c_compiler {
+    const char *source;
+    size_t source_length;
+    size_t cursor;
+    volatile uint8_t *code;
+    size_t capacity;
+    size_t output;
+    char parameter[MAX_LABEL_BYTES];
+    size_t parameter_length;
+};
+
+static void c_space(struct c_compiler *compiler) {
+    while (compiler->cursor < compiler->source_length) {
+        char byte = compiler->source[compiler->cursor];
+        if (byte != ' ' && byte != '\t' && byte != '\n' && byte != '\r') break;
+        ++compiler->cursor;
+    }
+}
+
+static int c_punct(struct c_compiler *compiler, char punctuation) {
+    c_space(compiler);
+    if (compiler->cursor == compiler->source_length ||
+        compiler->source[compiler->cursor] != punctuation)
+        return 0;
+    ++compiler->cursor;
+    return 1;
+}
+
+static int c_identifier(struct c_compiler *compiler,
+                        char output[MAX_LABEL_BYTES], size_t *output_length) {
+    c_space(compiler);
+    size_t start = compiler->cursor;
+    if (start == compiler->source_length ||
+        !name_byte(compiler->source[start], 1))
+        return 0;
+    ++compiler->cursor;
+    while (compiler->cursor < compiler->source_length &&
+           name_byte(compiler->source[compiler->cursor], 0))
+        ++compiler->cursor;
+    return label_name(compiler->source, start, compiler->cursor, output,
+                      output_length);
+}
+
+static int c_keyword(struct c_compiler *compiler, const char *keyword) {
+    c_space(compiler);
+    size_t keyword_length = length(keyword);
+    if (compiler->cursor + keyword_length > compiler->source_length) return 0;
+    for (size_t index = 0; index < keyword_length; ++index)
+        if (compiler->source[compiler->cursor + index] != keyword[index])
+            return 0;
+    size_t end = compiler->cursor + keyword_length;
+    if (end < compiler->source_length &&
+        name_byte(compiler->source[end], 0))
+        return 0;
+    compiler->cursor = end;
+    return 1;
+}
+
+static int c_emit(struct c_compiler *compiler, uint32_t instruction) {
+    if (compiler->output + 4 > compiler->capacity) return 0;
+    put32(compiler->code, compiler->output, instruction);
+    compiler->output += 4;
+    return 1;
+}
+
+static int c_number(struct c_compiler *compiler, uint32_t *value) {
+    c_space(compiler);
+    return decimal(compiler->source, compiler->source_length,
+                   &compiler->cursor, value);
+}
+
+static int c_additive(struct c_compiler *compiler, uint32_t destination);
+
+static int c_primary(struct c_compiler *compiler, uint32_t destination) {
+    if (destination > 7) return 0;
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '(') {
+        ++compiler->cursor;
+        return c_additive(compiler, destination) && c_punct(compiler, ')');
+    }
+    uint32_t immediate;
+    size_t saved = compiler->cursor;
+    if (c_number(compiler, &immediate))
+        return c_emit(compiler, UINT32_C(0x52800000) |
+                                (immediate << 5) | destination);
+    compiler->cursor = saved;
+    char identifier[MAX_LABEL_BYTES];
+    size_t identifier_length;
+    if (!c_identifier(compiler, identifier, &identifier_length) ||
+        !same_name(identifier, identifier_length, compiler->parameter,
+                   compiler->parameter_length))
+        return 0;
+    /* mov wN, w9: the AAPCS64 int parameter is preserved in w9. */
+    return c_emit(compiler, UINT32_C(0x2a0003e0) | (UINT32_C(9) << 16) |
+                            destination);
+}
+
+static int c_multiplicative(struct c_compiler *compiler,
+                            uint32_t destination) {
+    if (!c_primary(compiler, destination)) return 0;
+    for (;;) {
+        c_space(compiler);
+        if (compiler->cursor == compiler->source_length ||
+            compiler->source[compiler->cursor] != '*')
+            return 1;
+        ++compiler->cursor;
+        if (!c_primary(compiler, destination + 1) ||
+            !c_emit(compiler, UINT32_C(0x1b007c00) |
+                              ((destination + 1) << 16) |
+                              (destination << 5) | destination))
+            return 0;
+    }
+}
+
+static int c_additive(struct c_compiler *compiler, uint32_t destination) {
+    if (!c_multiplicative(compiler, destination)) return 0;
+    for (;;) {
+        c_space(compiler);
+        if (compiler->cursor == compiler->source_length) return 1;
+        char operation = compiler->source[compiler->cursor];
+        if (operation != '+' && operation != '-') return 1;
+        ++compiler->cursor;
+        if (!c_multiplicative(compiler, destination + 1)) return 0;
+        uint32_t opcode = operation == '+' ? UINT32_C(0x0b000000)
+                                           : UINT32_C(0x4b000000);
+        if (!c_emit(compiler, opcode | ((destination + 1) << 16) |
+                              (destination << 5) | destination))
+            return 0;
+    }
+}
+
+static size_t compile_c(const char *source, size_t source_length,
+                        volatile uint8_t *code, size_t capacity,
+                        char function[MAX_LABEL_BYTES],
+                        size_t *function_length) {
+    struct c_compiler compiler = {
+        .source = source,
+        .source_length = source_length,
+        .code = code,
+        .capacity = capacity,
+    };
+    if (!function_length || !c_keyword(&compiler, "int") ||
+        !c_identifier(&compiler, function, function_length) ||
+        !c_punct(&compiler, '(') || !c_keyword(&compiler, "int") ||
+        !c_identifier(&compiler, compiler.parameter,
+                      &compiler.parameter_length) ||
+        !c_punct(&compiler, ')') || !c_punct(&compiler, '{') ||
+        !c_keyword(&compiler, "return"))
+        return 0;
+    /* mov w9, w0 preserves the sole AAPCS64 int parameter. */
+    if (!c_emit(&compiler, UINT32_C(0x2a0003e9)) ||
+        !c_additive(&compiler, 0) || !c_punct(&compiler, ';') ||
+        !c_punct(&compiler, '}'))
+        return 0;
+    c_space(&compiler);
+    if (compiler.cursor != compiler.source_length ||
+        !c_emit(&compiler, UINT32_C(0xd65f03c0)))
+        return 0;
+    return compiler.output;
+}
+
 static int write_file(const char *path, size_t path_length, const uint8_t *bytes,
                       size_t byte_count) {
     (void)syscall4(SYS_UNLINK, (uintptr_t)path, path_length, 0, 0);
@@ -648,7 +820,7 @@ static void fail(uint64_t status) {
 
 __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char main_source_path[] = "/home/user/generated.s";
-    static const char answer_source_path[] = "/home/user/generated-answer.s";
+    static const char answer_source_path[] = "/home/user/generated-answer.c";
     static const char main_object_path[] = "/home/user/generated-main.o";
     static const char answer_object_path[] = "/home/user/generated-answer.o";
     static const char output_path[] = "/home/user/generated-aarch64.elf";
@@ -667,6 +839,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "cmp x6, #77\n"
         "b.ne fail\n"
         "success:\n"
+        "mov x0, #20\n"
         "bl answer\n"
         "mov x8, #5\n"
         "svc #0\n"
@@ -675,15 +848,21 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "mov x8, #5\n"
         "svc #0\n";
     static const char answer_source[] =
-        "answer:\n"
-        "mov x0, #42\n"
-        "ret\n";
+        "int answer(int value) {\n"
+        "    return value * 2 + 2;\n"
+        "}\n";
+    static const char malformed_c_source[] =
+        "int answer(int value) { return value / 2; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
-        "MAKOS_AARCH64_LINKER_OK sources=2 objects=2 format=elf64-et-rel "
-        "linker=guest-native relocation=R_AARCH64_CALL26 "
+        "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
+        "compiler=guest-native assembler=guest-native objects=2 "
+        "format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
         "symbols=_start,answer output=/home/user/generated-aarch64.elf "
-        "persisted_reopened=1 malformed_object_denied=1 segments=2 "
+        "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 c_parameter=value "
+        "c_operators=mul,add code_bytes=76,28 object_bytes=688,592 "
+        "linked_bytes=104 output_bytes=559 persisted_reopened=1 malformed_c_denied=1 "
+        "malformed_object_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
 
     if (!write_file(main_source_path, sizeof(main_source_path) - 1,
@@ -691,7 +870,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         !write_file(answer_source_path, sizeof(answer_source_path) - 1,
                     (const uint8_t *)answer_source, sizeof(answer_source) - 1))
         fail(80);
-    uint8_t source_input[512] = {0}, answer_input[64] = {0};
+    uint8_t source_input[512] = {0}, answer_input[128] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
@@ -708,11 +887,22 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t main_code_length = assemble((const char *)source_input, source_length,
                                        main_code, sizeof(main_code), relocations,
                                        &relocation_count);
-    size_t answer_code_length = assemble((const char *)answer_input,
-                                         answer_source_length,
-                                         answer_code, sizeof(answer_code), 0, 0);
-    if (main_code_length != 72 || answer_code_length != 8 ||
-        relocation_count != 1 || relocations[0].offset != 48)
+    char function[MAX_LABEL_BYTES] = {0};
+    size_t function_length = 0;
+    uint8_t malformed_code[32] = {0};
+    char malformed_function[MAX_LABEL_BYTES] = {0};
+    size_t malformed_function_length = 0;
+    if (compile_c(malformed_c_source, sizeof(malformed_c_source) - 1,
+                  malformed_code, sizeof(malformed_code), malformed_function,
+                  &malformed_function_length) != 0)
+        fail(82);
+    size_t answer_code_length = compile_c((const char *)answer_input,
+                                          answer_source_length, answer_code,
+                                          sizeof(answer_code), function,
+                                          &function_length);
+    if (main_code_length != 76 || answer_code_length != 28 ||
+        !same_name(function, function_length, "answer", 6) ||
+        relocation_count != 1 || relocations[0].offset != 52)
         fail(82);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -732,9 +922,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                             main_code_length, "_start", 6,
                                             relocations, relocation_count);
     size_t answer_object_length = emit_object(answer_object, answer_code,
-                                              answer_code_length, "answer", 6,
-                                              0, 0);
-    if (!main_object_length || !answer_object_length ||
+                                              answer_code_length, function,
+                                              function_length, 0, 0);
+    if (main_object_length != 688 || answer_object_length != 592 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(answer_object_path, sizeof(answer_object_path) - 1,
@@ -767,12 +957,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                         answer_object, answer_object_length,
                                         linked_code, sizeof(linked_code),
                                         &entry_offset);
-    if (linked_length != 80 || entry_offset != 0) fail(89);
+    if (linked_length != 104 || entry_offset != 0) fail(89);
 
     volatile uint8_t image[IMAGE_CAPACITY];
     size_t image_length = emit_elf(image, linked_code, linked_length,
                                    entry_offset);
-    if (!image_length ||
+    if (image_length != 559 ||
         !write_file(output_path, sizeof(output_path) - 1,
                     (const uint8_t *)image, image_length))
         fail(90);

@@ -170,22 +170,28 @@ Last updated: 2026-08-25.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. The later desktop gate now
   admits only non-leader Firefox-role threads to AP1-3; all leaders, non-Firefox
-  roles, and device MMIO remain on CPU0. Automatic migration and genuine
-  Firefox overlap/contention are still open, so the scheduler row stays Partial.
-- 2026-08-25 the AArch64 guest-native toolchain now crosses the first genuine
-  object/link boundary. Two sources are written and reread through MakFS. The
-  bounded assembler emits separate 680-byte and 568-byte ELF64 `ET_REL` files
-  with `.text`, `.rela.text`, `.symtab`, `.strtab`, and `.shstrtab`; both are
-  persisted and reopened. The guest linker resolves undefined `answer` in the
-  `_start` object against the second object, validates the placeholder/range,
-  applies `R_AARCH64_CALL26`, and emits a 559-byte two-`PT_LOAD` ELF64
-  `ET_EXEC`. A copied object with relocation type 282 is rejected before the
-  valid link. Focused Pi/QEMU 10.0.11 TCG then executes and reaps the final ELF
-  twice with status 42, once through syscall 56 and once through syscall 57.
-  The current release image/artifact check, focused runtime, structural guard,
-  and full `make unit check` pass. This remains a bounded static-linker seed,
-  not a general-purpose linker, C/Rust compiler, build system, debugger, or
-  substantial in-guest MakOS build, so self-hosting remains Partial.
+  roles, and device MMIO remain on CPU0. A controlled exact-role pthread fixture
+  records simultaneous distinct TIDs on AP1/AP3. Automatic migration and the
+  same overlap/contention from the genuine Firefox process are still open, so
+  the scheduler row stays Partial.
+- 2026-08-25 the AArch64 guest-native toolchain now crosses both a genuine
+  source/compiler boundary and the existing object/link boundary. It writes an
+  assembly startup and valid C source to MakFS and rereads them. The bounded C
+  subset parser accepts one AAPCS64 `int` function/parameter, unsigned 16-bit
+  constants, parentheses, and precedence-correct `*`, `+`, and `-`; it emits
+  32-bit A64 integer instructions and rejects unsupported syntax. The exercised
+  `answer(int value) { return value * 2 + 2; }` becomes 28 code bytes and a
+  592-byte ELF64 `ET_REL`; the assembler produces 76 code bytes and a 688-byte
+  `ET_REL`. Both objects contain real section/symbol/string tables, are
+  persisted and reopened, and link through a validated `R_AARCH64_CALL26` into
+  104 code bytes and a 559-byte two-`PT_LOAD` `ET_EXEC`. The runtime rejects a
+  malformed C division expression and copied relocation type 282 before the
+  valid build. Focused Pi/QEMU 10.0.11 TCG executes/reaps the final ELF twice
+  with status 42 through syscalls 56/57. Release artifact validation, focused
+  runtime, structural guard, and full `make unit check` pass. This is a real but
+  deliberately bounded C compiler/static-linker seed, not a general C/Rust
+  compiler, build system, debugger, or substantial in-guest MakOS build, so
+  self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment

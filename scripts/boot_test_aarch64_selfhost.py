@@ -21,16 +21,24 @@ IMAGE = pathlib.Path(
     os.environ.get("MAKOS_AARCH64_IMAGE", ROOT / "build/makos-aarch64.img")
 )
 LINKER_MARKER = (
-    b"MAKOS_AARCH64_LINKER_OK sources=2 objects=2 format=elf64-et-rel "
-    b"linker=guest-native relocation=R_AARCH64_CALL26 symbols=_start,answer "
-    b"output=/home/user/generated-aarch64.elf persisted_reopened=1 "
+    b"MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
+    b"compiler=guest-native assembler=guest-native objects=2 "
+    b"format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
+    b"symbols=_start,answer output=/home/user/generated-aarch64.elf "
+    b"c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 c_parameter=value "
+    b"c_operators=mul,add code_bytes=76,28 object_bytes=688,592 "
+    b"linked_bytes=104 output_bytes=559 persisted_reopened=1 malformed_c_denied=1 "
     b"malformed_object_denied=1"
 )
 EXECUTION_MARKER = (
-    b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs "
+    b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=2 "
+    b"languages=aarch64-asm,c-subset-v1 compiler=guest-native "
     b"assembler=guest-native linker=guest-native objects=2 "
     b"object_format=elf64-et-rel relocation=R_AARCH64_CALL26 "
-    b"symbols=_start,answer persisted_reopened=1 malformed_object_denied=1 "
+    b"symbols=_start,answer c_source=/home/user/generated-answer.c "
+    b"c_abi=aapcs64-int32 c_parameter=value c_operators=mul,add code_bytes=76,28 "
+    b"object_bytes=688,592 linked_bytes=104 output_bytes=559 persisted_reopened=1 "
+    b"malformed_c_denied=1 malformed_object_denied=1 "
     b"output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 "
     b"argv=3 env=1 malformed_startup_denied=3 executed=2 status=42"
 )
@@ -168,9 +176,13 @@ def main() -> int:
 
     print(
         "MAKOS_AARCH64_SELFHOST_RUNTIME_OK "
-        f"accel={accel} sources=2 objects=2 format=elf64-et-rel "
-        "linker=guest-native relocation=R_AARCH64_CALL26 symbols=2 "
-        "persisted_reopened=1 malformed_object_denied=1 executed=2 status=42"
+        f"accel={accel} sources=2 languages=aarch64-asm,c-subset-v1 "
+        "compiler=guest-native assembler=guest-native objects=2 "
+        "format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
+        "symbols=2 c_abi=aapcs64-int32 c_parameter=value c_operators=mul,add "
+        "code_bytes=76,28 "
+        "object_bytes=688,592 linked_bytes=104 output_bytes=559 persisted_reopened=1 "
+        "malformed_c_denied=1 malformed_object_denied=1 executed=2 status=42"
     )
     return 0
 

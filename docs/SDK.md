@@ -61,6 +61,25 @@ fail before process allocation.
 page-rounded multi-region anonymous memory; legacy one-page wrappers remain.
 See `docs/SYSCALLS.md`.
 
+## Guest-native AArch64 seed
+
+The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
+source from MakFS and writes ELF64 objects and an executable back through the
+normal VFS. Its C subset grammar is one translation unit of the form
+`int name(int parameter) { return expression; }`, where expressions may use
+the parameter, unsigned 16-bit constants, parentheses, multiplication,
+addition, and subtraction. It emits AAPCS64 32-bit `int` code, then a real
+ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
+`.shstrtab`. The companion assembler supplies `_start`; the bounded linker
+resolves one `R_AARCH64_CALL26` and produces a validated static `ET_EXEC`.
+Unsupported tokens and malformed object metadata fail closed.
+
+This seed has no declarations beyond the single function, locals, loads or
+stores, control flow, multiple C functions, preprocessing, optimization,
+general symbol resolution, archives, dynamic linking, CLI build driver, or
+debug information. It must not be presented as a general C compiler or a
+self-hosted MakOS build.
+
 Current libc is intentionally narrow: no stdio allocator, dynamic linker,
 shared libraries, TLS, process-wide environment mutation, bind/listen/accept, nonblocking sockets,
 signals, or full POSIX conformance. `user/worker.c` is boot-tested evidence for
