@@ -142,7 +142,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   assignments, equality/inequality control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
   loads and stores, fixed local `int` arrays with checked constant indexing,
-  array decay and typed pointer parameters passed in AAPCS64 `x0`, non-leaf
+  array decay, bounded constant-element pointer addition with known-bound
+  rejection, and typed pointer parameters passed in AAPCS64 `x0`, non-leaf
   frames, same-object calls that mutate caller-owned array elements, and
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
   loop/memory outcomes execute in EL0.

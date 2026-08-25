@@ -30,17 +30,18 @@ for fragment in (
     '"svc #0\\n"',
     '"bl answer\\n"',
     '"int answer(int value) {\\n"',
-    '"    int values[2] = { (value * 3) - 20, 0 };\\n"',
+    '"    int values[3] = { (value * 3) - 20, 40, 0 };\\n"',
     '"    if (values[0] == 40) {\\n"',
-    '"        return adjust(values);\\n"',
+    '"        return adjust(values + 1);\\n"',
     '"    return 86;\\n"',
     '"int adjust(int *pointer) {\\n"',
+    '"    int *next = pointer + 1;\\n"',
     '"    pointer[0] = pointer[0] + 1;\\n"',
     '"    int count = 0;\\n"',
     '"    while (count != 1) {\\n"',
-    '"        pointer[1] = pointer[0] + 1;\\n"',
+    '"        *(pointer + 1) = pointer[0] + 1;\\n"',
     '"        count = count + 1;\\n"',
-    '"    return pointer[1];\\n"',
+    '"    return *next;\\n"',
     "static size_t assemble(",
     "static size_t compile_c(",
     "static size_t compile_c_unit(",
@@ -75,6 +76,7 @@ for fragment in (
     "UINT32_C(0xb9000000)",
     "UINT32_C(0xb9400000)",
     "UINT32_C(0x910003e0)",
+    "UINT32_C(0x91000000)",
     "UINT32_C(0x94000000)",
     "UINT32_C(0x6b00001f)",
     "UINT32_C(0x54000000)",
@@ -84,9 +86,11 @@ for fragment in (
     "malformed_loop_source",
     "malformed_assignment_source",
     "malformed_address_source",
+    "malformed_address_return_source",
     "malformed_pointer_assignment_source",
     "malformed_pointer_return_source",
     "malformed_array_index_source",
+    "malformed_pointer_add_source",
     "malformed_duplicate_function_source",
     "compile_c(malformed_c_source",
     "static size_t emit_object(",
@@ -105,19 +109,19 @@ for fragment in (
     "addend != 0",
     "link_objects(objects, object_lengths, 2",
     "link_objects(duplicate_objects, duplicate_lengths, 3",
-    "program_relocations[0].offset != 80",
+    "program_relocations[0].offset != 88",
     "program_definition_count != 2",
-    "program_definitions[0].size != 128",
-    "program_definitions[1].offset != 128",
-    "program_definitions[1].size != 132",
+    "program_definitions[0].size != 136",
+    "program_definitions[1].offset != 136",
+    "program_definitions[1].size != 136",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
     "compiled_adjust(forty) != 42 || forty[0] != 41 || forty[1] != 42",
     "compiled_adjust(zero) != 2 || zero[0] != 1 || zero[1] != 2",
-    "main_object_length != 688 || program_object_length != 872",
-    "linked_length != 336",
+    "main_object_length != 688 || program_object_length != 880",
+    "linked_length != 348",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_c_denied=9",
+    "persisted_reopened=1 malformed_c_denied=11",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -159,6 +163,11 @@ for fragment in (
 require(BUILD, "../user/aarch64_toolchain.c")
 require(TOOLCHAIN, "parameter_pointer")
 require(TOOLCHAIN, "compiler->parameter_pointer")
+require(TOOLCHAIN, "static int c_pointer_expression(")
+require(TOOLCHAIN, "static int c_emit_pointer_value(")
+require(TOOLCHAIN, "local.pointer_bound = local.array_length")
+require(TOOLCHAIN, '"        return adjust(values + 1);\\n"')
+require(TOOLCHAIN, '"        *(pointer + 1) = pointer[0] + 1;\\n"')
 require(SHELL, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
@@ -169,10 +178,10 @@ require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocations=R_AARCH64_CALL26:2 symbols=_start,answer,adjust")
 require(SHELL, "translation_unit_functions=2")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=multi-function,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,address-of,address-expression,dereference,if,equality,inequality,while,call,return nonleaf_frame=96")
+require(SHELL, "c_features=multi-function,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,address-of,address-expression,dereference,if,equality,inequality,while,call,return nonleaf_frame=96")
 require(SHELL, "c_operators=mul,sub,add branch_results=42,86")
-require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,2 array_results=41:42,1:2 code_bytes=76,128,132 object_bytes=688,872 intra_object_call=1 linked_bytes=336 output_bytes=815")
-require(SHELL, "malformed_c_denied=9")
+require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,2 array_results=41:42,1:2 pointer_offset_call=1 code_bytes=76,136,136 object_bytes=688,880 intra_object_call=1 linked_bytes=348 output_bytes=815")
+require(SHELL, "malformed_c_denied=11")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -181,7 +190,7 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_c_denied=9")
+require(FOCUSED_RUNTIME, "malformed_c_denied=11")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

@@ -185,7 +185,12 @@ Last updated: 2026-08-25.
   one-argument call within or across objects. It now also accepts either an `int` or
   `int *` parameter, `int *pointer = &local`, address expressions passed across
   the call boundary, dereference loads inside expressions, and
-  `*pointer = expression` stores. Fixed local `int` arrays have one to four
+  `*pointer = expression` stores. Pointer locals and call arguments now also
+  accept `pointer-or-array + constant` for 0..3 elements. Code generation uses
+  a 64-bit address `ADD` scaled by four while pointee loads/stores remain
+  32-bit; parenthesized `*(pointer + constant)` works on either side of an
+  assignment. Known local-array bounds propagate through derived pointers and
+  reject one-past-end results. Fixed local `int` arrays have one to four
   exactly initialized elements within the four-slot frame budget. Constant
   indexing emits bounded 32-bit loads/stores; known local-array bounds are
   checked at compile time, and a bare array argument decays to its preserved
@@ -195,28 +200,31 @@ Last updated: 2026-08-25.
   conditional and signed backward unconditional branches are range-checked
   before patching. Emitted non-leaf functions preserve FP/LR and x19-x23 in a
   96-byte frame. Integer arguments use AAPCS64 `w0`; pointer arguments use
-  `x0` and are preserved in `x23`. The compiler concatenates 128-byte `answer`
-  and 132-byte `adjust` into one 260-byte `.text` with two defined symbols in an
-  872-byte ELF64 `ET_REL`; the assembler produces 76 bytes in a 688-byte
+  `x0` and are preserved in `x23`. The current linked call passes
+  `values + 1`, while `adjust` derives `next = pointer + 1` and stores through
+  `*(pointer + 1)`. The compiler concatenates two 136-byte definitions into one
+  272-byte `.text` with two defined symbols in an 880-byte ELF64 `ET_REL`; the
+  assembler produces 76 bytes in a 688-byte
   object. Both persist and reopen. The bounded general linker concatenates up
   to three objects, discovers global definitions/undefined symbols, resolves
   relocations against either same-object definitions or external symbols,
   applies validated `R_AARCH64_CALL26` relocations
-  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 336 code
+  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 348 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
   and duplicate `answer` definitions. Division syntax
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
-  untyped pointer reassignment, returning a pointer as an `int`, indexing a
-  known two-element array at index two, and duplicate functions in one
+  untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
+  known two-element array at index two, deriving `values + 2` from that known
+  array, and duplicate functions in one
   translation unit also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
   `adjust(forty)=42`, and `adjust(zero)=2`; the latter two also prove the arrays
   change to `41:42` and `1:2`. The linked `answer`→`adjust` call passes the
-  stack-backed `values[2]` array, so its same-object call result requires real
-  relocation, array decay, and callee indexed loads/stores into both elements
-  of caller-owned memory. Focused
+  stack-backed `values[3] + 1` address, so its same-object call result requires
+  real relocation, scaled pointer addition, and callee loads/stores into the
+  final two elements of caller-owned memory. Focused
   Pi/QEMU 10.0.11 TCG then
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
   Release artifact validation, focused runtime, structural guard, and full
@@ -826,7 +834,11 @@ Last updated: 2026-08-25.
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
   the unprivileged user. A newer focused run passes the two-function C
   translation unit, 872-byte multi-definition object, same-object CALL26, exact
-  array mutation, and both final-ELF executions. The focused four-vCPU TCG SMP input/network image also
+  array mutation, and both final-ELF executions. A still newer focused run
+  passes bounded scaled pointer addition across the call and inside `adjust`,
+  a 272-byte two-definition `.text`, 880-byte object, exact direct-array
+  mutations, known one-past-end denial, and both final-ELF executions. The
+  focused four-vCPU TCG SMP input/network image also
   passed three runs with CPU0-owned UDP TX, DNS RX wake, and exact frame
   balance (two before and one after the final malformed-length guard). One
   intervening post-guard run completed the network proof but missed the later
