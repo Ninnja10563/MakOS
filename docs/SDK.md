@@ -50,9 +50,12 @@ strings, and 256 string bytes into versioned descriptor;
 `makos_process_spawn_path_args` copies it into child startup stack. Current
 implementation uses two bounded concurrent PID7/PID8 slots. Child entry gets
 `argc`, `argv`, `envp` in both SysV stack layout and `rdi`/`rsi`/`rdx`.
-Those SDK wrappers currently describe x86_64. AArch64 implements syscall 56
-with default SysV `argc=1` startup and a validated immutable ELF snapshot;
-the versioned syscall-57 argument descriptor remains unimplemented there.
+Those SDK wrappers currently describe x86_64 register details. AArch64 now
+implements the same syscall-56 default and fixed 336-byte version-1 syscall-57
+descriptor contract over a validated immutable ELF snapshot. Its child receives
+the canonical SysV stack plus `argc`, `argv`, and `envp` in `x0`, `x1`, and
+`x2`; malformed versions, offsets, strings, lengths, and environment entries
+fail before process allocation.
 `makos_mprotect` exposes read/write/execute masks while kernel rejects W+X.
 `makos_mmap_range`, `makos_munmap_range`, and `makos_mprotect_range` expose
 page-rounded multi-region anonymous memory; legacy one-page wrappers remain.

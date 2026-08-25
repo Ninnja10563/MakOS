@@ -8,8 +8,12 @@ Original specification source:
 
 `/Users/marcushuang/.codex/attachments/4ef18f50-cd19-419b-93ed-d509edff0836/pasted-text.txt`
 
-Host: macOS Apple Silicon M3. Workspace is a Git repository on `main`, tracking
-`https://github.com/Ninnja10563/MakOS.git`. Preserve existing files and changes.
+Current development host: Raspberry Pi running Debian Linux. The primary
+interactive/performance qualification target remains macOS Apple Silicon using
+AArch64 QEMU/HVF. Pi QEMU/KVM or TCG results are functional Pi evidence only
+and never substitute for required macOS/HVF timing evidence. Workspace is a Git
+repository on `main`, tracking `https://github.com/Ninnja10563/MakOS.git`.
+Preserve existing files and changes.
 
 ## User priorities
 
@@ -23,6 +27,15 @@ Host: macOS Apple Silicon M3. Workspace is a Git repository on `main`, tracking
 
 ## Current verified state
 
+- 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
+  The exact 336-byte version-1 descriptor is copied and validated before child
+  allocation. The guest-native two-pass assembler emits code that validates
+  syscall-56 `argc=1` and syscall-57 `argc=3`, `argv[1]`, and `envp[0]`; Pi
+  QEMU 10.0.11 TCG passes both status-42 executions plus three malformed-form
+  denials. Full `make unit`, `make check`, release image/artifact checks and
+  structural guards pass. The broad Pi/TCG harness later hit the preserved
+  Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
+  full broad-gate pass.
 - No QEMU/test process was running at the 2026-08-25 handoff. Stale visible-test
   clone `build/makos-visible-data-1787604571.img` remains available, but PID
   `19919` and its QMP/session are gone. Check process state before every runtime
@@ -100,9 +113,10 @@ Host: macOS Apple Silicon M3. Workspace is a Git repository on `main`, tracking
    exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds.
 2. Boot a current visible login milestone for user testing after the next verified
    behavior change; record PID/session/data clone/QMP before handoff.
-3. Continue highest-impact Partial/Missing original-spec rows. Strong candidates:
-   AArch64 userspace SMP scheduling or first genuine guest self-hosting step.
-   Preserve real implementation requirement—no fake/spoofed apps.
+3. Continue the highest-impact Partial/Missing original-spec row. AArch64
+   userspace SMP scheduling remains the strongest candidate after syscall-57
+   parity and the first genuine guest self-hosting seed. Preserve real
+   implementation requirements—no fake/spoofed apps.
 
 ## Operating constraints
 

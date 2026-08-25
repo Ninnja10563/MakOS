@@ -15,6 +15,7 @@ enum {
     SYS_PROCESS_SPAWN = 14,
     SYS_PROCESS_WAIT = 15,
     SYS_PROCESS_SPAWN_PATH = 56,
+    SYS_PROCESS_SPAWN_PATH_ARGS = 57,
     SYS_PACKAGE_INSTALL = 18,
     SYS_PACKAGE_QUERY = 19,
     SYS_PACKAGE_ROLLBACK = 20,
@@ -25,6 +26,19 @@ enum {
 };
 
 enum { COMMAND_BYTES = 128, HISTORY_SLOTS = 8 };
+
+struct spawn_arguments {
+    uint32_t version;
+    uint32_t argc;
+    uint32_t envc;
+    uint32_t data_length;
+    uint32_t argv_offsets[8];
+    uint32_t env_offsets[8];
+    uint8_t data[256];
+};
+
+_Static_assert(sizeof(struct spawn_arguments) == 336,
+               "spawn descriptor ABI size changed");
 
 static uint64_t textedit_pid;
 static uint64_t firefox_pid;
@@ -38,6 +52,14 @@ void *memset(void *destination, int value, size_t count) {
     uint8_t *bytes = destination;
     for (size_t index = 0; index < count; ++index)
         bytes[index] = (uint8_t)value;
+    return destination;
+}
+
+void *memcpy(void *destination, const void *source, size_t count) {
+    uint8_t *output = destination;
+    const uint8_t *input = source;
+    for (size_t index = 0; index < count; ++index)
+        output[index] = input[index];
     return destination;
 }
 
@@ -66,6 +88,17 @@ static void write_bytes(const void *bytes, size_t count) {
 }
 
 static void write_text(const char *text) { write_bytes(text, length(text)); }
+
+static uint32_t append_spawn_string(struct spawn_arguments *arguments,
+                                    const char *value) {
+    uint32_t offset = arguments->data_length;
+    size_t count = length(value) + 1;
+    if ((size_t)offset + count > sizeof(arguments->data)) return UINT32_MAX;
+    for (size_t index = 0; index < count; ++index)
+        arguments->data[offset + index] = (uint8_t)value[index];
+    arguments->data_length += (uint32_t)count;
+    return offset;
+}
 
 static uint8_t hex_nibble(char value) {
     if (value >= '0' && value <= '9')
@@ -388,8 +421,7 @@ static void run_selfhost_probe(void) {
         write_text("selfhost-aarch64: assembler failed\n");
         return;
     }
-    uint64_t generated = syscall4(SYS_PROCESS_SPAWN_PATH,
-                                  (uintptr_t)output_path,
+    uint64_t generated = syscall4(SYS_PROCESS_SPAWN_PATH, (uintptr_t)output_path,
                                   sizeof(output_path) - 1, 0, 0);
     if (generated == UINT64_MAX) {
         write_text("selfhost-aarch64: generated ELF rejected\n");
@@ -397,10 +429,51 @@ static void run_selfhost_probe(void) {
     }
     while ((status = syscall4(SYS_PROCESS_WAIT, generated, 0, 0, 0)) == UINT64_MAX)
         syscall4(SYS_YIELD, 0, 0, 0, 0);
-    if (status == 42)
-        write_text("MAKOS_AARCH64_SELFHOST_SEED_OK source=guest-makfs assembler=guest-native output=elf64-aarch64 persisted=1 kernel_loader=validated executed=1 status=42\n");
-    else
+    if (status != 42) {
         write_text("selfhost-aarch64: generated program failed\n");
+        return;
+    }
+
+    struct spawn_arguments startup = {0};
+    startup.version = 1;
+    startup.argc = 3;
+    startup.envc = 1;
+    startup.argv_offsets[0] = append_spawn_string(&startup, output_path);
+    startup.argv_offsets[1] = append_spawn_string(&startup, "alpha");
+    startup.argv_offsets[2] = append_spawn_string(&startup, "two");
+    startup.env_offsets[0] = append_spawn_string(&startup, "MODE=test");
+    struct spawn_arguments malformed = startup;
+    malformed.version = 2;
+    if (syscall4(SYS_PROCESS_SPAWN_PATH_ARGS, (uintptr_t)output_path,
+                 sizeof(output_path) - 1, (uintptr_t)&malformed,
+                 sizeof(malformed)) != UINT64_MAX) {
+        write_text("selfhost-aarch64: bad startup version accepted\n");
+        return;
+    }
+    malformed = startup;
+    malformed.argv_offsets[7] = 1;
+    if (syscall4(SYS_PROCESS_SPAWN_PATH_ARGS, (uintptr_t)output_path,
+                 sizeof(output_path) - 1, (uintptr_t)&malformed,
+                 sizeof(malformed)) != UINT64_MAX ||
+        syscall4(SYS_PROCESS_SPAWN_PATH_ARGS, (uintptr_t)output_path,
+                 sizeof(output_path) - 1, (uintptr_t)&startup,
+                 sizeof(startup) - 1) != UINT64_MAX) {
+        write_text("selfhost-aarch64: malformed startup bounds accepted\n");
+        return;
+    }
+    generated = syscall4(SYS_PROCESS_SPAWN_PATH_ARGS, (uintptr_t)output_path,
+                         sizeof(output_path) - 1, (uintptr_t)&startup,
+                         sizeof(startup));
+    if (generated == UINT64_MAX) {
+        write_text("selfhost-aarch64: startup-vector ELF rejected\n");
+        return;
+    }
+    while ((status = syscall4(SYS_PROCESS_WAIT, generated, 0, 0, 0)) == UINT64_MAX)
+        syscall4(SYS_YIELD, 0, 0, 0, 0);
+    if (status == 42)
+        write_text("MAKOS_AARCH64_SELFHOST_SEED_OK source=guest-makfs assembler=guest-native output=elf64-aarch64 persisted=1 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_denied=3 executed=2 status=42\n");
+    else
+        write_text("selfhost-aarch64: startup-vector program failed\n");
 }
 
 static void run_musl_crt_probe(void) {

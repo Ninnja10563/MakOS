@@ -48,10 +48,9 @@ cover authentication, account, session, and package transaction decisions;
 record metadata attributes each event to current PID.
 
 AArch64 currently reports bits 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 14, 15, 16, 17,
-18, 20, and 21. It advertises exec-by-path after implementing call 56, but not
-startup-vector bit 19 because call 57 remains unimplemented on that target;
-restricted same-process system-package `execve` is a target extension, not
-false parity.
+18, 19, 20, and 21. Calls 56 and 57 now share the immutable static-ELF snapshot
+and loader; bit 19 records the versioned explicit startup-vector path.
+Restricted same-process system-package `execve` remains a target extension.
 
 ## Calls
 
@@ -118,13 +117,12 @@ false parity.
 
 AArch64 keeps normative calls 0-57 and adds compositor/browser extensions:
 
-AArch64 implements call 56 for a process-capable shell: the kernel snapshots a
-readable VFS file, validates static `ET_EXEC`/`EM_AARCH64` layout, segment file
-bounds, address bounds, nonoverlap, executable entry and W^X before allocating
-an address space, then synthesizes `argc=1`, `argv[0]=path`, and an empty
-environment. Call 57 remains reserved but unimplemented on AArch64; ABI feature
-discovery advertises exec-by-path and the self-hosting seed, but not
-startup-vector parity.
+AArch64 implements calls 56 and 57 for a process-capable shell: the kernel
+snapshots a readable VFS file, validates static `ET_EXEC`/`EM_AARCH64` layout,
+segment file bounds, address bounds, nonoverlap, executable entry and W^X before
+allocating an address space. Call 56 synthesizes `argc=1`, `argv[0]=path`, and
+an empty environment. Call 57 first copies and validates the exact version-1
+descriptor below, then builds child-owned vectors and advertises feature bit 19.
 
 | No. | Name | Arguments | Result |
 |---:|---|---|---|
@@ -324,9 +322,9 @@ strings into child-owned stack pages before scheduling child; caller memory is
 never shared. SysV-style initial stack is 16-byte aligned and contains `argc`,
 `argv[]`, NULL, `envp[]`, NULL, then auxv entries for `AT_PAGESZ`, `AT_ENTRY`,
 UID/EUID/GID/EGID, `AT_CLKTCK`, `AT_SECURE`, `AT_EXECFN`, and `AT_NULL`.
-MakOS also passes `argc`, `argv`, `envp` in `rdi`, `rsi`, `rdx` for direct C
-entry stubs. Syscall 56 remains compatible and synthesizes `argc=1`,
-`argv[0]=path`, empty environment.
+MakOS also passes `argc`, `argv`, `envp` in `rdi`, `rsi`, `rdx` on x86_64 and
+`x0`, `x1`, `x2` on AArch64 for direct C entry stubs. Syscall 56 remains
+compatible and synthesizes `argc=1`, `argv[0]=path`, empty environment.
 
 Socket objects support `AF_INET` (2), connected UDP (`SOCK_DGRAM` 2,
 `IPPROTO_UDP` 17) and connected TCP (`SOCK_STREAM` 1, `IPPROTO_TCP` 6).

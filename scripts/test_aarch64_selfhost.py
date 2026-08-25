@@ -20,7 +20,10 @@ def require(source: str, fragment: str) -> None:
 
 
 for fragment in (
-    '"mov x0, #42\\n"',
+    '"cmp x0, #1\\n"',
+    '"b.eq success\\n"',
+    '"ldr x3, [x1, #8]\\n"',
+    '"ldrb w4, [x3]\\n"',
     '"mov x8, #5\\n"',
     '"svc #0\\n"',
     "static size_t assemble(",
@@ -40,14 +43,19 @@ for fragment in (
     "segment.flags & 3 == 3",
     "crate::vfs::snapshot(path, &mut image)?",
     "pub fn spawn_path(path: &[u8])",
-    "startup=sysv-default",
+    "pub fn spawn_path_with_arguments(path: &[u8], bytes: &[u8])",
+    "startup.argv_offsets[argc..].iter().any",
+    '"sysv-v1"',
 ):
     require(PROCESS, fragment)
 
 for fragment in (
     "const SYS_PROCESS_SPAWN_PATH: u64 = 56;",
+    "const SYS_PROCESS_SPAWN_PATH_ARGS: u64 = 57;",
     "const ABI_FEATURE_SELF_HOSTING_SEED: u64 = 1 << 14;",
     "const ABI_FEATURE_EXEC_BY_PATH: u64 = 1 << 18;",
+    "const ABI_FEATURE_PROCESS_STARTUP: u64 = 1 << 19;",
+    "arguments_length != crate::aarch64_process::SPAWN_ARGUMENTS_BYTES",
     "crate::aarch64_process::spawn_path(path)",
     "16 => crate::aarch64_process::spawn_toolchain()",
 ):
@@ -56,6 +64,10 @@ for fragment in (
 require(BUILD, "../user/aarch64_toolchain.c")
 require(SHELL, "MAKOS_AARCH64_SELFHOST_SEED_OK")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH")
+require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
+require(SHELL, "malformed.argv_offsets[7] = 1")
+require(SHELL, "sizeof(startup) - 1")
+require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
 require(SECURITY, "SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE")
 require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')

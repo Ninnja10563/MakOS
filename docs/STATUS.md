@@ -4,19 +4,22 @@ Last updated: 2026-08-25.
 
 ## Implemented
 
-- 2026-08-25 AArch64 now has a genuine first guest self-hosting seed. A
-  least-privilege EL0 toolchain process writes and rereads
-  `/home/user/generated.s` from MakFS, parses a bounded A64
-  `mov xN,#imm`/`svc #0`/`ret` grammar, emits native instructions, proves JIT
-  RWX denial plus RW-to-RX execution returning 42, and persists a 428-byte
-  two-segment AArch64 ELF at `/home/user/generated-aarch64.elf`. New AArch64
-  syscall 56 snapshots a readable VFS file, validates ET_EXEC/EM_AARCH64,
-  bounds, nonoverlap, entry, permissions and W^X before allocation, maps an
-  immutable snapshot, supplies default SysV startup and runs it at EL0. Pi/TCG
-  runtime passes assembler, loader, status-42 wait/reap and
-  `MAKOS_AARCH64_SELFHOST_SEED_OK`; structural guard and full unit/check pass.
-  This does not yet constitute a C/Rust compiler, linker, build system, or
-  substantial in-guest MakOS build, so self-hosting remains Partial.
+- 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
+  startup-vector ABI. The kernel requires the exact 336-byte version-1
+  descriptor, copies and validates up to eight arguments, eight environment
+  entries and 256 string bytes, rejects malformed/unused offsets and invalid
+  strings, and builds child-owned SysV stack vectors before scheduling. The
+  guest-native two-pass assembler now supports labels, compare, conditional
+  branches, 64-bit loads and byte loads in addition to move/SVC/return. Its
+  persisted 428-byte ELF inspects startup registers itself: Pi/QEMU 10.0.11 TCG
+  passes syscall 56 with `argc=1`, syscall 57 with `argc=3`/`envc=1`, three
+  malformed-descriptor denials, two status-42 wait/reaps, and truthful ABI bit
+  19. `make unit`, `make check`, release image/artifact validation, and focused
+  structural guards pass. The broad Pi/TCG boot continued through later musl
+  and MicroPython gates, then stopped at the unchanged Settings resize mismatch
+  (`560x360` observed versus required `450x290`); it is not recorded as a full
+  broad-gate pass. This still is not a C/Rust compiler, general linker/build
+  system, or substantial in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 repository imported and pushed to
   `https://github.com/Ninnja10563/MakOS.git` on `main` at commit `346b0df`.
   Source, docs, scripts, ports, SDK, tests, and manifests are tracked. Generated

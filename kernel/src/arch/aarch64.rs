@@ -2105,6 +2105,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const SYS_VM_UNMAP_RANGE: u64 = 54;
     const SYS_VM_PROTECT_RANGE: u64 = 55;
     const SYS_PROCESS_SPAWN_PATH: u64 = 56;
+    const SYS_PROCESS_SPAWN_PATH_ARGS: u64 = 57;
     const SYS_SURFACE_CLOSE: u64 = 58;
     const SYS_SURFACE_TEXT: u64 = 59;
     const SYS_SURFACE_READ_EVENT: u64 = 60;
@@ -2205,6 +2206,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const ABI_FEATURE_PACKAGE_TRANSACTIONS: u64 = 1 << 16;
     const ABI_FEATURE_VM_REGIONS: u64 = 1 << 17;
     const ABI_FEATURE_EXEC_BY_PATH: u64 = 1 << 18;
+    const ABI_FEATURE_PROCESS_STARTUP: u64 = 1 << 19;
     const ABI_FEATURE_TTY_SIGNALS: u64 = 1 << 20;
     const ABI_FEATURE_TYPED_IPC: u64 = 1 << 21;
     const ABI_FEATURES: u64 = ABI_FEATURE_IPC
@@ -2222,6 +2224,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         | ABI_FEATURE_PACKAGE_TRANSACTIONS
         | ABI_FEATURE_VM_REGIONS
         | ABI_FEATURE_EXEC_BY_PATH
+        | ABI_FEATURE_PROCESS_STARTUP
         | ABI_FEATURE_TTY_SIGNALS
         | ABI_FEATURE_TYPED_IPC;
     const ERROR_INVALID: u64 = u64::MAX;
@@ -4510,6 +4513,33 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             } else {
                 let path = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
                 crate::aarch64_process::spawn_path(path).unwrap_or(ERROR_INVALID)
+            }
+        }
+        SYS_PROCESS_SPAWN_PATH_ARGS => {
+            let path_address = frame.registers[0];
+            let path_length = frame.registers[1] as usize;
+            let arguments_address = frame.registers[2];
+            let arguments_length = frame.registers[3] as usize;
+            if !crate::security::has_capability(crate::security::CAP_PROCESS)
+                || path_length == 0
+                || path_length >= crate::vfs::MAX_PATH_BYTES
+                || arguments_length != crate::aarch64_process::SPAWN_ARGUMENTS_BYTES
+                || !user_range_readable(path_address, path_length)
+                || !user_range_readable(arguments_address, arguments_length)
+            {
+                ERROR_INVALID
+            } else {
+                let path = unsafe {
+                    core::slice::from_raw_parts(path_address as *const u8, path_length)
+                };
+                let arguments = unsafe {
+                    core::slice::from_raw_parts(
+                        arguments_address as *const u8,
+                        arguments_length,
+                    )
+                };
+                crate::aarch64_process::spawn_path_with_arguments(path, arguments)
+                    .unwrap_or(ERROR_INVALID)
             }
         }
         SYS_SURFACE_CLOSE => {

@@ -98,8 +98,12 @@ open gates.
 After login, `selfhost-aarch64` runs the first guest-native toolchain gate. It
 writes A64 source to MakFS, assembles and persists
 `/home/user/generated-aarch64.elf`, then launches that file through the kernel's
-validated AArch64 syscall-56 path and requires exit status 42. This is a bounded
-assembler seed, not yet a complete compiler/linker or an end-to-end OS build.
+validated AArch64 syscall-56 path with default `argc=1`, then through syscall 57
+with a version-1 descriptor containing three arguments and one environment
+string. The generated program checks both startup forms itself and exits 42;
+the shell also requires rejection of a bad version, a nonzero unused offset,
+and a truncated descriptor. This is a bounded assembler seed, not yet a
+complete compiler/linker or an end-to-end OS build.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.

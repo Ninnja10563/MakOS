@@ -89,31 +89,136 @@ static int decimal(const char *source, size_t source_length, size_t *cursor,
     return digits != 0;
 }
 
-/* Bounded but genuine two-pass-free assembler for a documented A64 subset. */
+enum { MAX_LABELS = 8, MAX_LABEL_BYTES = 16 };
+
+struct label {
+    char name[MAX_LABEL_BYTES];
+    size_t length;
+    size_t offset;
+};
+
+static int label_name(const char *source, size_t start, size_t end,
+                      char output[MAX_LABEL_BYTES], size_t *name_length) {
+    size_t count = 0;
+    if (start == end || source[start] < 'a' || source[start] > 'z') return 0;
+    while (start < end) {
+        char byte = source[start++];
+        if (!((byte >= 'a' && byte <= 'z') || (byte >= '0' && byte <= '9') ||
+              byte == '_') || count == MAX_LABEL_BYTES)
+            return 0;
+        output[count++] = byte;
+    }
+    *name_length = count;
+    return 1;
+}
+
+static int same_label(const struct label *label, const char *name, size_t count) {
+    if (label->length != count) return 0;
+    for (size_t index = 0; index < count; ++index)
+        if (label->name[index] != name[index]) return 0;
+    return 1;
+}
+
+/* Bounded genuine two-pass assembler with labels for a documented A64 subset. */
 static size_t assemble(const char *source, size_t source_length,
                        volatile uint8_t *code, size_t capacity) {
-    size_t cursor = 0, output = 0;
+    struct label labels[MAX_LABELS] = {0};
+    size_t label_count = 0, cursor = 0, output = 0;
     while (cursor < source_length) {
+        size_t line_start = cursor;
+        while (cursor < source_length && source[cursor] != '\n') ++cursor;
+        if (cursor == source_length || cursor == line_start) return 0;
+        size_t line_end = cursor++;
+        if (source[line_end - 1] == ':') {
+            if (label_count == MAX_LABELS ||
+                !label_name(source, line_start, line_end - 1,
+                            labels[label_count].name,
+                            &labels[label_count].length))
+                return 0;
+            for (size_t index = 0; index < label_count; ++index)
+                if (same_label(&labels[index], labels[label_count].name,
+                               labels[label_count].length))
+                    return 0;
+            labels[label_count++].offset = output;
+        } else {
+            if (output + 4 > capacity) return 0;
+            output += 4;
+        }
+    }
+
+    cursor = 0;
+    output = 0;
+    while (cursor < source_length) {
+        size_t line_end = cursor;
+        while (line_end < source_length && source[line_end] != '\n') ++line_end;
+        if (line_end == source_length) return 0;
+        if (line_end > cursor && source[line_end - 1] == ':') {
+            cursor = line_end + 1;
+            continue;
+        }
         uint32_t instruction;
-        if (consume(source, source_length, &cursor, "mov x")) {
+        if (consume(source, line_end, &cursor, "mov x")) {
             uint32_t reg, immediate;
-            if (!decimal(source, source_length, &cursor, &reg) || reg > 30 ||
-                !consume(source, source_length, &cursor, ", #") ||
-                !decimal(source, source_length, &cursor, &immediate))
+            if (!decimal(source, line_end, &cursor, &reg) || reg > 30 ||
+                !consume(source, line_end, &cursor, ", #") ||
+                !decimal(source, line_end, &cursor, &immediate))
                 return 0;
             instruction = UINT32_C(0xd2800000) | (immediate << 5) | reg;
-        } else if (consume(source, source_length, &cursor, "svc #0")) {
+        } else if (consume(source, line_end, &cursor, "cmp x")) {
+            uint32_t reg, immediate;
+            if (!decimal(source, line_end, &cursor, &reg) || reg > 30 ||
+                !consume(source, line_end, &cursor, ", #") ||
+                !decimal(source, line_end, &cursor, &immediate) || immediate > 4095)
+                return 0;
+            instruction = UINT32_C(0xf100001f) | (immediate << 10) | (reg << 5);
+        } else if (consume(source, line_end, &cursor, "ldr x")) {
+            uint32_t target, base, immediate;
+            if (!decimal(source, line_end, &cursor, &target) || target > 30 ||
+                !consume(source, line_end, &cursor, ", [x") ||
+                !decimal(source, line_end, &cursor, &base) || base > 30 ||
+                !consume(source, line_end, &cursor, ", #") ||
+                !decimal(source, line_end, &cursor, &immediate) ||
+                immediate > 32760 || immediate % 8 != 0 ||
+                !consume(source, line_end, &cursor, "]"))
+                return 0;
+            instruction = UINT32_C(0xf9400000) | ((immediate / 8) << 10) |
+                          (base << 5) | target;
+        } else if (consume(source, line_end, &cursor, "ldrb w")) {
+            uint32_t target, base;
+            if (!decimal(source, line_end, &cursor, &target) || target > 30 ||
+                !consume(source, line_end, &cursor, ", [x") ||
+                !decimal(source, line_end, &cursor, &base) || base > 30 ||
+                !consume(source, line_end, &cursor, "]"))
+                return 0;
+            instruction = UINT32_C(0x39400000) | (base << 5) | target;
+        } else if (consume(source, line_end, &cursor, "b.eq ") ||
+                   consume(source, line_end, &cursor, "b.ne ")) {
+            uint32_t condition = source[cursor - 3] == 'e' ? 0 : 1;
+            size_t target_index = MAX_LABELS;
+            for (size_t index = 0; index < label_count; ++index)
+                if (same_label(&labels[index], &source[cursor], line_end - cursor)) {
+                    target_index = index;
+                    break;
+                }
+            if (target_index == MAX_LABELS) return 0;
+            int64_t delta = ((int64_t)labels[target_index].offset -
+                             (int64_t)output) / 4;
+            if (delta < -262144 || delta > 262143) return 0;
+            instruction = UINT32_C(0x54000000) |
+                          (((uint32_t)delta & UINT32_C(0x7ffff)) << 5) |
+                          condition;
+            cursor = line_end;
+        } else if (consume(source, line_end, &cursor, "svc #0")) {
             instruction = UINT32_C(0xd4000001);
-        } else if (consume(source, source_length, &cursor, "ret")) {
+        } else if (consume(source, line_end, &cursor, "ret")) {
             instruction = UINT32_C(0xd65f03c0);
         } else {
             return 0;
         }
-        if (cursor >= source_length || source[cursor++] != '\n' ||
-            output + 4 > capacity)
-            return 0;
+        if (cursor != line_end || output + 4 > capacity) return 0;
         put32(code, output, instruction);
         output += 4;
+        cursor = line_end + 1;
     }
     return output;
 }
@@ -169,14 +274,30 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char source_path[] = "/home/user/generated.s";
     static const char output_path[] = "/home/user/generated-aarch64.elf";
     static const char source[] =
+        "cmp x0, #1\n"
+        "b.eq success\n"
+        "cmp x0, #3\n"
+        "b.ne fail\n"
+        "ldr x3, [x1, #8]\n"
+        "ldrb w4, [x3]\n"
+        "cmp x4, #97\n"
+        "b.ne fail\n"
+        "ldr x5, [x2, #0]\n"
+        "ldrb w6, [x5]\n"
+        "cmp x6, #77\n"
+        "b.ne fail\n"
+        "success:\n"
         "mov x0, #42\n"
         "mov x8, #5\n"
         "svc #0\n"
-        "ret\n";
+        "fail:\n"
+        "mov x0, #86\n"
+        "mov x8, #5\n"
+        "svc #0\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
         "MAKOS_AARCH64_ASSEMBLER_OK source=/home/user/generated.s "
-        "output=/home/user/generated-aarch64.elf grammar=movz,svc,ret "
+        "output=/home/user/generated-aarch64.elf grammar=labels,movz,cmp,branch,ldr,ldrb,svc,ret "
         "format=elf64 machine=aarch64 segments=2 code_rx=1 data_nx=1 "
         "persisted=1 wx_denied=1 jit_result=42\n";
 
@@ -192,7 +313,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         syscall4(SYS_CLOSE, fd, 0, 0, 0) != 1)
         fail(80);
 
-    char input[128] = {0};
+    char input[512] = {0};
     fd = syscall4(SYS_OPEN, (uintptr_t)source_path,
                   sizeof(source_path) - 1, 0, 0);
     uint64_t source_length = syscall4(SYS_READ, fd, (uintptr_t)input,
@@ -201,9 +322,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         syscall4(SYS_CLOSE, fd, 0, 0, 0) != 1)
         fail(81);
 
-    uint8_t code[64] = {0};
+    uint8_t code[128] = {0};
     size_t code_length = assemble(input, (size_t)source_length, code, sizeof(code));
-    if (code_length != 16) fail(82);
+    if (code_length != 72) fail(82);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
     if ((uintptr_t)jit == UINT64_MAX) fail(83);

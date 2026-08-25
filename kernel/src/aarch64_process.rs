@@ -13,6 +13,11 @@ const MAX_PROCESSES: usize = 128;
 const MAX_FUTEX_WAITERS: usize = MAX_PROCESSES;
 const SYSV_MAX_ARGUMENTS: usize = 64;
 const SYSV_MAX_ENVIRONMENT: usize = 64;
+pub const SPAWN_ARGUMENTS_VERSION: u32 = 1;
+pub const SPAWN_ARGUMENTS_BYTES: usize = 336;
+const SPAWN_MAX_ARGUMENTS: usize = 8;
+const SPAWN_MAX_ENVIRONMENT: usize = 8;
+const SPAWN_DATA_BYTES: usize = 256;
 const SURFACE_PRIORITY_TICKS: u64 = 1_000;
 const DYNAMIC_APP_BASE: u64 = 0x1000_0000;
 const DYNAMIC_LOADER_BASE: u64 = 0x2800_0000;
@@ -58,6 +63,26 @@ pub enum ProcessRole {
     Nano,
     Native,
     Firefox,
+}
+
+struct SpawnArguments {
+    argc: usize,
+    envc: usize,
+    argv_offsets: [usize; SPAWN_MAX_ARGUMENTS],
+    env_offsets: [usize; SPAWN_MAX_ENVIRONMENT],
+    data_length: usize,
+    data: [u8; SPAWN_DATA_BYTES],
+}
+
+impl SpawnArguments {
+    const EMPTY: Self = Self {
+        argc: 0,
+        envc: 0,
+        argv_offsets: [0; SPAWN_MAX_ARGUMENTS],
+        env_offsets: [0; SPAWN_MAX_ENVIRONMENT],
+        data_length: 0,
+        data: [0; SPAWN_DATA_BYTES],
+    };
 }
 
 #[derive(Clone, Copy)]
@@ -2008,6 +2033,32 @@ pub fn spawn_toolchain() -> Option<u64> {
 }
 
 pub fn spawn_path(path: &[u8]) -> Option<u64> {
+    let argv: [&[u8]; 1] = [path];
+    spawn_path_inner(path, &argv, &[], "sysv-default")
+}
+
+pub fn spawn_path_with_arguments(path: &[u8], bytes: &[u8]) -> Option<u64> {
+    let startup = parse_spawn_arguments(bytes)?;
+    let mut argv: [&[u8]; SPAWN_MAX_ARGUMENTS] = [&startup.data[0..0]; SPAWN_MAX_ARGUMENTS];
+    let mut envp: [&[u8]; SPAWN_MAX_ENVIRONMENT] =
+        [&startup.data[0..0]; SPAWN_MAX_ENVIRONMENT];
+    for (index, offset) in startup.argv_offsets[..startup.argc].iter().enumerate() {
+        let value = startup_string(&startup, *offset)?;
+        argv[index] = &value[..value.len() - 1];
+    }
+    for (index, offset) in startup.env_offsets[..startup.envc].iter().enumerate() {
+        let value = startup_string(&startup, *offset)?;
+        envp[index] = &value[..value.len() - 1];
+    }
+    spawn_path_inner(
+        path,
+        &argv[..startup.argc],
+        &envp[..startup.envc],
+        "sysv-v1",
+    )
+}
+
+fn spawn_path_inner(path: &[u8], argv: &[&[u8]], envp: &[&[u8]], startup: &str) -> Option<u64> {
     let parent_pid = current_pid();
     if parent_pid == 0
         || current_app_role() != ProcessRole::Shell
@@ -2020,14 +2071,12 @@ pub fn spawn_path(path: &[u8]) -> Option<u64> {
     let mut image = [0u8; crate::vfs::MAX_FILE_BYTES];
     let length = crate::vfs::snapshot(path, &mut image)?;
     let segments = validate_static_process_image(&image[..length])?;
-    let argv: [&[u8]; 1] = [path];
-    let envp: [&[u8]; 0] = [];
     let (pid, process) = spawn_process_sysv(
         parent_pid,
         &image[..length],
         ProcessRole::Native,
-        &argv,
-        &envp,
+        argv,
+        envp,
     )?;
     if !crate::security::register_session_process(pid, crate::security::SessionProcessRole::Native)
     {
@@ -2035,15 +2084,80 @@ pub fn spawn_path(path: &[u8]) -> Option<u64> {
         return None;
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_EXEC_SPAWN pid={} parent={} source=makfs format=elf64 bytes={} segments={} entry={:#x} ttbr0={:#x} startup=sysv-default",
+        "MAKOS_AARCH64_EXEC_SPAWN pid={} parent={} source=makfs format=elf64 bytes={} segments={} entry={:#x} ttbr0={:#x} startup={} argc={} envc={}",
         pid,
         parent_pid,
         length,
         segments,
         process.entry,
         process.root,
+        startup,
+        argv.len(),
+        envp.len(),
     );
     Some(pid)
+}
+
+fn parse_spawn_arguments(bytes: &[u8]) -> Option<SpawnArguments> {
+    if bytes.len() != SPAWN_ARGUMENTS_BYTES
+        || read_spawn_u32(bytes, 0)? != SPAWN_ARGUMENTS_VERSION as usize
+    {
+        return None;
+    }
+    let argc = read_spawn_u32(bytes, 4)?;
+    let envc = read_spawn_u32(bytes, 8)?;
+    let data_length = read_spawn_u32(bytes, 12)?;
+    if argc == 0
+        || argc > SPAWN_MAX_ARGUMENTS
+        || envc > SPAWN_MAX_ENVIRONMENT
+        || data_length == 0
+        || data_length > SPAWN_DATA_BYTES
+    {
+        return None;
+    }
+    let mut startup = SpawnArguments {
+        argc,
+        envc,
+        data_length,
+        ..SpawnArguments::EMPTY
+    };
+    for index in 0..SPAWN_MAX_ARGUMENTS {
+        startup.argv_offsets[index] = read_spawn_u32(bytes, 16 + index * 4)?;
+    }
+    for index in 0..SPAWN_MAX_ENVIRONMENT {
+        startup.env_offsets[index] = read_spawn_u32(bytes, 48 + index * 4)?;
+    }
+    startup.data.copy_from_slice(&bytes[80..SPAWN_ARGUMENTS_BYTES]);
+    if startup.argv_offsets[argc..].iter().any(|offset| *offset != 0)
+        || startup.env_offsets[envc..].iter().any(|offset| *offset != 0)
+    {
+        return None;
+    }
+    for offset in &startup.argv_offsets[..argc] {
+        if startup_string(&startup, *offset)?.len() <= 1 {
+            return None;
+        }
+    }
+    for offset in &startup.env_offsets[..envc] {
+        let value = startup_string(&startup, *offset)?;
+        let equals = value[..value.len() - 1]
+            .iter()
+            .position(|byte| *byte == b'=')?;
+        if equals == 0 {
+            return None;
+        }
+    }
+    Some(startup)
+}
+
+fn read_spawn_u32(bytes: &[u8], offset: usize) -> Option<usize> {
+    Some(u32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?) as usize)
+}
+
+fn startup_string(startup: &SpawnArguments, offset: usize) -> Option<&[u8]> {
+    let remaining = startup.data.get(offset..startup.data_length)?;
+    let length = remaining.iter().position(|byte| *byte == 0)? + 1;
+    Some(&remaining[..length])
 }
 
 pub fn spawn_musl_crt_probe() -> Option<u64> {
