@@ -68,10 +68,12 @@ source from MakFS and writes ELF64 objects and an executable back through the
 normal VFS. Its C subset accepts one `int` function with one `int` parameter.
 The body may declare up to four initialized register locals, use the parameter,
 locals, unsigned 16-bit constants, parentheses, multiplication, addition and
-subtraction, contain an equality `if` whose block returns an expression, and
-call one external function with one argument. A final unconditional return is
-required. It emits AAPCS64 32-bit `int` code with validated conditional-branch
-fixups and a 64-byte non-leaf FP/LR/x19-x23 save frame, then a real
+subtraction, assign expressions to the parameter or declared locals, contain
+an equality/inequality condition in an `if` whose block returns an expression,
+run a bounded assignment-only `while` body, and call one external function with
+one argument. A final unconditional return is required. It emits AAPCS64 32-bit
+`int` code with validated forward conditional and signed backward branch fixups
+and a 64-byte non-leaf FP/LR/x19-x23 save frame, then a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. The companion assembler supplies `_start`; the bounded linker
 discovers symbols across up to three objects, resolves two
@@ -79,8 +81,8 @@ discovers symbols across up to three objects, resolves two
 Unsupported tokens, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
-This seed has no pointers, memory loads/stores, loops, assignments after local
-initialization, nested/general blocks, multiple functions per translation unit,
+This seed has no pointers, memory loads/stores, nested/general blocks,
+multiple functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
 archives, dynamic linking, CLI build driver, or
 debug information. It must not be presented as a general C compiler or a

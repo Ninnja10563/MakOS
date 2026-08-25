@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural guard for three-object guest-native AArch64 compilation/linking."""
+"""Structural guard for loop-capable guest-native AArch64 compilation/linking."""
 
 from pathlib import Path
 
@@ -35,13 +35,23 @@ for fragment in (
     '"        return adjust(normalized);\\n"',
     '"    return 86;\\n"',
     '"int adjust(int value) {\\n"',
-    '"    return value + 2;\\n"',
+    '"    int count = 0;\\n"',
+    '"    while (count != 2) {\\n"',
+    '"        value = value + 1;\\n"',
+    '"        count = count + 1;\\n"',
+    '"    return value;\\n"',
     "static size_t assemble(",
     "static size_t compile_c(",
+    "static int c_variable_register(",
     "static int c_additive(",
     "static int c_multiplicative(",
+    "static int c_comparison(",
+    "static int c_patch_conditional(",
+    "static int c_patch_branch(",
     "static int c_declaration(",
+    "static int c_assignment(",
     "static int c_if_return(",
+    "static int c_while(",
     "MAX_C_LOCALS = 4",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x0b000000)",
@@ -52,9 +62,12 @@ for fragment in (
     "UINT32_C(0x2a0003f7)",
     "UINT32_C(0x94000000)",
     "UINT32_C(0x6b00001f)",
-    "UINT32_C(0x54000001)",
+    "UINT32_C(0x54000000)",
+    "UINT32_C(0x14000000)",
     "malformed_c_source",
     "malformed_control_source",
+    "malformed_loop_source",
+    "malformed_assignment_source",
     "compile_c(malformed_c_source",
     "static size_t emit_object(",
     "static int parse_object(",
@@ -73,12 +86,13 @@ for fragment in (
     "link_objects(duplicate_objects, duplicate_lengths, 3",
     "answer_relocations[0].offset != 68",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
+    "compiled_adjust(40) != 42 || compiled_adjust(0) != 2",
     "main_object_length != 688 || answer_object_length != 728",
-    "adjust_object_length != 608",
-    "linked_length != 248",
-    "image_length != 559",
+    "adjust_object_length != 664",
+    "linked_length != 300",
+    "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_c_denied=2",
+    "persisted_reopened=1 malformed_c_denied=4",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -129,10 +143,10 @@ require(SHELL, "objects=3 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocations=R_AARCH64_CALL26:2 symbols=_start,answer,adjust")
 require(SHELL, "c_abi=aapcs64-int32")
-require(SHELL, "c_features=parameter,local,if,equality,call,return nonleaf_frame=64")
+require(SHELL, "c_features=parameter,local,assignment,if,equality,inequality,while,call,return nonleaf_frame=64")
 require(SHELL, "c_operators=mul,sub,add branch_results=42,86")
-require(SHELL, "code_bytes=76,116,56 object_bytes=688,728,608 linked_bytes=248 output_bytes=559")
-require(SHELL, "malformed_c_denied=2")
+require(SHELL, "loop_results=42,2 code_bytes=76,116,108 object_bytes=688,728,664 linked_bytes=300 output_bytes=815")
+require(SHELL, "malformed_c_denied=4")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -141,7 +155,7 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_c_denied=2")
+require(FOCUSED_RUNTIME, "malformed_c_denied=4")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

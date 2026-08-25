@@ -21,8 +21,8 @@ enum {
     SYMBOL_SIZE = 24,
     RELA_SIZE = 24,
     CODE_OFFSET = 256,
-    DATA_OFFSET = 512,
-    IMAGE_CAPACITY = 768,
+    DATA_OFFSET = 768,
+    IMAGE_CAPACITY = 1024,
     OBJECT_CAPACITY = 1024,
     R_AARCH64_CALL26 = 283,
 };
@@ -315,6 +315,7 @@ static size_t assemble(const char *source, size_t source_length,
  *   int identifier(int identifier) {
  *       int identifier = expression;
  *       if (expression == expression) { return expression; }
+ *       while (expression != expression) { identifier = expression; }
  *       return expression;
  *   }
  *
@@ -393,6 +394,23 @@ static int c_keyword(struct c_compiler *compiler, const char *keyword) {
     return 1;
 }
 
+static int c_variable_register(struct c_compiler *compiler, const char *name,
+                               size_t name_length, uint32_t *register_out) {
+    if (same_name(name, name_length, compiler->parameter,
+                  compiler->parameter_length)) {
+        *register_out = 23;
+        return 1;
+    }
+    size_t local = 0;
+    while (local < compiler->local_count &&
+           !same_name(name, name_length, compiler->locals[local].name,
+                      compiler->locals[local].length))
+        ++local;
+    if (local == compiler->local_count) return 0;
+    *register_out = 19 + (uint32_t)local;
+    return 1;
+}
+
 static int c_emit(struct c_compiler *compiler, uint32_t instruction) {
     if (compiler->output + 4 > compiler->capacity) return 0;
     put32(compiler->code, compiler->output, instruction);
@@ -444,19 +462,9 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         return c_emit(compiler, UINT32_C(0x94000000));
     }
     uint32_t source_register = 0;
-    if (same_name(identifier, identifier_length, compiler->parameter,
-                  compiler->parameter_length)) {
-        source_register = 23;
-    } else {
-        size_t local = 0;
-        while (local < compiler->local_count &&
-               !same_name(identifier, identifier_length,
-                          compiler->locals[local].name,
-                          compiler->locals[local].length))
-            ++local;
-        if (local == compiler->local_count) return 0;
-        source_register = 19 + (uint32_t)local;
-    }
+    if (!c_variable_register(compiler, identifier, identifier_length,
+                             &source_register))
+        return 0;
     return c_emit(compiler, UINT32_C(0x2a0003e0) |
                             (source_register << 16) | destination);
 }
@@ -495,14 +503,49 @@ static int c_additive(struct c_compiler *compiler, uint32_t destination) {
     }
 }
 
-static int c_equality(struct c_compiler *compiler) {
+static int c_comparison(struct c_compiler *compiler,
+                        uint32_t *false_condition) {
     c_space(compiler);
-    if (compiler->cursor + 2 > compiler->source_length ||
-        compiler->source[compiler->cursor] != '=' ||
-        compiler->source[compiler->cursor + 1] != '=')
+    if (compiler->cursor + 2 > compiler->source_length) return 0;
+    char first = compiler->source[compiler->cursor];
+    if (compiler->source[compiler->cursor + 1] != '=' ||
+        (first != '=' && first != '!'))
         return 0;
+    *false_condition = first == '=' ? 1 : 0; /* B.NE or B.EQ. */
     compiler->cursor += 2;
     return 1;
+}
+
+static int c_patch_conditional(struct c_compiler *compiler, size_t branch,
+                               size_t target, uint32_t condition) {
+    int64_t delta = (int64_t)target - (int64_t)branch;
+    if (delta % 4 != 0) return 0;
+    int64_t immediate = delta / 4;
+    if (immediate < -262144 || immediate > 262143 || condition > 15) return 0;
+    put32(compiler->code, branch,
+          UINT32_C(0x54000000) |
+              (((uint32_t)immediate & UINT32_C(0x7ffff)) << 5) | condition);
+    return 1;
+}
+
+static int c_patch_branch(struct c_compiler *compiler, size_t branch,
+                          size_t target) {
+    int64_t delta = (int64_t)target - (int64_t)branch;
+    if (delta % 4 != 0) return 0;
+    int64_t immediate = delta / 4;
+    if (immediate < -33554432 || immediate > 33554431) return 0;
+    put32(compiler->code, branch,
+          UINT32_C(0x14000000) |
+              ((uint32_t)immediate & UINT32_C(0x03ffffff)));
+    return 1;
+}
+
+static int c_condition(struct c_compiler *compiler,
+                       uint32_t *false_condition) {
+    return c_punct(compiler, '(') && c_additive(compiler, 0) &&
+           c_comparison(compiler, false_condition) &&
+           c_additive(compiler, 1) && c_punct(compiler, ')') &&
+           c_emit(compiler, UINT32_C(0x6b00001f) | (UINT32_C(1) << 16));
 }
 
 static int c_epilogue(struct c_compiler *compiler) {
@@ -538,21 +581,54 @@ static int c_declaration(struct c_compiler *compiler) {
     return 1;
 }
 
-static int c_if_return(struct c_compiler *compiler) {
-    if (!c_punct(compiler, '(') || !c_additive(compiler, 0) ||
-        !c_equality(compiler) || !c_additive(compiler, 1) ||
-        !c_punct(compiler, ')') ||
-        !c_emit(compiler, UINT32_C(0x6b00001f) | (UINT32_C(1) << 16)))
+static int c_assignment(struct c_compiler *compiler) {
+    char identifier[MAX_LABEL_BYTES] = {0};
+    size_t identifier_length = 0;
+    uint32_t destination = 0;
+    if (!c_identifier(compiler, identifier, &identifier_length) ||
+        !c_variable_register(compiler, identifier, identifier_length,
+                             &destination) ||
+        !c_punct(compiler, '=') || !c_additive(compiler, 0) ||
+        !c_punct(compiler, ';'))
         return 0;
+    return c_emit(compiler, UINT32_C(0x2a0003e0) | destination);
+}
+
+static int c_if_return(struct c_compiler *compiler) {
+    uint32_t false_condition = 0;
+    if (!c_condition(compiler, &false_condition)) return 0;
     size_t branch = compiler->output;
-    if (!c_emit(compiler, UINT32_C(0x54000001)) ||
+    if (!c_emit(compiler, UINT32_C(0x54000000) | false_condition) ||
         !c_punct(compiler, '{') || !c_keyword(compiler, "return") ||
         !c_return_statement(compiler) || !c_punct(compiler, '}'))
         return 0;
-    size_t byte_delta = compiler->output - branch;
-    if (byte_delta % 4 != 0 || byte_delta / 4 > UINT32_C(0x3ffff)) return 0;
-    put32(compiler->code, branch,
-          UINT32_C(0x54000001) | ((uint32_t)(byte_delta / 4) << 5));
+    return c_patch_conditional(compiler, branch, compiler->output,
+                               false_condition);
+}
+
+static int c_while(struct c_compiler *compiler) {
+    size_t loop = compiler->output;
+    uint32_t false_condition = 0;
+    if (!c_condition(compiler, &false_condition)) return 0;
+    size_t exit_branch = compiler->output;
+    if (!c_emit(compiler, UINT32_C(0x54000000) | false_condition) ||
+        !c_punct(compiler, '{'))
+        return 0;
+    size_t assignments = 0;
+    for (;;) {
+        c_space(compiler);
+        if (compiler->cursor == compiler->source_length) return 0;
+        if (compiler->source[compiler->cursor] == '}') break;
+        if (!c_assignment(compiler)) return 0;
+        ++assignments;
+    }
+    if (assignments == 0 || !c_punct(compiler, '}')) return 0;
+    size_t back_branch = compiler->output;
+    if (!c_emit(compiler, UINT32_C(0x14000000)) ||
+        !c_patch_branch(compiler, back_branch, loop) ||
+        !c_patch_conditional(compiler, exit_branch, compiler->output,
+                             false_condition))
+        return 0;
     return 1;
 }
 
@@ -597,11 +673,13 @@ static size_t compile_c(const char *source, size_t source_length,
             if (!c_declaration(&compiler)) return 0;
         } else if (c_keyword(&compiler, "if")) {
             if (!c_if_return(&compiler)) return 0;
+        } else if (c_keyword(&compiler, "while")) {
+            if (!c_while(&compiler)) return 0;
         } else if (c_keyword(&compiler, "return")) {
             if (!c_return_statement(&compiler)) return 0;
             terminal_return = 1;
         } else {
-            return 0;
+            if (!c_assignment(&compiler)) return 0;
         }
         ++statement_count;
     }
@@ -1126,12 +1204,21 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "}\n";
     static const char adjust_source[] =
         "int adjust(int value) {\n"
-        "    return value + 2;\n"
+        "    int count = 0;\n"
+        "    while (count != 2) {\n"
+        "        value = value + 1;\n"
+        "        count = count + 1;\n"
+        "    }\n"
+        "    return value;\n"
         "}\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value / 2; }\n";
     static const char malformed_control_source[] =
         "int answer(int value) { if (value == 1) { return 42; } }\n";
+    static const char malformed_loop_source[] =
+        "int adjust(int value) { while (value != 0) { value = value - 1; } }\n";
+    static const char malformed_assignment_source[] =
+        "int adjust(int value) { missing = value; return value; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
         "MAKOS_AARCH64_LINKER_OK sources=3 languages=aarch64-asm,c-subset-v1 "
@@ -1139,10 +1226,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:2 "
         "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
         "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 "
-        "c_features=parameter,local,if,equality,call,return nonleaf_frame=64 "
-        "c_operators=mul,sub,add branch_results=42,86 code_bytes=76,116,56 "
-        "object_bytes=688,728,608 linked_bytes=248 output_bytes=559 "
-        "persisted_reopened=1 malformed_c_denied=2 "
+        "c_features=parameter,local,assignment,if,equality,inequality,while,call,return "
+        "nonleaf_frame=64 c_operators=mul,sub,add branch_results=42,86 "
+        "loop_results=42,2 code_bytes=76,116,108 object_bytes=688,728,664 "
+        "linked_bytes=300 output_bytes=815 persisted_reopened=1 malformed_c_denied=4 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -1155,7 +1242,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                     (const uint8_t *)adjust_source, sizeof(adjust_source) - 1))
         fail(80);
     uint8_t source_input[512] = {0}, answer_input[256] = {0};
-    uint8_t adjust_input[128] = {0};
+    uint8_t adjust_input[256] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
@@ -1197,6 +1284,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                   sizeof(malformed_code), malformed_function,
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_loop_source,
+                  sizeof(malformed_loop_source) - 1, malformed_code,
+                  sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_assignment_source,
+                  sizeof(malformed_assignment_source) - 1, malformed_code,
+                  sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
     size_t answer_code_length = compile_c((const char *)answer_input,
                                           answer_source_length, answer_code,
                                           sizeof(answer_code), answer_function,
@@ -1210,7 +1309,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                           adjust_relocations,
                                           &adjust_relocation_count);
     if (main_code_length != 76 || answer_code_length != 116 ||
-        adjust_code_length != 56 ||
+        adjust_code_length != 108 ||
         !same_name(answer_function, answer_function_length, "answer", 6) ||
         !same_name(adjust_function, adjust_function_length, "adjust", 6) ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
@@ -1258,7 +1357,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                               adjust_relocations,
                                               adjust_relocation_count);
     if (main_object_length != 688 || answer_object_length != 728 ||
-        adjust_object_length != 608 ||
+        adjust_object_length != 664 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(answer_object_path, sizeof(answer_object_path) - 1,
@@ -1287,7 +1386,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t corrupt_info = corrupt_view.rela_offset + 8;
     uint8_t saved_type = main_object[corrupt_info];
     main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1);
-    uint8_t linked_code[256] = {0};
+    uint8_t linked_code[384] = {0};
     size_t entry_offset = 0;
     const uint8_t *objects[MAX_LINK_OBJECTS] = {
         main_object, answer_object, adjust_object,
@@ -1321,7 +1420,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t linked_length = link_objects(objects, object_lengths, 3, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
-    if (linked_length != 248 || entry_offset != 0) fail(89);
+    if (linked_length != 300 || entry_offset != 0) fail(89);
 
     uint8_t *compiled_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -1334,12 +1433,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         fail(89);
     uint64_t (*compiled_answer)(uint64_t) =
         (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 76);
-    if (compiled_answer(20) != 42 || compiled_answer(0) != 86) fail(89);
+    uint64_t (*compiled_adjust)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 192);
+    if (compiled_answer(20) != 42 || compiled_answer(0) != 86 ||
+        compiled_adjust(40) != 42 || compiled_adjust(0) != 2)
+        fail(89);
 
     volatile uint8_t image[IMAGE_CAPACITY];
     size_t image_length = emit_elf(image, linked_code, linked_length,
                                    entry_offset);
-    if (image_length != 559 ||
+    if (image_length != 815 ||
         !write_file(output_path, sizeof(output_path) - 1,
                     (const uint8_t *)image, image_length))
         fail(90);
