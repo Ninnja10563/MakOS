@@ -27,15 +27,16 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Previous visible Pi/TCG login milestone for pushed commit `eff2cd7`: PID 82718,
-  VNC `127.0.0.1:5901`, session `build/makos-pi-visible-gzdjjY`, private data
-  clone `build/makos-pi-visible-gzdjjY/data.img`, private variables
-  `build/makos-pi-visible-gzdjjY/vars.fd`, QMP
-  `build/makos-pi-visible-gzdjjY/qmp.sock`, serial
-  `build/makos-pi-visible-gzdjjY/serial.log`, and PID file
-  `build/makos-pi-visible-gzdjjY/qemu.pid`. Markers pass truthful ABI discovery,
-  `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`. It exited cleanly through
-  QMP before the SMP runtime gate; no longer active.
+- Active visible Pi/QEMU 10.0.11 TCG milestone for pushed commit `d1c0bce`: PID
+  92279, VNC `127.0.0.1:5901`, session `build/makos-pi-visible-kw28Dx`, private
+  data clone `build/makos-pi-visible-kw28Dx/data.img`, private variables
+  `build/makos-pi-visible-kw28Dx/vars.fd`, QMP
+  `build/makos-pi-visible-kw28Dx/qmp.sock`, serial
+  `build/makos-pi-visible-kw28Dx/serial.log`, and PID file
+  `build/makos-pi-visible-kw28Dx/qemu.pid`. It is the sole QEMU process and
+  passes the four-PE EL0 marker, `MAKOS_LOGIN_UI_OK`, and
+  `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
+  before any later runtime gate.
 - A bounded four-PE AArch64 EL0 scheduler proof now passes on Pi/QEMU 10.0.11
   TCG: a GICv2 SGI wakes the AP gate, each AP enables its banked virtual-timer
   PPI, the four contexts rendezvous immediately before EL0 entry, and four
