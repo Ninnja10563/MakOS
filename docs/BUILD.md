@@ -106,12 +106,12 @@ runtimes when using an extracted, non-system QEMU installation.
 After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
 linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
 `/home/user/generated-program.c`, then rereads both from MakFS. A bounded C
-translation unit accepts up to two `int` functions, each with one `int` or
-`int *` parameter, 0..65535 constants,
+translation unit accepts up to two `int` functions, each with one or two typed
+`int`/`int *` parameters, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
 mutable parameter/local assignments, equality and inequality comparisons, one
 equality `if` block containing a return, a bounded `while` body containing one
-or more assignments, a one-argument function call, and bounded pointer
+or more assignments, a one- or two-argument function call, and bounded pointer
 initializers from `&local` or `pointer-or-array + constant`. Address and pointer
 expressions may be passed to the bounded external call. Dereference expressions
 load a 32-bit `int` through a pointer local or pointer parameter;
@@ -124,36 +124,39 @@ Fixed local `int` arrays accept one to four exactly supplied initializer
 expressions, subject to the shared four-slot frame limit. Constant indices are
 bounded to 0..3 and known local-array indices are checked against the declared
 length. Indexed expressions and assignments emit scaled 32-bit loads/stores;
-a bare array call argument decays to its 64-bit stack address in `x0`; an
-accepted `array + constant` call argument passes the scaled derived address.
+a bare array call argument decays to its 64-bit stack address; an accepted
+`array + constant` call argument passes the scaled derived address. Arguments
+occupy AAPCS64 `x0`/`x1`, using the `w` view for `int` values.
 A final unconditional return is required so every accepted path returns.
-Non-leaf functions preserve FP/LR and x19-x23 in a 96-byte AAPCS64 frame with
+Non-leaf functions preserve FP/LR and x19-x24 in a 96-byte AAPCS64 frame with
 four bounded 32-bit local slots. The
 current `answer` initializes `values[3]` with `(value * 3) - 20`, 40, and zero,
-then passes the derived `values + 1` pointer into `adjust` when element zero equals 40;
-otherwise it returns 86. `adjust` accepts that pointer in AAPCS64 `x0`,
-preserves it in `x23`, derives `next = pointer + 1`, increments element zero,
+then calls `adjust(values + 1, 1)` when element zero equals 40; otherwise it
+returns 86. `adjust(int *pointer, int delta)` accepts its pointer in AAPCS64
+`x0` and delta in `w1`, preserves them in `x23`/`w24`, derives
+`next = pointer + 1`, adds delta to element zero,
 then uses `while (count != 1)` and `*(pointer + 1)` to store
-element-zero-plus-one into element one and advance the counter. Its return
-reloads through `next`. The compiler emits two 136-byte definitions in a
-single 272-byte `.text` and an 880-byte
+element-zero-plus-delta into element one and advance the counter. Its return
+reloads through `next`. The compiler emits two 140-byte definitions in a
+single 280-byte `.text` and an 888-byte
 `generated-program.o`; the assembler emits 76 code bytes in the 688-byte
 `generated-main.o`. Both genuine ELF64 `ET_REL` files persist/reopen. The C
 object's symbol table defines `answer` at offset zero and `adjust` at offset
-136. The bounded linker discovers definitions and undefined symbols across
+140. The bounded linker discovers definitions and undefined symbols across
 both, applies the external `_start`→`answer` and same-object
-`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 348 code bytes in the
+`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 356 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
-`answer(20)=42`, `answer(0)=86`, `adjust(forty)=42`, and
-`adjust(zero)=2`, with the direct-call arrays also required to become
-`41:42` and `1:2`. Invalid
+`answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
+`adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the direct-call arrays also
+required to become `41:42`, `42:44`, and `1:2`. Invalid
 relocation type/addend/site, unresolved `adjust`, and duplicate `answer` inputs
 are denied, as are unsupported division, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
-and duplicate functions in one translation unit are also denied.
+duplicate functions/parameters, and more than two parameters or call arguments
+are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
 both forms, passes 20 to compiled `answer`, and exits with its result 42. Three

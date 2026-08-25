@@ -27,30 +27,34 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG pointer-add self-host milestone:
-  PID 408245, user service `makos-visible-selfhost-pointer-add-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG two-parameter self-host milestone:
+  PID 420287, user service `makos-visible-selfhost-two-parameter-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv`, private boot clone
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/boot.img`, private data clone
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/data.img`, private variables
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/vars.fd`, QMP
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/qmp.sock`, serial
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/serial.log`, PID file
-  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/qemu.pid`, and QMP framebuffer
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX`, private boot clone
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/boot.img`, private data clone
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/data.img`, private variables
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/vars.fd`, QMP
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/qmp.sock`, serial
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/serial.log`, PID file
+  `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/qemu.pid`, and QMP framebuffer
   captures `login.ppm`/`login.png`. Its boot
   clone SHA-256 is
-  `f01b937a3baa1c8b8e470b13f384847a195f9849e02f70bb94a01d7e095586f0`,
+  `49a9584f2a08ac16e8e1a8e02965e3660020dfc531b9997318bed6de08a5349c`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `101,96,100`, with no fatal/panic. The 800x600 capture was visually
+  counters `100,98,99`, with no fatal/panic. The 800x600 capture SHA-256 is
+  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`; it was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 408245/session
+  `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv` was stopped cleanly
+  through QMP before the two-parameter self-host runtime; its private files remain.
   Prior PID 402725/session
   `build/makos-pi-visible-selfhost-pointer-add-xVy0hK88` was stopped cleanly
   through QMP before the final typed-address denial/runtime; its private files
@@ -308,29 +312,33 @@ Preserve existing files and changes.
 - 2026-08-25 the guest-native AArch64 toolchain now builds two source files
   into two persisted ELF64 `ET_REL` objects. The assembler emits 76 bytes of
   `_start` code in a 688-byte object. One C translation unit contains both the
-  two 136-byte definitions, `answer` and later-defined `adjust`; the bounded
-  compiler concatenates them into a 272-byte `.text` with distinct symbols in
-  one 880-byte object, including a 96-byte
+  two 140-byte definitions, `answer` and later-defined
+  `adjust(int *pointer, int delta)`; the bounded compiler concatenates them
+  into a 280-byte `.text` with distinct symbols in one 888-byte object,
+  including a 96-byte
   AAPCS64 non-leaf frame, mutable parameter/local assignments,
   equality/inequality comparisons, a signed backward-branch assignment-only
   `while`, bounded `int *pointer = &local`, fixed local `int` arrays with exact
   initializers, checked constant indexing, array decay, bounded constant-element
-  pointer addition, and an `int *` parameter carried in `x0` and preserved in
-  `x23`. Pointer addition emits a scaled 64-bit address `ADD`; known local bounds
+  pointer addition, plus one or two independently typed `int`/`int *`
+  parameters and call arguments. AAPCS64 carries them in `x0`/`x1` (`w0`/`w1`
+  for integers) and preserves them in x23/x24. Pointer addition emits a scaled 64-bit address `ADD`; known local bounds
   reject one-past-end derived pointers. The real
-  `answer`→`adjust(values + 1)` call, `next = pointer + 1`, and
-  `*(pointer + 1)` store mutate the final two caller-owned array elements.
+  `answer`→`adjust(values + 1, 1)` call, `next = pointer + 1`, and
+  `*(pointer + 1)` store mutate the final two caller-owned array elements using
+  the second parameter as delta.
   The bounded
   linker discovers definitions/undefined symbols across both, applies external
   `_start`→`answer` and same-object `answer`→`adjust` `R_AARCH64_CALL26`
   relocations, and
-  emits 348 linked bytes in an 815-byte `ET_EXEC`. The fully linked C graph
-  executes `answer(20)=42`, `answer(0)=86`, `adjust(forty)=42`, and
-  `adjust(zero)=2`; both direct-call arrays must also become `41:42`/`1:2`, and the
+  emits 356 linked bytes in an 815-byte `ET_EXEC`. The fully linked C graph
+  executes `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
+  `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; direct-call arrays must become
+  `41:42`/`42:44`/`1:2`, and the
   normal loader executes the final ELF twice with status 42. The adjust
   outcomes require real stack address formation and dereference memory writes.
-  Unsupported division, missing all-path
-  return, undefined-variable assignment/address target, pointer reassignment,
+  Unsupported division, duplicate parameter names, more than two parameters or
+  call arguments, missing all-path return, undefined-variable assignment/address target, pointer reassignment,
   pointer/address-as-`int` return, a known two-element array indexed at two, a known
   two-element array advanced by two, duplicate functions in one translation unit,
   an out-of-range BL site, relocation type 282, a nonzero CALL26 addend,
@@ -340,7 +348,7 @@ Preserve existing files and changes.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
   Partial: this is not a full C/Rust compiler, general linker/build system/
   debugger, or substantial in-guest MakOS build.
-- At this handoff PID 408245 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 420287 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced

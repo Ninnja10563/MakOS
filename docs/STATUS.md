@@ -178,12 +178,12 @@ Last updated: 2026-08-25.
   two-source/two-object build boundary. It writes and rereads an assembly
   startup plus one C translation unit containing `answer` and later-defined
   `adjust` through MakFS. Each bounded C translation unit accepts up to two
-  AAPCS64 `int` functions, each with one parameter and up to four
+  AAPCS64 `int` functions, each with one or two typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
   `*`/`+`/`-`, mutable parameter/local assignments, equality/inequality
   comparisons, an equality `if`, a bounded assignment-only `while`, and a
-  one-argument call within or across objects. It now also accepts either an `int` or
-  `int *` parameter, `int *pointer = &local`, address expressions passed across
+  one- or two-argument call within or across objects. Parameters may independently
+  be `int` or `int *`; the compiler also accepts `int *pointer = &local`, address expressions passed across
   the call boundary, dereference loads inside expressions, and
   `*pointer = expression` stores. Pointer locals and call arguments now also
   accept `pointer-or-array + constant` for 0..3 elements. Code generation uses
@@ -198,21 +198,23 @@ Last updated: 2026-08-25.
   Address-taken `int` locals occupy bounded 32-bit stack slots and are reloaded
   from memory, while pointer locals use preserved 64-bit registers. Forward
   conditional and signed backward unconditional branches are range-checked
-  before patching. Emitted non-leaf functions preserve FP/LR and x19-x23 in a
-  96-byte frame. Integer arguments use AAPCS64 `w0`; pointer arguments use
-  `x0` and are preserved in `x23`. The current linked call passes
-  `values + 1`, while `adjust` derives `next = pointer + 1` and stores through
-  `*(pointer + 1)`. The compiler concatenates two 136-byte definitions into one
-  272-byte `.text` with two defined symbols in an 880-byte ELF64 `ET_REL`; the
+  before patching. Emitted non-leaf functions preserve FP/LR and x19-x24 in a
+  96-byte frame. Up to two arguments use AAPCS64 `x0`/`x1` (`w0`/`w1` for
+  integers) and are preserved in x23/x24. The current linked call invokes
+  `adjust(values + 1, 1)`; `adjust(int *pointer, int delta)` derives
+  `next = pointer + 1`, applies delta twice, and stores through
+  `*(pointer + 1)`. The compiler concatenates two 140-byte definitions into one
+  280-byte `.text` with two defined symbols in an 888-byte ELF64 `ET_REL`; the
   assembler produces 76 bytes in a 688-byte
   object. Both persist and reopen. The bounded general linker concatenates up
   to three objects, discovers global definitions/undefined symbols, resolves
   relocations against either same-object definitions or external symbols,
   applies validated `R_AARCH64_CALL26` relocations
-  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 348 code
+  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 356 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
-  and duplicate `answer` definitions. Division syntax
+  and duplicate `answer` definitions. Duplicate parameter names, more than two
+  parameters, more than two call arguments, division syntax,
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
   untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
@@ -220,8 +222,8 @@ Last updated: 2026-08-25.
   array, and duplicate functions in one
   translation unit also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
-  `adjust(forty)=42`, and `adjust(zero)=2`; the latter two also prove the arrays
-  change to `41:42` and `1:2`. The linked `answer`→`adjust` call passes the
+  `adjust(forty,1)=42`, `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; the latter
+  three also prove the arrays change to `41:42`, `42:44`, and `1:2`. The linked `answer`→`adjust` call passes the
   stack-backed `values[3] + 1` address, so its same-object call result requires
   real relocation, scaled pointer addition, and callee loads/stores into the
   final two elements of caller-owned memory. Focused

@@ -66,14 +66,14 @@ See `docs/SYSCALLS.md`.
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
 normal VFS. Its C subset accepts up to two `int` functions in one translation
-unit, each with one `int` or `int *` parameter. With an `int` parameter, the
-body may use and assign that parameter.
+unit, each with one or two typed `int`/`int *` parameters. Integer parameters
+may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
 locals, unsigned 16-bit constants, parentheses, multiplication, addition and
 subtraction, assign expressions to declared integer locals, contain
 an equality/inequality condition in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
-one argument. A pointer local may be initialized from `&local` or from
+one or two arguments. A pointer local may be initialized from `&local` or from
 `pointer-or-array + constant`, and either form may cross the external-call
 boundary. `*pointer` performs a 32-bit load and `*pointer = expression` a 32-bit
 store through a pointer local or pointer parameter; parenthesized
@@ -86,9 +86,10 @@ within the same four-slot frame budget. The compiler supports constant indexed
 loads/stores and rejects indices outside a known local array; passing a bare
 array to the bounded external call decays it to its 64-bit stack address, and
 `array + constant` passes the scaled derived address.
-It emits AAPCS64 32-bit `int` code, passing pointer arguments in `x0`, with
+It emits AAPCS64 32-bit `int` code, passing up to two arguments in `x0`/`x1`
+(`w0`/`w1` for integers), with
 validated forward conditional and signed backward branch fixups
-and a 96-byte non-leaf FP/LR/x19-x23 frame containing four bounded local slots,
+and a 96-byte non-leaf FP/LR/x19-x24 frame containing four bounded local slots,
 then a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. Multiple definitions carry distinct `.text` offsets and sizes;
@@ -96,7 +97,8 @@ relocations may reference a same-object definition or an external undefined
 symbol. The companion assembler supplies `_start`; the bounded linker discovers
 symbols across up to three objects, resolves two
 `R_AARCH64_CALL26` relocations, and produces a validated static `ET_EXEC`.
-Unsupported tokens, malformed relocation types, unresolved symbols, duplicate
+Unsupported tokens, duplicate parameter names, more than two parameters or
+call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
 This seed has no general pointer arithmetic beyond bounded constant-element

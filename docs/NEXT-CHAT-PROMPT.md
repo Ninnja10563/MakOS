@@ -17,30 +17,32 @@ runtime. The guest-native AArch64 toolchain now reads a valid multi-statement C
 assembly startup and two C functions from MakFS, compiles parameterized
 arithmetic, register locals, mutable parameter/local assignments,
 equality/inequality control flow, a backward-branch `while`, a 96-byte non-leaf
-frame, bounded local address-of/dereference memory loads/stores, typed `int *`
-parameters, fixed local `int` arrays, checked constant indexing, array decay,
+frame preserving x19-x24, bounded local address-of/dereference memory loads/stores,
+one or two independently typed `int`/`int *` parameters and call arguments in
+AAPCS64 x0/x1, fixed local `int` arrays, checked constant indexing, array decay,
 bounded scaled `pointer-or-array + constant` expressions in pointer
 initializers/calls, parenthesized derived-pointer loads/stores, known-bound
-one-past-end rejection, and a same-object call that mutates caller-owned array
-elements. It
+one-past-end rejection, and a same-object `adjust(values + 1, 1)` call that
+mutates caller-owned array elements using its second parameter. It
 compiles `answer` and later-defined `adjust` from one C translation unit into
 one multi-definition object and persists/reopens two genuine ELF64 `ET_REL`
 objects total. Its bounded linker resolves external `_start`→`answer` and
 same-object `answer`→`adjust`,
 applies two `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
-unresolved-symbol and duplicate-definition inputs, emits an 815-byte `ET_EXEC`,
-executes both linked branch paths plus direct loop and exact indexed-array
-outcomes (`41:42` and `1:2`),
+unresolved-symbol and duplicate-definition inputs, rejects duplicate/over-limit
+parameters and over-limit calls, emits 356 linked bytes in an 815-byte `ET_EXEC`,
+executes both linked branch paths plus direct delta-1/delta-2 loop and exact
+indexed-array outcomes (`41:42`, `42:44`, and `1:2`),
 and runs the final
 ELF twice with status 42 in focused Pi/QEMU TCG runtime.
 Full unit/check and release artifact checks pass. This remains a bounded compiler
 seed, not a general C toolchain or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 408245, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 420287, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-pointer-add-final-KH1kf1pv/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-selfhost-two-parameter-final-Q6tVYzrX/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when
