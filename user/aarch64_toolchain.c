@@ -476,10 +476,9 @@ static size_t assemble(const char *source, size_t source_length,
  * bounded local pointers or the pointer parameter, checked fixed-array
  * indexing, constant- or scalar-variable-element pointer addition in pointer
  * initializers/calls and parenthesized dereferences, typed pointer subtraction
- * in int elements, signed relational conditions, and a bounded one- or
- * two-argument external call with
- * array-to-pointer decay.  Functions take one or two typed integer or pointer
- * parameters in AAPCS64 x0/x1.  The output follows AAPCS64,
+ * in int elements, signed relational conditions, and a bounded call with up
+ * to three arguments and array-to-pointer decay.  Functions take up to three
+ * typed integer or pointer parameters in AAPCS64 x0-x2.  The output follows AAPCS64,
  * including a non-leaf save frame, and is wrapped in a genuine ELF64 ET_REL
  * object by emit_object(). Unsupported syntax fails closed.
  */
@@ -487,7 +486,7 @@ enum {
     MAX_C_LOCALS = 4,
     MAX_C_STACK_SLOTS = 4,
     MAX_C_FUNCTIONS = 3,
-    MAX_C_PARAMETERS = 2,
+    MAX_C_PARAMETERS = 3,
 };
 
 struct c_definition {
@@ -874,6 +873,9 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         if (!c_call_argument(compiler, 0)) return 0;
         if (c_punct(compiler, ',')) {
             if (!c_call_argument(compiler, 1)) return 0;
+            if (c_punct(compiler, ',')) {
+                if (!c_call_argument(compiler, 2)) return 0;
+            }
         }
         if (!c_punct(compiler, ')')) return 0;
         struct relocation *relocation =
@@ -1009,7 +1011,9 @@ static int c_condition(struct c_compiler *compiler,
 }
 
 static int c_epilogue(struct c_compiler *compiler) {
-    return c_emit(compiler, UINT32_C(0xa94363f7)) &&
+    return (compiler->parameter_count < 3 ||
+            c_emit(compiler, UINT32_C(0xf9402bf9))) &&
+           c_emit(compiler, UINT32_C(0xa94363f7)) &&
            c_emit(compiler, UINT32_C(0xa9425bf5)) &&
            c_emit(compiler, UINT32_C(0xa94153f3)) &&
            c_emit(compiler, UINT32_C(0xa8c67bfd)) &&
@@ -1266,12 +1270,14 @@ static int c_compile_function(struct c_compiler *compiler,
         if (!c_punct(compiler, ',')) break;
     }
     if (!c_punct(compiler, ')') || !c_punct(compiler, '{')) return 0;
-    /* Preserve FP/LR and x19-x24; reserve four 32-bit local stack slots. */
+    /* Preserve FP/LR and x19-x25; reserve four 32-bit local stack slots. */
     if (!c_emit(compiler, UINT32_C(0xa9ba7bfd)) ||
         !c_emit(compiler, UINT32_C(0x910003fd)) ||
         !c_emit(compiler, UINT32_C(0xa90153f3)) ||
         !c_emit(compiler, UINT32_C(0xa9025bf5)) ||
-        !c_emit(compiler, UINT32_C(0xa90363f7)))
+        !c_emit(compiler, UINT32_C(0xa90363f7)) ||
+        (compiler->parameter_count == 3 &&
+         !c_emit(compiler, UINT32_C(0xf9002bf9))))
         return 0;
     for (size_t parameter = 0; parameter < compiler->parameter_count;
          ++parameter) {
@@ -2294,9 +2300,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char malformed_duplicate_parameter_source[] =
         "int adjust(int value, int value) { return value; }\n";
     static const char malformed_too_many_parameters_source[] =
-        "int adjust(int first, int second, int third) { return first; }\n";
+        "int adjust(int first, int second, int third, int fourth) { return first; }\n";
     static const char malformed_too_many_arguments_source[] =
-        "int answer(int value) { return adjust(value, value, value); }\n";
+        "int answer(int value) { return adjust(value, value, value, value); }\n";
+    static const char three_argument_source[] =
+        "int sum3(int first, int second, int third) {\n"
+        "    return first + second + third;\n"
+        "}\n"
+        "int invoke3(int value) {\n"
+        "    return sum3(value, 1, 1);\n"
+        "}\n";
     static const char relational_greater_source[] =
         "int greater(int value) { if (value > 5) { return 42; } return 0; }\n";
     static const char relational_at_most_source[] =
@@ -2314,8 +2327,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=4 cache=makstate-v2 cache_hits=0 cache_misses=4 state_committed=1 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c translation_unit_functions=2,1,1 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
-        "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
+        "c_features=multi-function,multi-parameter,three-argument,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+        "max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 linked_bytes=500 output_bytes=815 helper_result=42 "
@@ -2616,6 +2629,60 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         library_relocation_count != 0 || helper_relocation_count != 0)
         fail(82);
 
+    uint8_t three_argument_code[192] = {0};
+    struct c_definition three_argument_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t three_argument_definition_count = 0;
+    struct relocation three_argument_relocations[MAX_RELOCATIONS] = {0};
+    size_t three_argument_relocation_count = 0;
+    size_t three_argument_code_length = compile_c_unit(
+        three_argument_source, sizeof(three_argument_source) - 1,
+        three_argument_code, sizeof(three_argument_code),
+        three_argument_definitions, &three_argument_definition_count,
+        three_argument_relocations, &three_argument_relocation_count);
+    if (three_argument_code_length != 140 ||
+        three_argument_definition_count != 2 ||
+        !same_name(three_argument_definitions[0].name,
+                   three_argument_definitions[0].length, "sum3", 4) ||
+        three_argument_definitions[0].offset != 0 ||
+        three_argument_definitions[0].size != 80 ||
+        !same_name(three_argument_definitions[1].name,
+                   three_argument_definitions[1].length, "invoke3", 7) ||
+        three_argument_definitions[1].offset != 80 ||
+        three_argument_definitions[1].size != 60 ||
+        three_argument_relocation_count != 1 ||
+        three_argument_relocations[0].offset != 116 ||
+        !same_name(three_argument_relocations[0].name,
+                   three_argument_relocations[0].length, "sum3", 4))
+        fail(82);
+    uint8_t three_argument_object[OBJECT_CAPACITY] = {0};
+    size_t three_argument_object_length = emit_object_definitions(
+        three_argument_object, three_argument_code,
+        three_argument_code_length, three_argument_definitions,
+        three_argument_definition_count, three_argument_relocations,
+        three_argument_relocation_count);
+    struct object_view three_argument_view;
+    if (three_argument_object_length != 752 ||
+        !parse_object(three_argument_object, three_argument_object_length,
+                      &three_argument_view) ||
+        three_argument_view.text_length != 140 ||
+        three_argument_view.rela_count != 1 ||
+        three_argument_view.symbol_count != 3)
+        fail(85);
+    const uint8_t *three_argument_objects[MAX_LINK_OBJECTS] = {
+        three_argument_object,
+    };
+    size_t three_argument_object_lengths[MAX_LINK_OBJECTS] = {
+        three_argument_object_length,
+    };
+    uint8_t three_argument_linked[192] = {0};
+    size_t three_argument_entry = 0;
+    size_t three_argument_linked_length = link_objects(
+        three_argument_objects, three_argument_object_lengths, 1,
+        three_argument_linked, sizeof(three_argument_linked), "invoke3",
+        &three_argument_entry);
+    if (three_argument_linked_length != 140 || three_argument_entry != 80)
+        fail(88);
+
     uint8_t *relational_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
     if ((uintptr_t)relational_jit == UINT64_MAX) fail(83);
@@ -2640,6 +2707,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         pointer_difference_source, sizeof(pointer_difference_source) - 1,
         relational_jit + 384, 128, relational_function,
         &relational_function_length, 0, 0);
+    copy_bytes(relational_jit + 512, three_argument_linked,
+               three_argument_linked_length);
     if (!greater_length || greater_length > 128 ||
         !at_most_length || at_most_length > 128 ||
         !previous_length || previous_length > 128 ||
@@ -2657,6 +2726,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         (uint64_t (*)(uint32_t *, uint64_t))(uintptr_t)(relational_jit + 256);
     uint64_t (*compiled_distance)(uint32_t *, uint32_t *) =
         (uint64_t (*)(uint32_t *, uint32_t *))(uintptr_t)(relational_jit + 384);
+    uint64_t (*compiled_sum3)(uint64_t, uint64_t, uint64_t) =
+        (uint64_t (*)(uint64_t, uint64_t, uint64_t))(uintptr_t)
+            (relational_jit + 512);
+    uint64_t (*compiled_invoke3)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)
+            (relational_jit + 512 + three_argument_entry);
     uint32_t previous_values[2] = {42, 7};
     uint32_t distance_values[4] = {0, 0, 0, 0};
     if (compiled_greater(6) != 42 || compiled_greater(5) != 0 ||
@@ -2664,7 +2739,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         compiled_previous(previous_values + 1, UINT32_MAX) != 42 ||
         compiled_distance(distance_values + 3, distance_values) != 3 ||
         (uint32_t)compiled_distance(distance_values, distance_values + 3) !=
-            UINT32_MAX - 2)
+            UINT32_MAX - 2 ||
+        compiled_sum3(40, 1, 1) != 42 || compiled_invoke3(40) != 42)
         fail(83);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);

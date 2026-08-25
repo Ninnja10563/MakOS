@@ -137,18 +137,21 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   file into MakFS; VFS exec-by-path validates/maps it in a fresh address space,
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
-  startup and two C sources from MakFS. A bounded source-driven C compiler emits
-  AAPCS64 integer/pointer expressions, one or two typed parameters/call arguments
-  in x0/x1, register locals, mutable integer parameter/local
+  startup and three C sources from MakFS. A bounded source-driven C compiler emits
+  AAPCS64 integer/pointer expressions, up to three typed parameters/call arguments
+  in x0-x2, register locals, mutable integer parameter/local
   assignments, signed equality/inequality/ordering control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
   loads and stores, fixed local `int` arrays with checked constant indexing,
   array decay, constant and signed scalar-variable element pointer addition
   with known-bound fail-closed rejection, signed typed pointer difference,
-  typed pointer parameters, non-leaf frames preserving x19-x24,
+  typed pointer parameters, non-leaf frames preserving x19-x24 and conditionally
+  x25 for a third parameter,
   one same-object plus one external C-to-C call that mutate caller-owned array elements, and
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
-  loop/memory outcomes execute in EL0.
+  loop/memory outcomes execute in EL0. A separate 140-byte `sum3`/`invoke3`
+  unit emits a 752-byte object, resolves its same-object call, and executes both
+  three-argument paths as 42.
   The assembler emits `_start`. The guest static
   linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
   external `adjust`→`combine` across the required three persisted objects,

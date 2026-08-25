@@ -14,12 +14,13 @@ Current verified milestones: cursor runtime passes seven positions with zero
 scanout pixel changes, virtio-GPU cursor plane, and host cursor hidden. Typed IPC
 passes 12/12 unit tests, structural guard, full unit/check, and isolated full HVF
 runtime. The guest-native AArch64 toolchain now reads a valid multi-statement
-assembly startup and two C sources containing three functions from MakFS, compiles parameterized
+assembly startup and three C sources containing four functions from MakFS, compiles parameterized
 arithmetic, register locals, mutable parameter/local assignments,
 signed equality/inequality/ordering control flow, a backward-branch `while`, a 96-byte non-leaf
 frame preserving x19-x24, bounded local address-of/dereference memory loads/stores,
-one or two independently typed `int`/`int *` parameters and call arguments in
-AAPCS64 x0/x1, fixed local `int` arrays, checked constant indexing, array decay,
+up to three independently typed `int`/`int *` parameters and call arguments in
+AAPCS64 x0-x2, with conditional x25 preservation for the third parameter,
+fixed local `int` arrays, checked constant indexing, array decay,
 bounded scaled `pointer-or-array + constant-or-scalar` expressions in pointer
 initializers/calls, signed `SXTW #2` dynamic offsets, parenthesized
 derived-pointer loads/stores, typed signed pointer difference, known-bound
@@ -44,7 +45,9 @@ applies three `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol, missing-library, and duplicate-definition inputs, rejects duplicate/over-limit
 parameters and over-limit calls, rejects a fourth translation-unit function,
 emits 500 linked bytes in an 815-byte `ET_EXEC`, directly executes
-`helper(40)=42`,
+`helper(40)=42`, and separately compiles `sum3(int,int,int)` plus
+`invoke3(int)` into 140 bytes and a parsed 752-byte `ET_REL`, resolves its
+same-object `CALL26` with entry offset 80, and executes both as 42,
 executes both linked branch paths plus direct delta-1/delta-2 loop, exact
 indexed-array outcomes (`41:42:0`, `42:0:44`, and `1:2:0`), all four signed
 ordering relations, a `pointer + -1` load, and pointer differences `3`/`-3`,
@@ -77,13 +80,13 @@ acts as a priority time slice, fixing observed fork-child starvation. Full
 `make unit check` passes. This is functional Pi/TCG evidence only; strict
 Firefox timing still needs the unchanged idle macOS/HVF gate.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 606789, user
-service `makos-visible-cpu-affinity-final2.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 614416, user
+service `makos-visible-selfhost-three-argument-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q/qmp.sock`. Its
+`build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`390864fa24f82b330b75b2aa50e1fbcbffaea8ece41448acccaeb9638308f18c`;
+`340e37930e819d48a6e6ac69714c246e3eb869e452b35691fd980bc20f7f696c`;
 the inspected 800x600 login PNG is
 `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
 Stop it through QMP before

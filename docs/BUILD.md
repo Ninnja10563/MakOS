@@ -136,12 +136,12 @@ a distinct absolute output path, and one valid entry symbol. The parsed paths
 drive all source reads, object writes/reopens, entry-symbol emission/selection,
 and the final executable write. Bad version, relative path, colliding paths,
 and missing-link manifests fail closed before compilation. A bounded C
-translation unit accepts up to three `int` functions, each with one or two typed
+translation unit accepts up to three `int` functions, each with up to three typed
 `int`/`int *` parameters, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
 mutable parameter/local assignments, signed `==`, `!=`, `<`, `<=`, `>`, and
 `>=` comparisons, one conditional `if` block containing a return, a bounded `while` body containing one
-or more assignments, a one- or two-argument function call, and bounded pointer
+or more assignments, a one- through three-argument function call, and bounded pointer
 initializers from `&local` or `pointer-or-array + constant-or-scalar`. Address and pointer
 expressions may be passed to the bounded external call. Dereference expressions
 load a 32-bit `int` through a pointer local or pointer parameter;
@@ -163,10 +163,12 @@ bounded to 0..3 and known local-array indices are checked against the declared
 length. Indexed expressions and assignments emit scaled 32-bit loads/stores;
 a bare array call argument decays to its 64-bit stack address; an accepted
 `array + constant` call argument passes the scaled derived address. Arguments
-occupy AAPCS64 `x0`/`x1`, using the `w` view for `int` values.
+occupy AAPCS64 `x0` through `x2`, using the `w` view for `int` values.
 A final unconditional return is required so every accepted path returns.
 Non-leaf functions preserve FP/LR and x19-x24 in a 96-byte AAPCS64 frame with
-four bounded 32-bit local slots. The
+four bounded 32-bit local slots. A three-parameter function additionally saves
+and restores `x25` in the frame's aligned unused slot; one- and two-parameter
+code remains byte-for-byte unchanged. The
 current `answer` initializes `values[3]` with `(value * 3) - 20`, 40, and zero,
 then calls `adjust(values + 1, 1)` when element zero is at least 40; otherwise it
 returns 86. `adjust(int *pointer, int delta)` accepts its pointer in AAPCS64
@@ -194,7 +196,12 @@ discovers definitions and undefined symbols across all four, applies external
 `adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the three-element direct-call arrays also
 required to become `41:42:0`, `42:0:44`, and `1:2:0`. Separate RX probes cover
 all four signed ordering relations, load 42 through `pointer + -1`, and return
-signed pointer differences of `3` and `-3`. Invalid
+signed pointer differences of `3` and `-3`. A separate two-function source
+compiles `sum3(int,int,int)` plus `invoke3(int)`, preserves the third parameter
+from `x2` in `x25`, emits 140 code bytes in a 752-byte ELF64 `ET_REL`, resolves
+the same-object `invoke3`→`sum3` `R_AARCH64_CALL26` relocation, links with entry
+offset 80, and executes both `sum3(40,1,1)` and `invoke3(40)` as 42 from RX
+memory. Invalid
 relocation type/addend/site, unresolved `adjust`, a missing library object, and
 duplicate `answer` inputs are denied, as are unsupported division, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
@@ -202,7 +209,7 @@ undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
 unproved variable offset from a known-bounded local array, pointer-minus-scalar,
-duplicate functions/parameters, a fourth function, and more than two parameters or call arguments
+duplicate functions/parameters, a fourth function, and more than three parameters or call arguments
 are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates

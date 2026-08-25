@@ -116,7 +116,7 @@ for fragment in (
     "MAX_C_LOCALS = 4",
     "OBJECT_CAPACITY = 2048",
     "MAX_C_FUNCTIONS = 3",
-    "MAX_C_PARAMETERS = 2",
+    "MAX_C_PARAMETERS = 3",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x0b000000)",
     "UINT32_C(0x4b000000)",
@@ -126,6 +126,8 @@ for fragment in (
     "UINT32_C(0x2a0003e0)",
     "UINT32_C(0xa90363f7)",
     "UINT32_C(0xa94363f7)",
+    "UINT32_C(0xf9002bf9)",
+    "UINT32_C(0xf9402bf9)",
     "UINT32_C(0x8b20c800)",
     "UINT32_C(0xcb000000)",
     "UINT32_C(0x9342fc00)",
@@ -153,6 +155,11 @@ for fragment in (
     "malformed_duplicate_parameter_source",
     "malformed_too_many_parameters_source",
     "malformed_too_many_arguments_source",
+    '"int adjust(int first, int second, int third, int fourth) { return first; }\\n"',
+    '"int answer(int value) { return adjust(value, value, value, value); }\\n"',
+    "three_argument_source",
+    '"int sum3(int first, int second, int third) {\\n"',
+    '"    return sum3(value, 1, 1);\\n"',
     "relational_greater_source",
     "relational_at_most_source",
     "signed_pointer_offset_source",
@@ -208,6 +215,10 @@ for fragment in (
     "library_object_length != 616",
     "helper_object_length != 608",
     "linked_length != 500",
+    "three_argument_code_length != 140",
+    "three_argument_object_length != 752",
+    "three_argument_linked_length != 140 || three_argument_entry != 80",
+    "compiled_sum3(40, 1, 1) != 42 || compiled_invoke3(40) != 42",
     "image_length != 815",
     "format=elf64-et-rel",
     "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17",
@@ -290,8 +301,9 @@ require(SHELL, "build_manifest=/home/user/generated.build")
 require(SHELL, "build_driver=makbuild-v1 build_inputs=4")
 require(SHELL, "translation_unit_functions=2,1,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
-require(SHELL, "max_parameters=2 max_call_arguments=2 nonleaf_frame=96")
+require(SHELL, "c_features=multi-function,multi-parameter,three-argument,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
+require(SHELL, "max_parameters=3 max_call_arguments=3 nonleaf_frame=96")
+require(SHELL, "three_argument_result=42 three_argument_link=et-rel,same-object")
 require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge")
 require(SHELL, "branch_results=42,86 loop_results=42,2 memory_results=42,2")
 require(SHELL, "pointer_call=answer-to-adjust pointee_results=42,44,2")

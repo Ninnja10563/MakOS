@@ -240,12 +240,12 @@ Last updated: 2026-08-26.
   old-version, or malformed state safely forces a full rebuild.
   Each bounded C
   translation unit accepts up to three
-  AAPCS64 `int` functions, each with one or two typed parameters and up to four
+  AAPCS64 `int` functions, each with up to three typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
   `*`/`+`/`-`, mutable parameter/local assignments, signed
   `==`/`!=`/`<`/`<=`/`>`/`>=` comparisons, a conditional `if`, a bounded
   assignment-only `while`, and a
-  one- or two-argument call within or across objects. Parameters may independently
+  one- through three-argument call within or across objects. Parameters may independently
   be `int` or `int *`; the compiler also accepts `int *pointer = &local`, address expressions passed across
   the call boundary, dereference loads inside expressions, and
   `*pointer = expression` stores. Pointer locals and call arguments now also
@@ -264,8 +264,10 @@ Last updated: 2026-08-26.
   from memory, while pointer locals use preserved 64-bit registers. Forward
   conditional and signed backward unconditional branches are range-checked
   before patching. Emitted non-leaf functions preserve FP/LR and x19-x24 in a
-  96-byte frame. Up to two arguments use AAPCS64 `x0`/`x1` (`w0`/`w1` for
-  integers) and are preserved in x23/x24. The current linked call invokes
+  96-byte frame. Up to three arguments use AAPCS64 `x0` through `x2` (`w0`
+  through `w2` for integers) and are preserved in x23 through x25. The `x25`
+  stack slot is emitted only for a three-parameter function, preserving the
+  exact existing one- and two-parameter code sizes. The current linked call invokes
   `adjust(values + 1, 1)`; `adjust(int *pointer, int delta)` derives
   `next = pointer + delta`, computes the signed element count
   `distance = next - pointer` through 64-bit `SUB`/arithmetic shift-right two,
@@ -284,8 +286,12 @@ Last updated: 2026-08-26.
   `answer`→`adjust` internally), includes `helper`, and emits 500 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`, a
-  missing `combine` object, and duplicate `answer` definitions. Duplicate parameter names, more than two
-  parameters, more than two call arguments, division syntax,
+  missing `combine` object, and duplicate `answer` definitions. A separate
+  two-function source compiles `sum3(int,int,int)` and `invoke3(int)` into 140
+  code bytes and a 752-byte ELF64 `ET_REL`; the linker resolves its same-object
+  `CALL26`, selects entry offset 80, and RX execution requires both calls to
+  return 42. Duplicate parameter names, more than three parameters, more than
+  three call arguments, division syntax,
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
   untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
@@ -307,13 +313,13 @@ Last updated: 2026-08-26.
   The library function is executed directly as `combine(40,2)=42`; the linked
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
-  `make unit check`, and a fresh visible Pi/TCG login pass. That visible guest
-  was later stopped cleanly. The current visible CPU-affinity milestone is
-  PID 606789 under `makos-visible-cpu-affinity-final2.service`, with
+  `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
+  three-argument self-host milestone is PID 614416 under
+  `makos-visible-selfhost-three-argument-final.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q`; its boot clone
+  `build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1`; its boot clone
   exactly matches the current release image SHA-256
-  `390864fa24f82b330b75b2aa50e1fbcbffaea8ece41448acccaeb9638308f18c`.
+  `340e37930e819d48a6e6ac69714c246e3eb869e452b35691fd980bc20f7f696c`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

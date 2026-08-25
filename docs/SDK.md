@@ -67,14 +67,14 @@ See `docs/SYSCALLS.md`.
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
 normal VFS. Its C subset accepts up to three `int` functions in one translation
-unit, each with one or two typed `int`/`int *` parameters. Integer parameters
+unit, each with up to three typed `int`/`int *` parameters. Integer parameters
 may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
 locals, unsigned 16-bit constants, parentheses, multiplication, addition and
 subtraction, assign expressions to declared integer locals, contain
 signed `==`, `!=`, `<`, `<=`, `>`, or `>=` conditions in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
-one or two arguments. A pointer local may be initialized from `&local` or from
+one through three arguments. A pointer local may be initialized from `&local` or from
 `pointer-or-array + constant-or-scalar`, and either form may cross the external-call
 boundary. `*pointer` performs a 32-bit load and `*pointer = expression` a 32-bit
 store through a pointer local or pointer parameter; parenthesized
@@ -93,11 +93,13 @@ within the same four-slot frame budget. The compiler supports constant indexed
 loads/stores and rejects indices outside a known local array; passing a bare
 array to the bounded external call decays it to its 64-bit stack address, and
 `array + constant` passes the scaled derived address.
-It emits AAPCS64 32-bit `int` code, passing up to two arguments in `x0`/`x1`
-(`w0`/`w1` for integers), with
+It emits AAPCS64 32-bit `int` code, passing up to three arguments in `x0`
+through `x2` (`w0` through `w2` for integers), with
 validated forward conditional and signed backward branch fixups
-and a 96-byte non-leaf FP/LR/x19-x24 frame containing four bounded local slots,
-then a real
+and a 96-byte non-leaf FP/LR/x19-x24 frame containing four bounded local slots.
+Three-parameter functions additionally preserve `x25` in an aligned unused
+frame slot, while smaller functions retain their prior byte layout. It wraps
+the result in a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. Multiple definitions carry distinct `.text` offsets and sizes;
 relocations may reference a same-object definition or an external undefined
@@ -109,7 +111,10 @@ The primary fixture graph persists one assembly and three C sources as four obje
 separate library object. An independent `helper(int value)` translation unit
 emits 56 code bytes in a 608-byte object, is linked into the final image, and is
 also executed directly to prove `helper(40)=42`. Linking without that required
-library fails closed.
+library fails closed. A separate source emits `sum3(int,int,int)` and its
+three-argument caller `invoke3(int)` as 140 code bytes in a 752-byte object;
+the linker resolves the internal `CALL26`, selects entry offset 80, and both
+functions execute as 42 from RX memory.
 The guest reads `/home/user/generated.build` in the versioned `MAKBUILD1`
 format. Its input records select language, absolute MakFS source path,
 and distinct absolute object path; the final record selects the absolute ELF
@@ -124,7 +129,7 @@ copies it into the toolchain's child-owned SysV startup vector, and launches the
 EL0 toolchain with `argv[1]` naming the manifest. `MODE=build` consumes existing
 MakFS files and does not seed or overwrite source/manifest inputs;
 `selfhost-aarch64` alone requests the deterministic `MODE=fixture` seeding path.
-Unsupported tokens, duplicate parameter names, more than two parameters or
+Unsupported tokens, duplicate parameter names, more than three parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
