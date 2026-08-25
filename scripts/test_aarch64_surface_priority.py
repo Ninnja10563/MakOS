@@ -66,8 +66,8 @@ wait_event = dispatch[dispatch.index("SYS_SURFACE_WAIT_EVENT =>") :]
 wait_event = wait_event[: wait_event.index("SYS_SURFACE_BLIT =>")]
 assert "if event.kind == 1" in wait_event
 assert "arm_firefox_process_leader_handoff" in wait_event
-assert "crate::aarch64_virtio_input::poll();" in timer_irq
-assert timer_irq.index("crate::aarch64_virtio_input::poll();") < timer_irq.index(
+assert "service_input_on_owner_cpu();" in timer_irq
+assert timer_irq.index("service_input_on_owner_cpu();") < timer_irq.index(
     "crate::aarch64_process::preempt_from_timer(frame);"
 )
 assert "ProcessState::Ready" in select and "table.activate_on(scheduler_cpu(), tid)" in select
@@ -82,6 +82,6 @@ print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_TEST_OK "
     "trigger=queued-key target=firefox-input-watcher blocked,active=retain-hint fallback=process-leader "
     "ready=next-schedule boost=bounded-window handoff=watcher-dequeue-fallback,futex-refresh "
-    "timer_poll=100hz expiry=ticks "
+    "timer_poll=100hz owner=cpu0 expiry=ticks "
     "fallback=round-robin pointer=unchanged"
 )

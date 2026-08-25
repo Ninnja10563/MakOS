@@ -132,18 +132,23 @@ def main() -> int:
                 if "error" in qmp_command(stream, "qmp_capabilities"):
                     raise AssertionError("QMP capability negotiation failed")
 
+                ready = (
+                    b"MAKOS_AARCH64_SMP_INPUT_DEVICE_READY "
+                    b"waiter_cpu=1 poller_cpu=0 device=virtio-keyboard "
+                    b"chord=ctrl-k input_idle_mask=0x2"
+                )
                 wait_for_output(
                     selector,
                     process,
                     output,
-                    b"MAKOS_AARCH64_SMP_INPUT_DEVICE_READY ",
+                    ready,
                     90,
                 )
                 for marker in (
                     b"MAKOS_CONFIG_OK source=fat",
                     b"smp_input_probe=1",
                     b"MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices=2",
-                    b"waiter_cpu=1 poller_cpu=0 device=virtio-keyboard chord=ctrl-k input_idle_mask=0x2",
+                    ready,
                 ):
                     if marker not in output:
                         raise AssertionError(f"missing pre-input marker {marker!r}")
@@ -159,6 +164,8 @@ def main() -> int:
                 required = (
                     b"MAKOS_AARCH64_SMP_INPUT_DEVICE_OK waiter_cpu=1 poller_cpu=0",
                     b"device=virtio-keyboard event=ctrl-k ring_activity=real",
+                    b"mmio_owner=cpu0 contention=ap-deferred owner_activity=",
+                    b"ap_deferrals=",
                     b"block=ap-idle wake=cpu0-device-poll,sgi",
                     b"input_idle_mask=0x2 input_resume_mask=0x2 status=61 free_balance=1",
                     b"MAKOS_LOGIN_UI_OK framebuffer=800x600 prompt=visible",
@@ -182,7 +189,8 @@ def main() -> int:
     print(
         "MAKOS_AARCH64_SMP_INPUT_RUNTIME_OK "
         f"accel={accel} waiter_cpu=1 poller_cpu=0 device=virtio-keyboard "
-        "event=ctrl-k block=ap-idle wake=device-ring,sgi free_balance=1"
+        "event=ctrl-k mmio_owner=cpu0 contention=ap-deferred "
+        "block=ap-idle wake=device-ring,sgi free_balance=1"
     )
     return 0
 

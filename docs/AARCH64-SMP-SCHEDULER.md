@@ -91,7 +91,11 @@ real EL0 `read_key` syscall while a CPU0-affined Ready sentinel prevents the
 last-runnable WFI shortcut. With no AP1-eligible successor, the waiter now
 returns to the AP idle dispatcher instead of undoing its block. The host
 harness sends a real QEMU Ctrl-K event; CPU0 drains the virtio used ring, wakes
-the input wait class, and sends the scheduler SGI. Runtime requires matching
+the input wait class, and sends the scheduler SGI. Virtio-input MMIO and its
+deferred compositor work now have an explicit CPU0 owner. AP syscall and TTY
+paths record a deferral instead of polling the device, while the low-level
+driver fails closed if called from a non-owner CPU. Runtime requires nonzero
+CPU0 ring activity and AP deferrals, matching
 `input_idle_mask=0x2`/`input_resume_mask=0x2`, exact key delivery, status 61,
 frame balance, and subsequent boot completion. The ordinary boot config never
 arms or waits for external test input.
@@ -128,9 +132,10 @@ safe general process migration.
   through a first-owner-wins join path. A permanently non-returning EL1 driver
   path would still require a cancellable safe point. Administrative `terminate`
   correctly continues to reject a task owned by another CPU.
-- AP banked virtual-timer PPI enable/programming and CPU0-only global tick/device
-  servicing pass the bounded probe. General AP syscalls still require a complete
-  device/service ownership audit.
+- AP banked virtual-timer PPI enable/programming and CPU0-only global tick
+  servicing pass the bounded probe. Virtio input now has exclusive CPU0 MMIO
+  ownership plus measured AP deferral. General AP syscalls still require the
+  equivalent network, block, and GPU service ownership/contention audit.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -166,8 +171,9 @@ a GICv2 SGI only after publishing its enabled state.
    - CPU0 alone advances global monotonic ticks and services deadlines/device
      polling. AP timer IRQs only preempt/select; otherwise four timer streams
      would make wall time advance fourfold.
-   - GICC acknowledge/EOI is per PE. Device bottom halves remain CPU0-owned
-     until their locks and interrupt affinity are audited.
+   - GICC acknowledge/EOI is per PE. Virtio-input MMIO is explicitly CPU0-owned
+     and guarded against AP entry. Network, block, and GPU bottom halves remain
+     CPU0-owned pending equivalent lock and interrupt-affinity qualification.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one

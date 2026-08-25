@@ -165,10 +165,14 @@ make test-aarch64-smp-input-runtime
 
 `boot/MAKOS-SMP-INPUT.CFG` arms an AP1 EL0 `read_key` waiter only after
 virtio-input initialization. The harness waits for the guest readiness marker,
-sends QEMU Ctrl-K, and requires CPU0 used-ring polling plus an SGI to resume
-AP1 from its idle dispatcher. Exact idle/resume masks, key-derived status 61,
-frame balance, and normal boot completion are mandatory. `boot/MAKOS.CFG`
-does not contain the test option.
+sends QEMU Ctrl-K, and requires exclusive CPU0 used-ring polling plus an SGI to
+resume AP1 from its idle dispatcher. The runtime marker must report nonzero
+`owner_activity` and `ap_deferrals`; the structural guard permits the one
+low-level poll call only inside the CPU0 owner wrapper and makes the driver
+fail closed on a non-owner CPU. Exact idle/resume masks, key-derived status 61,
+frame balance, and normal boot completion are mandatory. The harness waits for
+the complete readiness line so a partial serial read cannot trigger input
+early. `boot/MAKOS.CFG` does not contain the test option.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

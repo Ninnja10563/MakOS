@@ -52,15 +52,19 @@ Last updated: 2026-08-25.
   An opt-in seventh fixture starts after real virtio-input initialization. AP1
   blocks in EL0 `read_key`, returns to its idle dispatcher with no eligible
   local successor, then resumes only after the focused harness sends QEMU
-  Ctrl-K and CPU0 drains the virtio ring and sends an SGI. Two repeated Pi/TCG
-  runs require `input_idle_mask=0x2`/`input_resume_mask=0x2`, status 61, exact
-  frame balance, and subsequent boot completion. The ordinary image never
-  arms the external-input wait.
+  Ctrl-K and CPU0 drains the virtio ring and sends an SGI. Virtio-input MMIO
+  and deferred compositor input work now have an exclusive CPU0 service
+  wrapper; AP syscall/TTY paths record a deferral, and the low-level driver
+  fails closed on any non-owner call. Two repeated Pi/TCG runs report nonzero
+  CPU0 activity/AP deferrals and require
+  `input_idle_mask=0x2`/`input_resume_mask=0x2`, status 61, exact frame balance,
+  and subsequent boot completion. The ordinary image never arms the
+  external-input wait.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending device affinity and
-  contention proof, so the
+  desktop/Firefox AP scheduling remains gated pending network, block, and GPU
+  service affinity/contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative

@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TABLE = (ROOT / "crates/process-table/src/lib.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
 PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
+INPUT = (ROOT / "kernel/src/aarch64_virtio_input.rs").read_text()
+TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAIN = (ROOT / "kernel/src/main.rs").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
@@ -42,12 +44,17 @@ for token in (
     "SMP_USER_SCHEDULER_ENABLED.store(false, Ordering::Release);",
     "user_stack_pointer_valid_in(context.ttbr0, context.sp_el0)",
     "pub(crate) fn send_scheduler_ipi()",
+    "pub(crate) fn service_input_on_owner_cpu()",
     "stop_remote_group_member_from_irq(frame)",
     "stop_remote_group_member_on_el0_return(frame)",
 ):
     assert token in ARCH, token
 
 assert ARCH.count("crate::aarch64_process::ipc_control_allowed()") == 4
+assert ARCH.count("crate::aarch64_virtio_input::poll()") == 1
+assert "crate::aarch64_virtio_input::poll()" not in PROCESS
+assert "crate::aarch64_virtio_input::poll()" not in TTY
+assert "AArch64 virtio-input poll attempted from non-owner CPU" in INPUT
 
 for token in (
     "fn scheduler_cpu() -> usize",
@@ -101,6 +108,8 @@ for token in (
     "SMP_PROBE_INPUT_IDLE_MASK",
     "SMP_PROBE_INPUT_BLOCKED_MASK",
     "SMP_PROBE_INPUT_RESUME_MASK",
+    "reset_input_service_affinity_evidence",
+    "input_service_affinity_evidence",
     "pub fn run_smp_input_device_self_test()",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
@@ -141,6 +150,7 @@ for token in (
     'send_key(stream, "ctrl-k")',
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
     "input_idle_mask=0x2 input_resume_mask=0x2 status=61 free_balance=1",
+    "mmio_owner=cpu0 contention=ap-deferred owner_activity=",
 ):
     assert token in INPUT_RUNTIME, token
 

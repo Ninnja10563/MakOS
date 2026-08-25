@@ -97,6 +97,8 @@ static FIREFOX_BLIT_TRACES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_FONT_FD: AtomicU64 = AtomicU64::new(u64::MAX);
 static FIREFOX_FONT_IO_TRACES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_MUTATION_TRACES: AtomicU64 = AtomicU64::new(0);
+static INPUT_SERVICE_OWNER_ACTIVITY: AtomicU64 = AtomicU64::new(0);
+static INPUT_SERVICE_NONOWNER_DEFERRALS: AtomicU64 = AtomicU64::new(0);
 const FIREFOX_FILE_TRACE_LIMIT: u64 = 8;
 const FIREFOX_MUTATION_TRACE_LIMIT: u64 = 16;
 static SMP_ONLINE_MASK: AtomicU64 = AtomicU64::new(1);
@@ -623,6 +625,34 @@ pub(crate) fn cpu_index() -> usize {
         crate::fatal("AArch64 logical CPU ID invalid");
     }
     index
+}
+
+/// Virtio input MMIO and deferred compositor input work are owned by CPU0.
+/// AP syscall paths consume already-published logical queues and defer hardware
+/// service to CPU0's timer bottom half instead of contending on the device.
+pub(crate) fn service_input_on_owner_cpu() -> bool {
+    if cpu_index() != 0 {
+        INPUT_SERVICE_NONOWNER_DEFERRALS.fetch_add(1, Ordering::AcqRel);
+        return false;
+    }
+    let activity = crate::aarch64_virtio_input::poll();
+    crate::graphics::service_deferred_actions();
+    if activity {
+        INPUT_SERVICE_OWNER_ACTIVITY.fetch_add(1, Ordering::AcqRel);
+    }
+    activity
+}
+
+pub(crate) fn reset_input_service_affinity_evidence() {
+    INPUT_SERVICE_OWNER_ACTIVITY.store(0, Ordering::Release);
+    INPUT_SERVICE_NONOWNER_DEFERRALS.store(0, Ordering::Release);
+}
+
+pub(crate) fn input_service_affinity_evidence() -> (u64, u64) {
+    (
+        INPUT_SERVICE_OWNER_ACTIVITY.load(Ordering::Acquire),
+        INPUT_SERVICE_NONOWNER_DEFERRALS.load(Ordering::Acquire),
+    )
 }
 
 fn cached_active_root() -> u64 {
@@ -2995,8 +3025,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = 0;
                 return;
             }
-            crate::aarch64_virtio_input::poll();
-            crate::graphics::service_deferred_actions();
+            service_input_on_owner_cpu();
             frame.registers[0] = 0;
             finish_signal_delivery(frame);
             crate::aarch64_process::yield_from_exception(frame);
@@ -3310,8 +3339,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             }
         }
         SYS_READ_KEY => {
-            crate::aarch64_virtio_input::poll();
-            crate::graphics::service_deferred_actions();
+            service_input_on_owner_cpu();
             if let Some(key) = crate::aarch64_virtio_input::read_key() {
                 crate::aarch64_process::complete_input_wait();
                 u64::from(key)
@@ -3327,8 +3355,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     enable_interrupts();
                     unsafe { asm!("wfi", options(nomem, nostack)) };
                     disable_interrupts();
-                    crate::aarch64_virtio_input::poll();
-                    crate::graphics::service_deferred_actions();
+                    service_input_on_owner_cpu();
                     if let Some(key) = crate::aarch64_virtio_input::read_key() {
                         crate::aarch64_process::complete_input_wait();
                         u64::from(key)
@@ -4645,8 +4672,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             {
                 ERROR_INVALID
             } else {
-                crate::aarch64_virtio_input::poll();
-                crate::graphics::service_deferred_actions();
+                service_input_on_owner_cpu();
                 if let Some(event) = crate::graphics::read_event(frame.registers[0]) {
                     crate::aarch64_process::complete_input_wait();
                     unsafe {
@@ -4669,8 +4695,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     enable_interrupts();
                     unsafe { asm!("wfi", options(nomem, nostack)) };
                     disable_interrupts();
-                    crate::aarch64_virtio_input::poll();
-                    crate::graphics::service_deferred_actions();
+                    service_input_on_owner_cpu();
                     if let Some(event) = crate::graphics::read_event(frame.registers[0]) {
                         crate::aarch64_process::complete_input_wait();
                         unsafe {
@@ -4693,8 +4718,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             {
                 ERROR_INVALID
             } else {
-                crate::aarch64_virtio_input::poll();
-                crate::graphics::service_deferred_actions();
+                service_input_on_owner_cpu();
                 if let Some(event) = crate::graphics::read_event(frame.registers[0]) {
                     crate::aarch64_process::complete_input_wait();
                     unsafe {
@@ -5499,7 +5523,7 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
                 // so CPU-bound EL0 code cannot delay key/button delivery until
                 // its next unrelated syscall; queued keys can select Firefox's
                 // blocked watcher in this same 100 Hz preemption.
-                crate::aarch64_virtio_input::poll();
+                service_input_on_owner_cpu();
             }
             crate::aarch64_process::preempt_from_timer(frame);
             finish_signal_delivery(frame);

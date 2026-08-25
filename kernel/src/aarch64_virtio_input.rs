@@ -218,12 +218,15 @@ pub fn init() {
     );
 }
 
-pub fn poll() {
+pub fn poll() -> bool {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-input poll attempted from non-owner CPU");
+    }
     if POLLING
         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
-        return;
+        return false;
     }
     crate::graphics::begin_input_batch();
     let count = usize::from(DEVICE_COUNT.load(Ordering::Acquire));
@@ -240,6 +243,7 @@ pub fn poll() {
         }
         crate::aarch64_process::wake_input_waiters();
     }
+    activity
 }
 
 pub fn read_key() -> Option<u8> {

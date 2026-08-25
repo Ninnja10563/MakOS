@@ -1156,6 +1156,7 @@ pub fn run_smp_input_device_self_test() {
     SMP_PROBE_INPUT_BLOCKED_MASK.store(0, Ordering::Release);
     SMP_PROBE_INPUT_RESUME_MASK.store(0, Ordering::Release);
     SMP_PROBE_INPUT_WAIT_TID.store(0, Ordering::Release);
+    crate::arch::reset_input_service_affinity_evidence();
     for tid in &SMP_PROBE_AFFINITY {
         tid.store(0, Ordering::Release);
     }
@@ -1198,8 +1199,7 @@ pub fn run_smp_input_device_self_test() {
     loop {
         // Device ownership stays on CPU0: it drains the real virtio used ring,
         // publishes the input wait wake, and sends the scheduler SGI to AP1.
-        crate::aarch64_virtio_input::poll();
-        crate::graphics::service_deferred_actions();
+        crate::arch::service_input_on_owner_cpu();
         let complete = with_state(|state| {
             state.table.get(waiter).is_some_and(|info| {
                 info.state == makos_process_table::ProcessState::Zombie
@@ -1250,16 +1250,21 @@ pub fn run_smp_input_device_self_test() {
 
     let idle = SMP_PROBE_INPUT_IDLE_MASK.load(Ordering::Acquire);
     let resumed = SMP_PROBE_INPUT_RESUME_MASK.load(Ordering::Acquire);
+    let (owner_activity, nonowner_deferrals) = crate::arch::input_service_affinity_evidence();
     if reaped[0].2 != 61
         || reaped[1].2 != 62
         || idle != 0b0010
         || resumed != idle
+        || owner_activity == 0
+        || nonowner_deferrals == 0
         || crate::mm::free_frames() != free_before
     {
         crate::fatal("AArch64 SMP input-device userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK waiter_cpu=1 poller_cpu=0 device=virtio-keyboard event=ctrl-k ring_activity=real block=ap-idle wake=cpu0-device-poll,sgi input_idle_mask={:#x} input_resume_mask={:#x} status=61 free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK waiter_cpu=1 poller_cpu=0 device=virtio-keyboard event=ctrl-k ring_activity=real mmio_owner=cpu0 contention=ap-deferred owner_activity={} ap_deferrals={} block=ap-idle wake=cpu0-device-poll,sgi input_idle_mask={:#x} input_resume_mask={:#x} status=61 free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        owner_activity,
+        nonowner_deferrals,
         idle,
         resumed,
     );
@@ -1491,8 +1496,7 @@ pub(crate) fn block_current_for_io_on(
         unsafe { asm!("wfi", options(nomem, nostack)) };
         crate::arch::disable_interrupts();
         crate::aarch64_socket::pump();
-        crate::aarch64_virtio_input::poll();
-        crate::graphics::service_deferred_actions();
+        crate::arch::service_input_on_owner_cpu();
         captured.restore(frame);
         return IoBlockResult::Switched;
     }
@@ -1832,8 +1836,7 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             // them live during idle wait, then hand scheduler any task they
             // wake instead of monopolizing EL1 until this task's deadline.
             crate::aarch64_socket::pump();
-            crate::aarch64_virtio_input::poll();
-            crate::graphics::service_deferred_actions();
+            crate::arch::service_input_on_owner_cpu();
         }
     }
     let captured = crate::arch::UserContext::capture(frame);

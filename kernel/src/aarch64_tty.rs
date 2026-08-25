@@ -580,7 +580,7 @@ pub fn read(fd: u64, output: &mut [u8]) -> Result<usize, Errno> {
     if output.is_empty() {
         return Ok(0);
     }
-    crate::aarch64_virtio_input::poll();
+    crate::arch::service_input_on_owner_cpu();
     with_state(|state| {
         if fd != 0 || !state.fd_open(pid, fd) {
             return Err(Errno::BadFileDescriptor);
@@ -624,7 +624,7 @@ pub fn poll_events(fd: u64, requested: u16) -> u16 {
     const POLLNVAL: u16 = 0x020;
     let pid = crate::aarch64_process::current_pid();
     if fd == 0 {
-        crate::aarch64_virtio_input::poll();
+        crate::arch::service_input_on_owner_cpu();
     }
     let (events, signaled) = with_state(|state| {
         if !state.fd_open(pid, fd) {
