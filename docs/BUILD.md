@@ -181,9 +181,27 @@ alone drains the RX ring and wakes AP1 by SGI. The gate requires nonzero
 `owner_transmits`/`ap_tx_requests`, `owner_frames`/`ap_deferrals`, matching I/O
 idle/resume masks, validated DNS response status 63, and balanced frames. The
 marker reports `tx_transport=bounded-copy-queue` and
-`tcp_ap_tx=fail-closed`: copied UDPv4/v6 is qualified, while stateful AP TCP TX
-is not. The UDP completion wait is bounded in EL1; the receive phase separately
-proves AP scheduler idle/wake.
+`tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe`: copied UDPv4/v6 is
+qualified here. The UDP completion wait is bounded in EL1; the receive phase
+separately proves AP scheduler idle/wake.
+
+Stateful AP TCPv4 has its own focused image and host fixture:
+
+```sh
+make test-aarch64-smp-tcp-runtime
+```
+
+`boot/MAKOS-SMP-TCP.CFG` arms only this network proof. AP1 creates a TCPv4
+socket, connects through QEMU slirp to the harness listener at
+`10.0.2.2:18080`, sends exact `MAKOS_AP_TCP_TX\n`, blocks in receive, verifies
+exact `MAKOS_CPU0_TCP_RX\n`, and closes with FIN. CPU0 exclusively owns route
+resolution and virtio-net TX/RX; AP connect and segment state cross the bounded
+copied queue. The listener delays its response by 0.5 seconds, forcing the AP
+through the scheduler idle/wake path. The 90-second gate requires exact bytes,
+statuses 69/70, four owner completions/four AP requests (connect, data, ACK,
+FIN), one owner RX frame/AP deferral, I/O masks `0x2`, and frame balance. This
+Pi/TCG gate is functional evidence only; it does not replace Firefox or other
+performance qualification on macOS/HVF. TCPv6 still needs a guest runtime.
 
 The same image now also runs an AP1 native-graphics phase. A kernel-only
 pre-login binding grants its immutable probe only `CAP_GRAPHICS`; the probe

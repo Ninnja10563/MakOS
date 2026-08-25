@@ -68,6 +68,10 @@ const TX_SLOT_SERVICING: u8 = 3;
 const TX_SLOT_DONE: u8 = 4;
 const TX_KIND_UDP4: u8 = 1;
 const TX_KIND_UDP6: u8 = 2;
+const TX_KIND_TCP4_CONNECT: u8 = 3;
+const TX_KIND_TCP6_CONNECT: u8 = 4;
+const TX_KIND_TCP4_SEGMENT: u8 = 5;
+const TX_KIND_TCP6_SEGMENT: u8 = 6;
 
 #[derive(Clone, Copy)]
 struct DnsCacheEntry {
@@ -165,13 +169,24 @@ static UDP6_SEND_REPORTED: AtomicBool = AtomicBool::new(false);
 static TCP6_CONNECT_REPORTED: AtomicBool = AtomicBool::new(false);
 static TX_NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static TX_OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TCP_TX_NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static TCP_TX_OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TCP_TX_CONNECT_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TCP_TX_DATA_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TCP_TX_ACK_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TCP_TX_FIN_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 struct TxServiceRequest {
     kind: u8,
     remote_ip: [u8; 16],
+    remote_mac: [u8; 6],
     remote_port: u16,
     local_port: u16,
+    sequence: u32,
+    acknowledgment: u32,
+    flags: u8,
+    receive_window: u16,
     length: u16,
     payload: [u8; TX_SERVICE_PAYLOAD],
 }
@@ -180,17 +195,41 @@ impl TxServiceRequest {
     const EMPTY: Self = Self {
         kind: 0,
         remote_ip: [0; 16],
+        remote_mac: [0; 6],
         remote_port: 0,
         local_port: 0,
+        sequence: 0,
+        acknowledgment: 0,
+        flags: 0,
+        receive_window: 0,
         length: 0,
         payload: [0; TX_SERVICE_PAYLOAD],
+    };
+}
+
+#[derive(Clone, Copy)]
+struct TxServiceResult {
+    count: usize,
+    remote_mac: [u8; 6],
+    transmit_sequence: u32,
+    receive_sequence: u32,
+    receive_window: u16,
+}
+
+impl TxServiceResult {
+    const FAILED: Self = Self {
+        count: usize::MAX,
+        remote_mac: [0; 6],
+        transmit_sequence: 0,
+        receive_sequence: 0,
+        receive_window: 0,
     };
 }
 
 struct TxServiceSlot {
     state: AtomicU8,
     request: UnsafeCell<TxServiceRequest>,
-    result: UnsafeCell<usize>,
+    result: UnsafeCell<TxServiceResult>,
 }
 
 unsafe impl Sync for TxServiceSlot {}
@@ -200,7 +239,7 @@ impl TxServiceSlot {
         Self {
             state: AtomicU8::new(TX_SLOT_FREE),
             request: UnsafeCell::new(TxServiceRequest::EMPTY),
-            result: UnsafeCell::new(usize::MAX),
+            result: UnsafeCell::new(TxServiceResult::FAILED),
         }
     }
 }
@@ -505,6 +544,18 @@ fn queue_udp_send(
     local_port: u16,
     payload: &[u8],
 ) -> Option<usize> {
+    let mut request = TxServiceRequest::EMPTY;
+    request.kind = kind;
+    request.remote_ip = remote_ip;
+    request.remote_port = remote_port;
+    request.local_port = local_port;
+    request.length = payload.len() as u16;
+    request.payload[..payload.len()].copy_from_slice(payload);
+    let result = queue_tx_request(request, false)?;
+    (result.count != usize::MAX).then_some(result.count)
+}
+
+fn queue_tx_request(request: TxServiceRequest, tcp: bool) -> Option<TxServiceResult> {
     let slot = TX_SERVICE.iter().find(|slot| {
         slot.state
             .compare_exchange(
@@ -515,18 +566,14 @@ fn queue_udp_send(
             )
             .is_ok()
     })?;
-    let mut request = TxServiceRequest::EMPTY;
-    request.kind = kind;
-    request.remote_ip = remote_ip;
-    request.remote_port = remote_port;
-    request.local_port = local_port;
-    request.length = payload.len() as u16;
-    request.payload[..payload.len()].copy_from_slice(payload);
     unsafe {
         slot.request.get().write(request);
-        slot.result.get().write(usize::MAX);
+        slot.result.get().write(TxServiceResult::FAILED);
     }
     TX_NONOWNER_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    if tcp {
+        TCP_TX_NONOWNER_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    }
     slot.state.store(TX_SLOT_READY, Ordering::Release);
     unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
 
@@ -539,7 +586,7 @@ fn queue_udp_send(
     }
     let result = unsafe { slot.result.get().read() };
     slot.state.store(TX_SLOT_FREE, Ordering::Release);
-    (result != usize::MAX).then_some(result)
+    Some(result)
 }
 
 pub fn service_tx_requests() -> usize {
@@ -563,7 +610,7 @@ pub fn service_tx_requests() -> usize {
         let request = unsafe { slot.request.get().read() };
         let length = usize::from(request.length);
         let result = if length > TX_SERVICE_PAYLOAD {
-            None
+            TxServiceResult::FAILED
         } else {
             match request.kind {
                 TX_KIND_UDP4 => udp_send_on_owner(
@@ -576,18 +623,118 @@ pub fn service_tx_requests() -> usize {
                     request.remote_port,
                     request.local_port,
                     &request.payload[..length],
-                ),
+                )
+                .map(|count| TxServiceResult {
+                    count,
+                    ..TxServiceResult::FAILED
+                })
+                .unwrap_or(TxServiceResult::FAILED),
                 TX_KIND_UDP6 => udp6_send_on_owner(
                     request.remote_ip,
                     request.remote_port,
                     request.local_port,
                     &request.payload[..length],
-                ),
-                _ => None,
+                )
+                .map(|count| TxServiceResult {
+                    count,
+                    ..TxServiceResult::FAILED
+                })
+                .unwrap_or(TxServiceResult::FAILED),
+                TX_KIND_TCP4_CONNECT => tcp_connect_on_owner(
+                    [
+                        request.remote_ip[0],
+                        request.remote_ip[1],
+                        request.remote_ip[2],
+                        request.remote_ip[3],
+                    ],
+                    request.remote_port,
+                    request.local_port,
+                )
+                .map(tcp4_service_result)
+                .unwrap_or(TxServiceResult::FAILED),
+                TX_KIND_TCP6_CONNECT => tcp6_connect_on_owner(
+                    request.remote_ip,
+                    request.remote_port,
+                    request.local_port,
+                )
+                .map(tcp6_service_result)
+                .unwrap_or(TxServiceResult::FAILED),
+                TX_KIND_TCP4_SEGMENT => with_state(|state| {
+                    if !state.ready {
+                        return TxServiceResult::FAILED;
+                    }
+                    send_tcp(
+                        state,
+                        request.remote_mac,
+                        [
+                            request.remote_ip[0],
+                            request.remote_ip[1],
+                            request.remote_ip[2],
+                            request.remote_ip[3],
+                        ],
+                        request.local_port,
+                        request.remote_port,
+                        request.sequence,
+                        request.acknowledgment,
+                        request.flags,
+                        request.receive_window,
+                        &request.payload[..length],
+                    )
+                    .map(|()| TxServiceResult {
+                        count: length,
+                        ..TxServiceResult::FAILED
+                    })
+                    .unwrap_or(TxServiceResult::FAILED)
+                }),
+                TX_KIND_TCP6_SEGMENT => with_state(|state| {
+                    if !state.ready || !state.ipv6_ready {
+                        return TxServiceResult::FAILED;
+                    }
+                    send_tcp_v6(
+                        state,
+                        request.remote_mac,
+                        request.remote_ip,
+                        request.local_port,
+                        request.remote_port,
+                        request.sequence,
+                        request.acknowledgment,
+                        request.flags,
+                        request.receive_window,
+                        &request.payload[..length],
+                    )
+                    .map(|()| TxServiceResult {
+                        count: length,
+                        ..TxServiceResult::FAILED
+                    })
+                    .unwrap_or(TxServiceResult::FAILED)
+                }),
+                _ => TxServiceResult::FAILED,
             }
         };
-        unsafe { slot.result.get().write(result.unwrap_or(usize::MAX)) };
+        unsafe { slot.result.get().write(result) };
         TX_OWNER_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+        if request.kind >= TX_KIND_TCP4_CONNECT {
+            TCP_TX_OWNER_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+            if result.count != usize::MAX {
+                match request.kind {
+                    TX_KIND_TCP4_CONNECT | TX_KIND_TCP6_CONNECT => {
+                        TCP_TX_CONNECT_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                    }
+                    TX_KIND_TCP4_SEGMENT | TX_KIND_TCP6_SEGMENT
+                        if request.flags & 0x01 != 0 =>
+                    {
+                        TCP_TX_FIN_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                    }
+                    TX_KIND_TCP4_SEGMENT | TX_KIND_TCP6_SEGMENT if length != 0 => {
+                        TCP_TX_DATA_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                    }
+                    TX_KIND_TCP4_SEGMENT | TX_KIND_TCP6_SEGMENT => {
+                        TCP_TX_ACK_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                    }
+                    _ => {}
+                }
+            }
+        }
         slot.state.store(TX_SLOT_DONE, Ordering::Release);
         completed += 1;
     }
@@ -600,6 +747,23 @@ pub fn service_tx_requests() -> usize {
 pub fn reset_tx_affinity_evidence() {
     TX_NONOWNER_REQUESTS.store(0, Ordering::Release);
     TX_OWNER_COMPLETIONS.store(0, Ordering::Release);
+    TCP_TX_NONOWNER_REQUESTS.store(0, Ordering::Release);
+    TCP_TX_OWNER_COMPLETIONS.store(0, Ordering::Release);
+    TCP_TX_CONNECT_COMPLETIONS.store(0, Ordering::Release);
+    TCP_TX_DATA_COMPLETIONS.store(0, Ordering::Release);
+    TCP_TX_ACK_COMPLETIONS.store(0, Ordering::Release);
+    TCP_TX_FIN_COMPLETIONS.store(0, Ordering::Release);
+}
+
+pub fn tcp_tx_affinity_evidence() -> (u64, u64, u64, u64, u64, u64) {
+    (
+        TCP_TX_OWNER_COMPLETIONS.load(Ordering::Acquire),
+        TCP_TX_NONOWNER_REQUESTS.load(Ordering::Acquire),
+        TCP_TX_CONNECT_COMPLETIONS.load(Ordering::Acquire),
+        TCP_TX_DATA_COMPLETIONS.load(Ordering::Acquire),
+        TCP_TX_ACK_COMPLETIONS.load(Ordering::Acquire),
+        TCP_TX_FIN_COMPLETIONS.load(Ordering::Acquire),
+    )
 }
 
 pub fn tx_affinity_evidence() -> (u64, u64) {
@@ -607,6 +771,15 @@ pub fn tx_affinity_evidence() -> (u64, u64) {
         TX_OWNER_COMPLETIONS.load(Ordering::Acquire),
         TX_NONOWNER_REQUESTS.load(Ordering::Acquire),
     )
+}
+
+/// A requester owns the copied result until it publishes its updated socket
+/// state and releases the slot. CPU0 must not demultiplex a response into the
+/// old socket state during that interval.
+pub fn tx_request_publication_pending() -> bool {
+    TX_SERVICE
+        .iter()
+        .any(|slot| slot.state.load(Ordering::Acquire) == TX_SLOT_DONE)
 }
 
 fn dns_cache_lookup(state: &State, query: &[u8], output: &mut [u8]) -> Option<usize> {
@@ -651,6 +824,35 @@ pub fn tcp_connect(remote_ip: [u8; 4], remote_port: u16, local_port: u16) -> Opt
     if remote_ip == [0; 4] || remote_port == 0 || local_port == 0 {
         return None;
     }
+    if crate::arch::cpu_index() != 0 {
+        let mut request = TxServiceRequest::EMPTY;
+        request.kind = TX_KIND_TCP4_CONNECT;
+        request.remote_ip[..4].copy_from_slice(&remote_ip);
+        request.remote_port = remote_port;
+        request.local_port = local_port;
+        let result = queue_tx_request(request, true)?;
+        if result.count == usize::MAX {
+            return None;
+        }
+        return Some(TcpConnection {
+            remote_ip,
+            remote_mac: result.remote_mac,
+            local_port,
+            remote_port,
+            transmit_sequence: result.transmit_sequence,
+            receive_sequence: result.receive_sequence,
+            receive_window: result.receive_window,
+            closed: false,
+        });
+    }
+    tcp_connect_on_owner(remote_ip, remote_port, local_port)
+}
+
+fn tcp_connect_on_owner(
+    remote_ip: [u8; 4],
+    remote_port: u16,
+    local_port: u16,
+) -> Option<TcpConnection> {
     with_state(|state| {
         if !state.ready {
             return None;
@@ -701,22 +903,45 @@ pub fn tcp_connect(remote_ip: [u8; 4], remote_port: u16, local_port: u16) -> Opt
     })
 }
 
+fn tcp4_service_result(connection: TcpConnection) -> TxServiceResult {
+    TxServiceResult {
+        count: 0,
+        remote_mac: connection.remote_mac,
+        transmit_sequence: connection.transmit_sequence,
+        receive_sequence: connection.receive_sequence,
+        receive_window: connection.receive_window,
+    }
+}
+
+fn queue_tcp4_segment(connection: &TcpConnection, flags: u8, payload: &[u8]) -> Option<usize> {
+    let mut request = TxServiceRequest::EMPTY;
+    request.kind = TX_KIND_TCP4_SEGMENT;
+    request.remote_ip[..4].copy_from_slice(&connection.remote_ip);
+    request.remote_mac = connection.remote_mac;
+    request.remote_port = connection.remote_port;
+    request.local_port = connection.local_port;
+    request.sequence = connection.transmit_sequence;
+    request.acknowledgment = connection.receive_sequence;
+    request.flags = flags;
+    request.receive_window = connection.receive_window;
+    request.length = payload.len() as u16;
+    request.payload[..payload.len()].copy_from_slice(payload);
+    let result = queue_tx_request(request, true)?;
+    (result.count != usize::MAX).then_some(result.count)
+}
+
 pub fn tcp_send(connection: &mut TcpConnection, payload: &[u8]) -> Option<usize> {
     if connection.closed || payload.is_empty() {
         return None;
     }
-    with_state(|state| {
-        if !state.ready {
-            return None;
+    let send_chunk = |connection: &TcpConnection, flags, payload: &[u8]| {
+        if crate::arch::cpu_index() != 0 {
+            return queue_tcp4_segment(connection, flags, payload).map(|_| ());
         }
-        let mut sent = 0usize;
-        while sent < payload.len() {
-            let count = (payload.len() - sent).min(TCP_PAYLOAD_MAX);
-            let flags = if sent + count == payload.len() {
-                0x18
-            } else {
-                0x10
-            };
+        with_state(|state| {
+            if !state.ready {
+                return None;
+            }
             send_tcp(
                 state,
                 connection.remote_mac,
@@ -727,13 +952,25 @@ pub fn tcp_send(connection: &mut TcpConnection, payload: &[u8]) -> Option<usize>
                 connection.receive_sequence,
                 flags,
                 connection.receive_window,
-                &payload[sent..sent + count],
-            )?;
+                payload,
+            )
+        })
+    };
+    {
+        let mut sent = 0usize;
+        while sent < payload.len() {
+            let count = (payload.len() - sent).min(TCP_PAYLOAD_MAX);
+            let flags = if sent + count == payload.len() {
+                0x18
+            } else {
+                0x10
+            };
+            send_chunk(connection, flags, &payload[sent..sent + count])?;
             connection.transmit_sequence = connection.transmit_sequence.wrapping_add(count as u32);
             sent += count;
         }
         Some(sent)
-    })
+    }
 }
 
 pub fn tcp_receive(connection: &mut TcpConnection, output: &mut [u8]) -> Option<usize> {
@@ -742,6 +979,9 @@ pub fn tcp_receive(connection: &mut TcpConnection, output: &mut [u8]) -> Option<
     }
     if connection.closed {
         return Some(0);
+    }
+    if crate::arch::cpu_index() != 0 {
+        return None;
     }
     with_state(|state| {
         loop {
@@ -804,20 +1044,24 @@ pub fn tcp_close(connection: &mut TcpConnection) {
     if connection.closed {
         return;
     }
-    let _ = with_state(|state| {
-        send_tcp(
-            state,
-            connection.remote_mac,
-            connection.remote_ip,
-            connection.local_port,
-            connection.remote_port,
-            connection.transmit_sequence,
-            connection.receive_sequence,
-            0x11,
-            connection.receive_window,
-            &[],
-        )
-    });
+    if crate::arch::cpu_index() != 0 {
+        let _ = queue_tcp4_segment(connection, 0x11, &[]);
+    } else {
+        let _ = with_state(|state| {
+            send_tcp(
+                state,
+                connection.remote_mac,
+                connection.remote_ip,
+                connection.local_port,
+                connection.remote_port,
+                connection.transmit_sequence,
+                connection.receive_sequence,
+                0x11,
+                connection.receive_window,
+                &[],
+            )
+        });
+    }
     connection.transmit_sequence = connection.transmit_sequence.wrapping_add(1);
     connection.closed = true;
 }
@@ -834,6 +1078,35 @@ pub fn tcp6_connect(
     if remote_ip == [0; 16] || remote_ip[0] == 0xff || remote_port == 0 || local_port == 0 {
         return None;
     }
+    if crate::arch::cpu_index() != 0 {
+        let mut request = TxServiceRequest::EMPTY;
+        request.kind = TX_KIND_TCP6_CONNECT;
+        request.remote_ip = remote_ip;
+        request.remote_port = remote_port;
+        request.local_port = local_port;
+        let result = queue_tx_request(request, true)?;
+        if result.count == usize::MAX {
+            return None;
+        }
+        return Some(Tcp6Connection {
+            remote_ip,
+            remote_mac: result.remote_mac,
+            local_port,
+            remote_port,
+            transmit_sequence: result.transmit_sequence,
+            receive_sequence: result.receive_sequence,
+            receive_window: result.receive_window,
+            closed: false,
+        });
+    }
+    tcp6_connect_on_owner(remote_ip, remote_port, local_port)
+}
+
+fn tcp6_connect_on_owner(
+    remote_ip: [u8; 16],
+    remote_port: u16,
+    local_port: u16,
+) -> Option<Tcp6Connection> {
     with_state(|state| {
         if !state.ready || !state.ipv6_ready {
             return None;
@@ -890,22 +1163,45 @@ pub fn tcp6_connect(
     })
 }
 
+fn tcp6_service_result(connection: Tcp6Connection) -> TxServiceResult {
+    TxServiceResult {
+        count: 0,
+        remote_mac: connection.remote_mac,
+        transmit_sequence: connection.transmit_sequence,
+        receive_sequence: connection.receive_sequence,
+        receive_window: connection.receive_window,
+    }
+}
+
+fn queue_tcp6_segment(connection: &Tcp6Connection, flags: u8, payload: &[u8]) -> Option<usize> {
+    let mut request = TxServiceRequest::EMPTY;
+    request.kind = TX_KIND_TCP6_SEGMENT;
+    request.remote_ip = connection.remote_ip;
+    request.remote_mac = connection.remote_mac;
+    request.remote_port = connection.remote_port;
+    request.local_port = connection.local_port;
+    request.sequence = connection.transmit_sequence;
+    request.acknowledgment = connection.receive_sequence;
+    request.flags = flags;
+    request.receive_window = connection.receive_window;
+    request.length = payload.len() as u16;
+    request.payload[..payload.len()].copy_from_slice(payload);
+    let result = queue_tx_request(request, true)?;
+    (result.count != usize::MAX).then_some(result.count)
+}
+
 pub fn tcp6_send(connection: &mut Tcp6Connection, payload: &[u8]) -> Option<usize> {
     if connection.closed || payload.is_empty() {
         return None;
     }
-    with_state(|state| {
-        if !state.ready || !state.ipv6_ready {
-            return None;
+    let send_chunk = |connection: &Tcp6Connection, flags, payload: &[u8]| {
+        if crate::arch::cpu_index() != 0 {
+            return queue_tcp6_segment(connection, flags, payload).map(|_| ());
         }
-        let mut sent = 0usize;
-        while sent < payload.len() {
-            let count = (payload.len() - sent).min(TCP_PAYLOAD_MAX);
-            let flags = if sent + count == payload.len() {
-                0x18
-            } else {
-                0x10
-            };
+        with_state(|state| {
+            if !state.ready || !state.ipv6_ready {
+                return None;
+            }
             send_tcp_v6(
                 state,
                 connection.remote_mac,
@@ -916,13 +1212,25 @@ pub fn tcp6_send(connection: &mut Tcp6Connection, payload: &[u8]) -> Option<usiz
                 connection.receive_sequence,
                 flags,
                 connection.receive_window,
-                &payload[sent..sent + count],
-            )?;
+                payload,
+            )
+        })
+    };
+    {
+        let mut sent = 0usize;
+        while sent < payload.len() {
+            let count = (payload.len() - sent).min(TCP_PAYLOAD_MAX);
+            let flags = if sent + count == payload.len() {
+                0x18
+            } else {
+                0x10
+            };
+            send_chunk(connection, flags, &payload[sent..sent + count])?;
             connection.transmit_sequence = connection.transmit_sequence.wrapping_add(count as u32);
             sent += count;
         }
         Some(sent)
-    })
+    }
 }
 
 pub fn tcp6_receive(connection: &mut Tcp6Connection, output: &mut [u8]) -> Option<usize> {
@@ -931,6 +1239,9 @@ pub fn tcp6_receive(connection: &mut Tcp6Connection, output: &mut [u8]) -> Optio
     }
     if connection.closed {
         return Some(0);
+    }
+    if crate::arch::cpu_index() != 0 {
+        return None;
     }
     with_state(|state| {
         loop {
@@ -993,20 +1304,24 @@ pub fn tcp6_close(connection: &mut Tcp6Connection) {
     if connection.closed {
         return;
     }
-    let _ = with_state(|state| {
-        send_tcp_v6(
-            state,
-            connection.remote_mac,
-            connection.remote_ip,
-            connection.local_port,
-            connection.remote_port,
-            connection.transmit_sequence,
-            connection.receive_sequence,
-            0x11,
-            connection.receive_window,
-            &[],
-        )
-    });
+    if crate::arch::cpu_index() != 0 {
+        let _ = queue_tcp6_segment(connection, 0x11, &[]);
+    } else {
+        let _ = with_state(|state| {
+            send_tcp_v6(
+                state,
+                connection.remote_mac,
+                connection.remote_ip,
+                connection.local_port,
+                connection.remote_port,
+                connection.transmit_sequence,
+                connection.receive_sequence,
+                0x11,
+                connection.receive_window,
+                &[],
+            )
+        });
+    }
     connection.transmit_sequence = connection.transmit_sequence.wrapping_add(1);
     connection.closed = true;
 }
@@ -1022,6 +1337,9 @@ pub fn tcp6_update_receive_window(connection: &mut Tcp6Connection, available: us
         return true;
     }
     connection.receive_window = receive_window;
+    if crate::arch::cpu_index() != 0 {
+        return queue_tcp6_segment(connection, 0x10, &[]).is_some();
+    }
     with_state(|state| {
         send_tcp_v6(
             state,
@@ -1044,6 +1362,9 @@ pub fn tcp6_ingest(
     segment: TcpSegmentV6<'_>,
     output: &mut [u8],
 ) -> Option<TcpIngress> {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 TCPv6 RX ingest attempted from non-owner CPU");
+    }
     if segment.source_ip != connection.remote_ip
         || segment.source_port != connection.remote_port
         || segment.destination_port != connection.local_port
@@ -1153,6 +1474,9 @@ pub fn tcp_ingest(
     segment: TcpSegment<'_>,
     output: &mut [u8],
 ) -> Option<TcpIngress> {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 TCPv4 RX ingest attempted from non-owner CPU");
+    }
     if segment.source_ip != connection.remote_ip
         || segment.source_port != connection.remote_port
         || segment.destination_port != connection.local_port
@@ -1249,6 +1573,9 @@ pub fn tcp_update_receive_window(connection: &mut TcpConnection, available: usiz
         return true;
     }
     connection.receive_window = receive_window;
+    if crate::arch::cpu_index() != 0 {
+        return queue_tcp4_segment(connection, 0x10, &[]).is_some();
+    }
     with_state(|state| {
         send_tcp(
             state,

@@ -91,6 +91,12 @@ static SMP_GPU_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-gpu-owner-probe.elf"
 ));
+static SMP_TCP_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-tcp-probe.elf"));
+static SMP_TCP_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-tcp-owner-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -1410,11 +1416,165 @@ pub fn run_smp_network_rx_self_test() {
         crate::fatal("AArch64 SMP network-RX userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits={} ap_tx_requests={} block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tcp_ap_tx=fail-closed free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits={} ap_tx_requests={} block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
         owner_frames,
         nonowner_deferrals,
         owner_transmits,
         ap_tx_requests,
+        idle,
+        resumed,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_tcp_tx_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_IO_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_IO_RESUME_MASK.store(0, Ordering::Release);
+    crate::arch::reset_network_rx_affinity_evidence();
+    crate::aarch64_virtio_net::reset_tx_affinity_evidence();
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let requester = spawn_process(0, SMP_TCP_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP TCP requester spawn failed"))
+        .0;
+    let sentinel = spawn_process(0, SMP_TCP_OWNER_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP TCP owner sentinel spawn failed"))
+        .0;
+    SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(requester, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP TCP CPU0 sentinel absent"));
+        if process.pid != sentinel {
+            crate::fatal("AArch64 SMP TCP CPU0 affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == sentinel)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP TCP CPU0 context absent"))
+            .context
+    });
+    smp_probe_enter(sentinel);
+    crate::arch::switch_address_space(context.ttbr0);
+    let sentinel_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if sentinel_status != 70 {
+        crate::fatal("AArch64 SMP TCP CPU0 sentinel status invalid");
+    }
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        crate::arch::service_network_rx_on_owner_cpu();
+        let complete = with_state(|state| {
+            state.table.get(requester).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP TCP completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let mut reaped = [(0u64, 0u64, 0u64); 2];
+    with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, requester)
+        else {
+            crate::fatal("AArch64 SMP TCP requester reap failed");
+        };
+        reaped[0] = (requester, resource, exit_status);
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, sentinel)
+        else {
+            crate::fatal("AArch64 SMP TCP sentinel reap failed");
+        };
+        reaped[1] = (sentinel, resource, exit_status);
+        for tid in [requester, sentinel] {
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == tid) {
+                *slot = ContextSlot::EMPTY;
+            }
+        }
+    });
+    for (pid, resource, status) in reaped {
+        cleanup_reaped(pid, resource, status);
+    }
+
+    let idle = SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire);
+    let resumed = SMP_PROBE_IO_RESUME_MASK.load(Ordering::Acquire);
+    let (owner_frames, nonowner_deferrals) = crate::arch::network_rx_affinity_evidence();
+    let (owner, requests, connects, data, acknowledgments, fins) =
+        crate::aarch64_virtio_net::tcp_tx_affinity_evidence();
+    if reaped[0].2 != 69
+        || reaped[1].2 != 70
+        || idle != 0b0010
+        || resumed != idle
+        || owner_frames == 0
+        || nonowner_deferrals == 0
+        || owner == 0
+        || owner != requests
+        || connects != 1
+        || data == 0
+        || acknowledgments == 0
+        || fins == 0
+        || crate::mm::free_frames() != free_before
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SMP_TCP_DIAGNOSTIC requester_status={} owner_status={} io_idle={:#x} io_resume={:#x} owner_frames={} ap_rx_deferrals={} owner_completions={} ap_requests={} connects={} data={} acks={} fins={} free_balance={}",
+            reaped[0].2,
+            reaped[1].2,
+            idle,
+            resumed,
+            owner_frames,
+            nonowner_deferrals,
+            owner,
+            requests,
+            connects,
+            data,
+            acknowledgments,
+            fins,
+            u8::from(crate::mm::free_frames() == free_before),
+        );
+        crate::fatal("AArch64 SMP TCP userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_TCP_TX_OK requester_cpu=1 service_cpu=0 protocol=tcp4 endpoint=10.0.2.2:18080 handshake=syn,synack,ack payload=request,response close=fin ring_activity=real tx_mmio_owner=cpu0 rx_mmio_owner=cpu0 transport=bounded-copied-state"
+    );
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_TCP_TX_EVIDENCE owner_completions={} ap_requests={} connect_completions={} data_completions={} ack_completions={} fin_completions={} owner_frames={} ap_rx_deferrals={}",
+        owner,
+        requests,
+        connects,
+        data,
+        acknowledgments,
+        fins,
+        owner_frames,
+        nonowner_deferrals,
+    );
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_TCP_WAKE_OK block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=69 owner_status=70 socket_state=locked-publication free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
         idle,
         resumed,
     );
@@ -1855,7 +2015,13 @@ pub(crate) fn block_current_for_io_on(
     let now = crate::arch::monotonic_ticks();
     let mut captured = crate::arch::UserContext::capture(frame);
     captured.elr = captured.elr.saturating_sub(4);
-    if runtime_stats().runnable <= 1 {
+    // As with sleep_until, an opt-in AP qualification task must publish a
+    // genuine scheduler Blocked/idle state even if host vCPU ordering makes
+    // it the last globally runnable task at this instant.
+    let force_smp_probe_ap_idle = scheduler_cpu() != 0
+        && crate::arch::smp_probe_scheduler_enabled()
+        && current_app_role() == ProcessRole::SmpProbe;
+    if runtime_stats().runnable <= 1 && !force_smp_probe_ap_idle {
         // SVC entry keeps IRQs masked through publishing io_wait. A device or
         // timer becoming pending in that window makes the following WFI exit
         // immediately, so readiness cannot be lost between userspace's failed
@@ -2225,7 +2391,14 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
         return;
     }
     frame.registers[0] = 0;
-    if runtime_stats().runnable <= 1 {
+    // The SMP qualification fixture must exercise the real AP block-to-idle
+    // scheduler transition. A late AP can otherwise observe only itself as
+    // globally runnable and take the single-task EL1 WFI shortcut, making the
+    // per-CPU idle/wake proof depend on host vCPU scheduling order.
+    let force_smp_probe_ap_idle = scheduler_cpu() != 0
+        && crate::arch::smp_probe_scheduler_enabled()
+        && current_app_role() == ProcessRole::SmpProbe;
+    if runtime_stats().runnable <= 1 && !force_smp_probe_ap_idle {
         // No alternate EL0 task exists to run while this one sleeps. Blocking
         // then asking ProcessTable for a successor would fail and return
         // EAGAIN, turning libc nanosleep loops into 100% CPU busy-spins.

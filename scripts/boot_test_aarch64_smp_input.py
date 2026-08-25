@@ -23,7 +23,6 @@ IMAGE = pathlib.Path(
     )
 )
 
-
 def main() -> int:
     qemu = os.environ.get("QEMU_SYSTEM_AARCH64", "qemu-system-aarch64")
     code = first_file(
@@ -51,7 +50,6 @@ def main() -> int:
     output_dir = ROOT / "build"
     output_dir.mkdir(parents=True, exist_ok=True)
     serial_log = output_dir / "makos-smp-input-focused-serial.log"
-
     with tempfile.TemporaryDirectory(prefix="makos-smp-input-", dir=output_dir) as name:
         temporary = pathlib.Path(name)
         boot = temporary / "boot.img"
@@ -176,7 +174,7 @@ def main() -> int:
                     b"tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits=",
                     b"ap_tx_requests=",
                     b"io_idle_mask=0x2 io_resume_mask=0x2 status=63",
-                    b"tcp_ap_tx=fail-closed free_balance=1",
+                    b"tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe",
                     ready,
                 ):
                     if marker not in output:

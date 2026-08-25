@@ -17,8 +17,8 @@ Preserve existing files and changes.
 
 ## User priorities
 
-1. Near-native mouse performance; guest cursor must remain visible without pixel corruption or host-cursor duplication.
-2. Real Firefox/browser support, modern websites/protocols, usable performance.
+1. Real Firefox/browser support, modern websites/protocols, usable performance.
+2. Near-native mouse performance; guest cursor must remain visible without pixel corruption or host-cursor duplication.
 3. Functional terminal: punctuation/lowercase, commands, selection, copy/paste, real nano.
 4. Normal desktop behavior: draggable/resizable/closable/reopenable windows, taskbar apps, pressed button feedback, clear login focus/tab behavior.
 5. Text editor save correctness, file explorer, settings/resolution/users/sign-out, system monitor, Python runner, Wi-Fi/clock UI.
@@ -27,22 +27,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `97b695d`:
-  PID 224308, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-TMvEbm`, private data clone
-  `build/makos-pi-visible-TMvEbm/data.img`, private variables
-  `build/makos-pi-visible-TMvEbm/vars.fd`, QMP
-  `build/makos-pi-visible-TMvEbm/qmp.sock`, serial
-  `build/makos-pi-visible-TMvEbm/serial.log`, PID file
-  `build/makos-pi-visible-TMvEbm/qemu.pid`, and QMP framebuffer capture
-  `build/makos-pi-visible-TMvEbm/login-2.png`. It is the sole QEMU process and the
-  ordinary config reports `smp_input_probe=0`, four online PEs,
+- Active visible Pi/QEMU 10.0.11 TCG milestone for the stateful TCP change:
+  PID 241019, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-tcp-5o5pxp`, private data clone
+  `build/makos-pi-visible-tcp-5o5pxp/data.img`, private variables
+  `build/makos-pi-visible-tcp-5o5pxp/vars.fd`, QMP
+  `build/makos-pi-visible-tcp-5o5pxp/qmp.sock`, serial
+  `build/makos-pi-visible-tcp-5o5pxp/serial.log`, PID file
+  `build/makos-pi-visible-tcp-5o5pxp/qemu.pid`, and QMP framebuffer captures
+  `build/makos-pi-visible-tcp-5o5pxp/login.ppm`/`login.png`. It is the sole QEMU
+  process and the ordinary config reports `smp_input_probe=0`,
+  `smp_tcp_probe=0`, four online PEs,
   `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`, with no fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
-  Prior PID 214025/session `build/makos-pi-visible-JZAZKK` was stopped cleanly
+  Prior PID 224308/session `build/makos-pi-visible-TMvEbm` was stopped cleanly
+  through QMP before focused testing; its private session files remain.
+  Earlier PID 214025/session `build/makos-pi-visible-JZAZKK` was stopped cleanly
   through QMP before this build; its private session files remain.
   Intermediate PID 221943/session `build/makos-pi-visible-M60s26` was likewise
   stopped through QMP before the final marker rebuild; its files remain.
@@ -98,7 +101,7 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending stateful TCP TX, migration, and load balancing.
+  remains pending forced migration and load balancing.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -121,8 +124,8 @@ Preserve existing files and changes.
   missed the independently QMP-injected Ctrl-K; its immediate unchanged repeat
   passed the whole combined gate. The first RX attempt had exposed rejection of
   legal saved EL0 NZCV bits; only NZCV is now permitted. Copied UDPv4/v6 TX and
-  RX ownership are qualified. Stateful AP TCP TX fails closed and remains
-  pending; the AP UDP completion wait is bounded EL1 `WFE`, not scheduler-idle
+  RX ownership are qualified. Stateful TCPv4 is qualified by the separate gate
+  below; the AP UDP completion wait is bounded EL1 `WFE`, not scheduler-idle
   proof. Full `make check`, `make unit`, release/image artifact checks, and the
   SMP structural guard pass for the UDP ownership work.
   The focused image runs a ninth fixture before networking. The kernel creates
@@ -165,6 +168,23 @@ Preserve existing files and changes.
   the combined harness window before input readiness under slower host
   throughput; neither emitted fatal/panic. Do not lengthen or weaken the
   harness. The prior same-behavior combined pass remains regression evidence.
+- A separate `test.smp-tcp=required` image now qualifies stateful AP TCPv4.
+  AP1 creates a real socket, connects through slirp to the host fixture at
+  `10.0.2.2:18080`, sends exact `MAKOS_AP_TCP_TX\n`, blocks in receive, checks
+  exact `MAKOS_CPU0_TCP_RX\n`, and closes with FIN. Connect and segment state
+  crosses the bounded copied queue; CPU0 alone resolves the route and owns both
+  virtio-net rings. The socket table is mutated under its live lock instead of
+  whole-socket snapshot replacement. A 0.5-second host response delay forces
+  AP1 through Blocked/idle and a CPU0 RX wake SGI. Final Pi/QEMU 10.0.11 TCG
+  passes requester/owner statuses 69/70, exact bytes, one owner RX frame/AP
+  deferral, four owner completions/four AP requests (connect, data, ACK, FIN),
+  `io_idle_mask=0x2`/`io_resume_mask=0x2`, and exact frame balance. Marker:
+  `MAKOS_AARCH64_SMP_TCP_RUNTIME_OK accel=tcg requester_cpu=1 service_cpu=0 protocol=tcp4 request=exact response=exact close=fin tx_mmio_owner=cpu0 rx_mmio_owner=cpu0 socket_state=locked-publication`.
+  The opt-in SmpProbe additionally bypasses the last-runnable WFI shortcut so
+  host vCPU ordering cannot evade the required scheduler-idle publication;
+  production last-runnable behavior is unchanged. TCPv6 runtime, migration,
+  load balancing, and general desktop SMP remain open. Full `make unit check`,
+  scheduler structural guard, and dedicated 90-second runtime gate pass.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -174,12 +194,12 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 224308 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 241019 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- Core CPU0-owned GPU-service commit `97b695d` is the implementation state for
-  GitHub `main`; block-service commit `0868b79` remains its immediate storage
-  foundation. Generated
+- The stateful TCP owner-service milestone is the current implementation state;
+  CPU0-owned GPU commit `97b695d` and block-service commit `0868b79` remain its
+  device-ownership foundations. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -208,6 +228,12 @@ Preserve existing files and changes.
   6.6 GiB compressed, with Zen/WindowServer consuming multiple cores. Prior
   current-package strict pass remains valid evidence, but latest Gate 3 is not
   green. Do not relax thresholds. Rerun unchanged only after host pressure clears.
+- The Raspberry Pi was idle when the unchanged Firefox Make target was retried,
+  but preflight stopped before QEMU launch: this host does not contain exact
+  `build/makos-integrated-a9c604254f094de2.img` or the staged Firefox package,
+  and the GitHub repository has no release asset from which to recover it. This
+  is an artifact-prerequisite block, not a guest runtime or latency failure.
+  Firefox remains first priority on the intended idle macOS/HVF host.
 - AArch64 installer now uses shared `makos-installer` fresh/resume core through a virtio-blk adapter. Exact `install disk1 resume-disk1` accepts only blank MBR plus zero/source-identical partial sectors; committed or conflicting media fail closed. Source snapshot begins with a serialized flush/write-freeze; all disk0 writes are denied until error thaw or successful shutdown while disk1 remains writable. Full HVF gate guest-tests both resume refusals, hard-kills QEMU after first progress, proves LBA0 blank plus two source-identical partial blocks, resumes to exact SHA-256 equality, detaches live source, and passes two installed-only persistence boots. Marker: `MAKOS_AARCH64_INSTALL_BOOT_OK ... conflict_resume_refusal=1 ... power_interrupt=pre-mbr ... partial_blocks=2 resume=1 source_digest_match=1 ...`.
 - Final post-freeze `make unit && make check`, AArch64 release/image artifact build, and current visible login boot pass. Active clone is recorded above.
 - Sparse anonymous VM decommit now has fresh upstream-musl guest proof. Probe writes pages, calls `MADV_DONTNEED` and MakOS immediate-decommit `MADV_FREE`, verifies zero refault after each, then unmaps. Fresh 1,350-object static musl build, structural guard, release embed, and full AArch64 runtime pass.
@@ -252,12 +278,12 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
-2. Continue the AArch64 userspace SMP row with stateful CPU0 TCP service without
-   sharing mutable connection state across PEs; then add forced migration and
-   load balancing. Stop the visible QEMU through QMP before any focused runtime.
-3. Boot a fresh visible login milestone after the next verified behavior change
-   and record PID/session/data clone/QMP. Preserve real implementation
-   requirements—no fake/spoofed apps.
+2. Continue the AArch64 userspace SMP row with forced migration and load
+   balancing, retaining CPU0-exclusive device ownership. Stop the visible QEMU
+   through QMP before any focused runtime.
+3. Continue the first genuine self-hosting seed toward a general linker/compiler
+   and a substantial in-guest build. Preserve real implementation requirements—
+   no fake/spoofed apps.
 
 ## Operating constraints
 

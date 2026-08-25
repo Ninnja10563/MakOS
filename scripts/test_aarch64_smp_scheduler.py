@@ -22,10 +22,14 @@ BLOCK_PROBE = (ROOT / "user/aarch64_smp_block_probe.S").read_text()
 BLOCK_OWNER_PROBE = (ROOT / "user/aarch64_smp_block_owner_probe.S").read_text()
 GPU_PROBE = (ROOT / "user/aarch64_smp_gpu_probe.S").read_text()
 GPU_OWNER_PROBE = (ROOT / "user/aarch64_smp_gpu_owner_probe.S").read_text()
+TCP_PROBE = (ROOT / "user/aarch64_smp_tcp_probe.S").read_text()
+TCP_OWNER_PROBE = (ROOT / "user/aarch64_smp_tcp_owner_probe.S").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
+TCP_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_tcp.py").read_text()
 INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
+TCP_CONFIG = (ROOT / "boot/MAKOS-SMP-TCP.CFG").read_text()
 
 for token in (
     "current: [Option<usize>; MAX_SCHEDULER_CPUS]",
@@ -81,8 +85,20 @@ for token in (
     "TX_OWNER_COMPLETIONS",
     "TX_NONOWNER_REQUESTS",
     "if length > TX_SERVICE_PAYLOAD",
+    "TX_KIND_TCP4_CONNECT",
+    "TX_KIND_TCP4_SEGMENT",
+    "fn queue_tcp4_segment(",
+    "pub fn tcp_tx_affinity_evidence()",
+    "pub fn tx_request_publication_pending()",
+    'crate::fatal("AArch64 TCPv4 RX ingest attempted from non-owner CPU")',
 ):
     assert token in NET, token
+for token in (
+    "let socket = &mut state.sockets[index];",
+    "socket_state=locked-publication",
+    "no task",
+):
+    assert token in SOCKET + PROCESS, token
 assert "AArch64 virtio-blk request attempted from non-owner CPU" in BLOCK
 for token in (
     "SERVICE_SLOTS",
@@ -143,6 +159,8 @@ for token in (
     "SMP_PROBE_FUTEX_RESUME_MASK",
     "SMP_PROBE_AFFINITY",
     "FutexBlockResult::BspIdle",
+    "force_smp_probe_ap_idle",
+    "runtime_stats().runnable <= 1 && !force_smp_probe_ap_idle",
     "SMP_PROBE_IO_IDLE_MASK",
     "SMP_PROBE_IO_RESUME_MASK",
     "SMP_PROBE_IPC_IDLE_MASK",
@@ -180,6 +198,8 @@ for token in (
     "pub fn run_smp_network_rx_self_test()",
     "pub fn run_smp_block_io_self_test()",
     "pub fn run_smp_gpu_self_test()",
+    "pub fn run_smp_tcp_tx_self_test()",
+    "MAKOS_AARCH64_SMP_TCP_TX_OK",
     "MAKOS_AARCH64_SMP_GPU_OK",
     "MAKOS_AARCH64_SMP_BLOCK_OK",
     "register_smp_block_probe(waiter)",
@@ -215,13 +235,23 @@ for token in (
     "aarch64-smp-gpu-probe",
     "aarch64_smp_gpu_owner_probe.S",
     "aarch64-smp-gpu-owner-probe",
+    "aarch64_smp_tcp_probe.S",
+    "aarch64-smp-tcp-probe",
+    "aarch64_smp_tcp_owner_probe.S",
+    "aarch64-smp-tcp-owner-probe",
 ):
     assert token in BUILD_RS, token
-for token in ("aarch64-smp-gpu-probe.elf", "aarch64-smp-gpu-owner-probe.elf"):
+for token in (
+    "aarch64-smp-gpu-probe.elf",
+    "aarch64-smp-gpu-owner-probe.elf",
+    "aarch64-smp-tcp-probe.elf",
+    "aarch64-smp-tcp-owner-probe.elf",
+):
     assert token in PROCESS, token
 assert "run_smp_network_rx_self_test();" in MAIN
 assert "run_smp_block_io_self_test();" in MAIN
 assert "run_smp_gpu_self_test();" in MAIN
+assert "run_smp_tcp_tx_self_test();" in MAIN
 for token in ("mov x8, #47", "mov x8, #49", "mov x8, #50", "mov x0, #63"):
     assert token in NETWORK_PROBE, token
 for token in (
@@ -243,6 +273,19 @@ for token in (
     assert token in GPU_PROBE, token
 for token in ("add x19, x0, #100", "mov x0, #68"):
     assert token in GPU_OWNER_PROBE, token
+for token in (
+    "mov x8, #47",
+    "mov x8, #48",
+    "mov x8, #49",
+    "mov x8, #50",
+    "mov x8, #51",
+    '"MAKOS_AP_TCP_TX\\n"',
+    '"MAKOS_CPU0_TCP_RX\\n"',
+    "mov x0, #69",
+):
+    assert token in TCP_PROBE, token
+for token in ("add x19, x0, #100", "mov x0, #70"):
+    assert token in TCP_OWNER_PROBE, token
 for token in (
     "pub(crate) fn register_smp_block_probe",
     "capabilities: CAP_FILE_WRITE",
@@ -266,9 +309,13 @@ for cpu0_wrapper in (
 assert "Until every gate passes, MakOS reports `userspace_scheduler_cpus=1`." in DESIGN
 assert "Firefox first paint/navigation" in DESIGN
 assert '"test.smp-input=required" => smp_input_probe = true' in MAIN
+assert '"test.smp-tcp=required" => smp_tcp_probe = true' in MAIN
 assert "if boot_options.smp_input_probe" in MAIN
+assert "if boot_options.smp_tcp_probe" in MAIN
 assert "test-aarch64-smp-input-runtime: image-aarch64-smp-input" in MAKEFILE
+assert "test-aarch64-smp-tcp-runtime: image-aarch64-smp-tcp" in MAKEFILE
 assert "test.smp-input=required" in INPUT_CONFIG
+assert "test.smp-tcp=required" in TCP_CONFIG
 for token in (
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
     'send_key(stream, "ctrl-k")',
@@ -277,7 +324,7 @@ for token in (
     "mmio_owner=cpu0 contention=ap-deferred owner_activity=",
     "rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
     "tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits=",
-    "tcp_ap_tx=fail-closed free_balance=1",
+    "tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe",
     "MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0",
     "device=virtio-blk requests=read4k,write4k,fsync ring_activity=real",
     "mmio_owner=cpu0 transport=bounded-copy-queue service_point=cpu0-timer-bottom-half",
@@ -293,6 +340,19 @@ for token in (
     "transfer_completions=",
 ):
     assert token in INPUT_RUNTIME, token
+
+for token in (
+    "MAKOS_AARCH64_SMP_TCP_TX_OK requester_cpu=1 service_cpu=0",
+    "MAKOS_AARCH64_SMP_TCP_TX_EVIDENCE",
+    "MAKOS_AARCH64_SMP_TCP_WAKE_OK",
+    "TCP_REQUEST = b\"MAKOS_AP_TCP_TX\\n\"",
+    "TCP_RESPONSE = b\"MAKOS_CPU0_TCP_RX\\n\"",
+    "connect_completions=1 data_completions=1 ack_completions=1 fin_completions=1",
+    "host fixture did not observe the guest FIN",
+    "time.sleep(0.5)",
+    "MAKOS_AARCH64_SMP_TCP_RUNTIME_OK",
+):
+    assert token in TCP_RUNTIME, token
 
 print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "

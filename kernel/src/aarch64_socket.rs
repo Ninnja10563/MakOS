@@ -342,90 +342,89 @@ pub fn send_to(handle: u64, payload: &[u8], destination: Option<Endpoint>) -> Op
     if payload.is_empty() || payload.len() > 64 * 1024 {
         return None;
     }
-    let snapshot = with_state(|state| {
+    let result = with_state(|state| {
         let index = resolve_index(state, handle)?;
-        let socket = state.sockets[index];
-        (socket.connected || (u64::from(socket.kind) == SOCK_DGRAM && destination.is_some()))
-            .then_some((index, socket))
-    })?;
-    let (index, mut socket) = snapshot;
-    let result = match (u64::from(socket.kind), u64::from(socket.protocol)) {
-        (SOCK_DGRAM, IPPROTO_UDP) => {
-            let endpoint = destination.unwrap_or_else(|| socket.remote_endpoint());
-            if endpoint.port == 0
-                || !valid_remote(endpoint.address)
-                || (socket.domain == AF_INET as u8) != matches!(endpoint.address, IpAddress::V4(_))
-            {
-                return None;
-            }
-            let trace = UDP_DNS_TRACES.fetch_add(1, Ordering::AcqRel);
-            let query_id = payload
-                .get(..2)
-                .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
-                .unwrap_or(0);
-            let query_type = payload
-                .get(payload.len().saturating_sub(4)..payload.len().saturating_sub(2))
-                .filter(|_| payload.len() >= 4)
-                .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
-                .unwrap_or(0);
-            if trace < 32 {
-                crate::serial_println!(
-                    "MAKOS_UDP_DNS_SEND trace={} id={:#06x} qtype={} local={} remote={:?}:{} queued={}",
-                    trace,
-                    query_id,
-                    query_type,
-                    socket.local_port,
-                    endpoint.address,
-                    endpoint.port,
-                    socket.udp_count,
-                );
-            }
-            let sent = match endpoint.address {
-                IpAddress::V4(remote_ip) => crate::aarch64_virtio_net::udp_send(
-                    remote_ip,
-                    endpoint.port,
-                    socket.local_port,
-                    payload,
-                ),
-                IpAddress::V6(remote_ip) => crate::aarch64_virtio_net::udp6_send(
-                    remote_ip,
-                    endpoint.port,
-                    socket.local_port,
-                    payload,
-                ),
-            };
-            let Some(count) = sent else {
+        let socket = &mut state.sockets[index];
+        if !socket.connected && !(u64::from(socket.kind) == SOCK_DGRAM && destination.is_some()) {
+            return None;
+        }
+        match (u64::from(socket.kind), u64::from(socket.protocol)) {
+            (SOCK_DGRAM, IPPROTO_UDP) => {
+                let endpoint = destination.unwrap_or_else(|| socket.remote_endpoint());
+                if endpoint.port == 0
+                    || !valid_remote(endpoint.address)
+                    || (socket.domain == AF_INET as u8)
+                        != matches!(endpoint.address, IpAddress::V4(_))
+                {
+                    return None;
+                }
+                let trace = UDP_DNS_TRACES.fetch_add(1, Ordering::AcqRel);
+                let query_id = payload
+                    .get(..2)
+                    .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+                    .unwrap_or(0);
+                let query_type = payload
+                    .get(payload.len().saturating_sub(4)..payload.len().saturating_sub(2))
+                    .filter(|_| payload.len() >= 4)
+                    .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+                    .unwrap_or(0);
                 if trace < 32 {
                     crate::serial_println!(
-                        "MAKOS_UDP_DNS_RESULT trace={} id={:#06x} qtype={} result=transport-failure",
+                        "MAKOS_UDP_DNS_SEND trace={} id={:#06x} qtype={} local={} remote={:?}:{} queued={}",
                         trace,
                         query_id,
                         query_type,
+                        socket.local_port,
+                        endpoint.address,
+                        endpoint.port,
+                        socket.udp_count,
                     );
                 }
-                return None;
-            };
-            if trace < 32 {
-                crate::serial_println!(
-                    "MAKOS_UDP_DNS_RESULT trace={} id={:#06x} qtype={} result=sent bytes={}",
-                    trace,
-                    query_id,
-                    query_type,
-                    count,
-                );
+                let sent = match endpoint.address {
+                    IpAddress::V4(remote_ip) => crate::aarch64_virtio_net::udp_send(
+                        remote_ip,
+                        endpoint.port,
+                        socket.local_port,
+                        payload,
+                    ),
+                    IpAddress::V6(remote_ip) => crate::aarch64_virtio_net::udp6_send(
+                        remote_ip,
+                        endpoint.port,
+                        socket.local_port,
+                        payload,
+                    ),
+                };
+                let Some(count) = sent else {
+                    if trace < 32 {
+                        crate::serial_println!(
+                            "MAKOS_UDP_DNS_RESULT trace={} id={:#06x} qtype={} result=transport-failure",
+                            trace,
+                            query_id,
+                            query_type,
+                        );
+                    }
+                    return None;
+                };
+                if trace < 32 {
+                    crate::serial_println!(
+                        "MAKOS_UDP_DNS_RESULT trace={} id={:#06x} qtype={} result=sent bytes={}",
+                        trace,
+                        query_id,
+                        query_type,
+                        count,
+                    );
+                }
+                Some(payload.len())
             }
-            Some(payload.len())
-        }
-        (SOCK_STREAM, IPPROTO_TCP) => {
-            if socket.domain == AF_INET as u8 {
+            (SOCK_STREAM, IPPROTO_TCP) if socket.domain == AF_INET as u8 => {
                 crate::aarch64_virtio_net::tcp_send(socket.tcp.as_mut()?, payload)
-            } else {
+            }
+            (SOCK_STREAM, IPPROTO_TCP) => {
                 crate::aarch64_virtio_net::tcp6_send(socket.tcp6.as_mut()?, payload)
             }
+            _ => None,
         }
-        _ => None,
-    }?;
-    store_snapshot(index, socket)?;
+    })?;
     crate::aarch64_process::wake_io_source(makos_readiness::WaitSource::Network(handle));
     Some(result)
 }
@@ -438,25 +437,29 @@ pub fn receive_from(handle: u64, output: &mut [u8]) -> Option<(usize, Endpoint)>
     if output.is_empty() {
         return None;
     }
-    let (index, mut socket) = with_state(|state| {
+    let result = with_state(|state| {
         let index = resolve_index(state, handle)?;
-        let socket = state.sockets[index];
-        (socket.connected || u64::from(socket.kind) == SOCK_DGRAM).then_some((index, socket))
-    })?;
-    if crate::aarch64_process::current_app_role() == crate::aarch64_process::ProcessRole::Firefox {
-        let trace = FIREFOX_SOCKET_RECEIVES.fetch_add(1, Ordering::AcqRel);
-        if trace < FIREFOX_SOCKET_TRACE_LIMIT {
-            crate::serial_println!(
-                "MAKOS_FIREFOX_SOCKET_RECEIVE trace={} handle={:#x} kind={} udp_queued={} tcp_bytes={}",
-                trace,
-                handle,
-                socket.kind,
-                socket.udp_count,
-                socket.tcp_length.saturating_sub(socket.tcp_offset),
-            );
+        let (sockets, responses) = (&mut state.sockets, &mut state.tcp_responses);
+        let socket = &mut sockets[index];
+        if !socket.connected && u64::from(socket.kind) != SOCK_DGRAM {
+            return None;
         }
-    }
-    let (count, endpoint) = match (u64::from(socket.kind), u64::from(socket.protocol)) {
+        if crate::aarch64_process::current_app_role()
+            == crate::aarch64_process::ProcessRole::Firefox
+        {
+            let trace = FIREFOX_SOCKET_RECEIVES.fetch_add(1, Ordering::AcqRel);
+            if trace < FIREFOX_SOCKET_TRACE_LIMIT {
+                crate::serial_println!(
+                    "MAKOS_FIREFOX_SOCKET_RECEIVE trace={} handle={:#x} kind={} udp_queued={} tcp_bytes={}",
+                    trace,
+                    handle,
+                    socket.kind,
+                    socket.udp_count,
+                    socket.tcp_length.saturating_sub(socket.tcp_offset),
+                );
+            }
+        }
+        match (u64::from(socket.kind), u64::from(socket.protocol)) {
         (SOCK_DGRAM, IPPROTO_UDP) => {
             if socket.udp_count == 0 {
                 return None;
@@ -487,31 +490,21 @@ pub fn receive_from(handle: u64, output: &mut [u8]) -> Option<(usize, Endpoint)>
             socket.udp_lengths[head] = 0;
             socket.udp_head = (head + 1) % UDP_QUEUE_DEPTH;
             socket.udp_count -= 1;
-            (
+            Some((
                 count,
                 Endpoint {
                     address: sender_ip,
                     port: sender_port,
                 },
-            )
+            ))
         }
         (SOCK_STREAM, IPPROTO_TCP) => {
             let available = socket.tcp_length.saturating_sub(socket.tcp_offset);
             if available != 0 {
                 let count = output.len().min(available);
-                with_state(|state| {
-                    let current = state.sockets.get(index)?;
-                    if !current.used
-                        || current.generation != socket.generation
-                        || current.owner_pid != crate::aarch64_process::current_pid()
-                    {
-                        return None;
-                    }
-                    output[..count].copy_from_slice(
-                        &state.tcp_responses[index][socket.tcp_offset..socket.tcp_offset + count],
-                    );
-                    Some(())
-                })?;
+                output[..count].copy_from_slice(
+                    &responses[index][socket.tcp_offset..socket.tcp_offset + count],
+                );
                 socket.tcp_offset += count;
                 if socket.tcp_offset == socket.tcp_length {
                     socket.tcp_offset = 0;
@@ -530,26 +523,19 @@ pub fn receive_from(handle: u64, output: &mut [u8]) -> Option<(usize, Endpoint)>
                         free,
                     );
                 }
-                (count, socket.remote_endpoint())
-            } else if socket.nonblocking {
-                return None;
-            } else if socket.domain == AF_INET6 as u8 {
-                (
-                    crate::aarch64_virtio_net::tcp6_receive(socket.tcp6.as_mut()?, output)?,
-                    socket.remote_endpoint(),
-                )
+                Some((count, socket.remote_endpoint()))
             } else {
-                (
-                    crate::aarch64_virtio_net::tcp_receive(socket.tcp.as_mut()?, output)?,
-                    socket.remote_endpoint(),
-                )
+                // Blocking is implemented by the syscall scheduler. CPU0's
+                // timer bottom half pumps RX and wakes this handle; no task
+                // polls a virtio ring while holding the socket table lock.
+                return None;
             }
         }
         _ => return None,
-    };
-    store_snapshot(index, socket)?;
+        }
+    })?;
     crate::aarch64_process::wake_io_source(makos_readiness::WaitSource::Network(handle));
-    Some((count, endpoint))
+    Some(result)
 }
 
 /// Bounded timer-bottom-half RX demultiplexing for UDP and TCP sockets.
@@ -1061,20 +1047,6 @@ pub fn poll_events(handle: u64, requested: u32) -> u32 {
         }
     }
     ready
-}
-
-fn store_snapshot(index: usize, socket: Socket) -> Option<()> {
-    with_state(|state| {
-        let current = state.sockets.get_mut(index)?;
-        if !current.used
-            || current.generation != socket.generation
-            || current.owner_pid != crate::aarch64_process::current_pid()
-        {
-            return None;
-        }
-        *current = socket;
-        Some(())
-    })
 }
 
 fn resolve_index(state: &State, handle: u64) -> Option<usize> {

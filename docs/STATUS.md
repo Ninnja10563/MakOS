@@ -70,9 +70,20 @@ Last updated: 2026-08-25.
   frame balance. One intervening run completed the entire network fixture but
   later missed the independently injected Ctrl-K and hit the unchanged input
   completion timeout; the immediate unchanged repeat passed. Low-level TX now
-  fails closed off CPU0, copied UDPv4/v6 is qualified, and stateful AP TCP TX
-  remains fail-closed and pending. The AP UDP completion wait is a bounded EL1
-  `WFE` loop, not a scheduler-idle proof.
+  fails closed off CPU0 and copied UDPv4/v6 is qualified. The AP UDP completion
+  wait is a bounded EL1 `WFE` loop, not a scheduler-idle proof.
+  A separate opt-in TCPv4 fixture now has AP1 create a real socket, connect to
+  QEMU slirp host `10.0.2.2:18080`, send exact `MAKOS_AP_TCP_TX\n`, block in
+  receive, verify exact `MAKOS_CPU0_TCP_RX\n`, and close with FIN. Connect and
+  segment requests copy immutable state through the same bounded service queue;
+  CPU0 alone resolves the route and mutates the virtio-net rings, while socket
+  state is published under the socket-table lock. A delayed host reply proves
+  AP1 returns to its idle dispatcher and is resumed after CPU0 drains RX and
+  sends the wake SGI. Pi/QEMU 10.0.11 TCG passes status 69/70, exact request and
+  response, one owner RX frame/AP deferral, four owner completions/four AP
+  requests (connect, data, ACK, FIN), I/O idle/resume masks `0x2`, and exact
+  frame balance. TCPv6 retains structural service support but has no equivalent
+  guest runtime proof yet.
   A ninth fixture creates a private mode-0600 uid/gid-1000 inode and gives its
   immutable AP1 probe the minimum file-write capability before login. Through
   normal VFS/MakFS4 calls, AP1 writes and `fsync`s 4 KiB, closes, reopens, reads
@@ -106,9 +117,9 @@ Last updated: 2026-08-25.
   block/network/input/boot regression evidence.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending stateful TCP TX, migration, and load
-  balancing, so the scheduler audit row remains Partial and still reports one
-  desktop scheduler CPU.
+  scheduling remains gated pending forced migration and load balancing, so the
+  scheduler audit row remains Partial and still reports one desktop scheduler
+  CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment
@@ -144,6 +155,11 @@ Last updated: 2026-08-25.
   unsuitable for performance qualification: load 7.66, 163 MiB free, 6.6 GiB
   compressed, multiple browser/WindowServer cores busy. Thresholds remain
   unchanged; rerun on an idle host before calling latest Gate 3 green.
+  An idle Raspberry Pi retry of the unchanged Make target stopped at preflight
+  before QEMU launch because the exact integrated image
+  `build/makos-integrated-a9c604254f094de2.img` and staged Firefox package are
+  not present on this development host. No release asset supplies that artifact.
+  This is neither a Firefox runtime result nor macOS/HVF performance evidence.
 - 2026-08-25 AArch64 installer now shares the fail-closed installer core with
   x86 and supports exact `install disk1 resume-disk1`. Full HVF gate SIGKILLs
   QEMU after first verified payload progress. Installer serializes a source
@@ -501,13 +517,15 @@ Last updated: 2026-08-25.
 - Scheduling: preemptive kernel/user tasks and event block/wake work on BSP.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
-  state are CPU-indexed; multicore userspace still needs AP run queues,
-  stateful TCP service qualification, forced migration, and load balancing
-  before the desktop gate can open. CPU0-only virtio input, virtio-net TX/RX,
+  state are CPU-indexed; multicore userspace still needs general AP run queues,
+  forced migration, and load balancing before the desktop gate can open.
+  CPU0-only virtio input, virtio-net TX/RX,
   virtio-blk, and virtio-GPU submission now have focused AP runtime evidence
   for keyboard wake, copied UDPv4 DNS send/receive, timer-serviced 4 KiB
   filesystem read/write plus `fsync`/FLUSH, and deferred retained-surface
-  transfer/resource-flush completion.
+  transfer/resource-flush completion. A separate TCPv4 gate now proves an AP
+  connect/send/blocking-receive/FIN lifecycle with CPU0-owned TX/RX and exact
+  I/O idle/wake/resume.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID
@@ -555,8 +573,11 @@ Last updated: 2026-08-25.
   Offline wire tests and kernel/static/shared-libc builds pass; constrained
   IPv6 guest proof is pending. AArch64 confines low-level virtio-net TX/RX to
   CPU0; AP UDPv4/v6 sends use a bounded copied-request queue, with a real AP1
-  UDPv4 DNS transaction qualified under Pi/TCG. Stateful AP TCP TX is
-  fail-closed pending an owner-service design. AArch64 uses bounded asynchronous
+  UDPv4 DNS transaction qualified under Pi/TCG. Stateful AP TCPv4 connect,
+  segment send, ACK/window update, receive, and FIN now use copied owner-service
+  requests and pass an exact AP1/CPU0-host exchange under Pi/TCG. TCPv6 has the
+  same copied service structure but still lacks guest runtime qualification.
+  AArch64 uses bounded asynchronous
   TCP RX, timer-bottom-half packet ingestion, and poll/epoll wake; no
   listen/accept, DAD, IPv6 extension headers/scoped link-local socket API,
   broad options, routing policy/firewall, or device-IRQ RX mode.
@@ -712,8 +733,11 @@ Last updated: 2026-08-25.
   The next focused Pi/TCG run added AP1 native surface create/fill/present and
   passed one CPU0 deferred composition, two real virtio-GPU submissions, one
   transfer, one resource flush, exact surface/frame cleanup, all existing
-  device phases, and boot. A fresh normal-config visible QEMU then reached and
-  visibly captured the 800x600 native login dialog.
+  device phases, and boot. The later dedicated TCPv4 gate passed an exact AP1
+  connect/send/receive/FIN lifecycle through a delayed host fixture, including
+  four copied owner completions and I/O idle/resume masks `0x2`. A fresh
+  normal-config visible QEMU then reached and visibly captured the 800x600
+  native login dialog.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,

@@ -109,10 +109,31 @@ wakes the exact network wait source, and sends the scheduler SGI. Low-level TX,
 RX, and socket-pump entry points fail closed on the wrong CPU. Runtime requires
 a validated DNS response, nonzero CPU0 TX completions, AP TX requests, CPU0 RX
 frames and AP RX deferrals, `io_idle_mask=0x2`/`io_resume_mask=0x2`, status 63,
-and exact frame balance. This qualifies copied UDPv4/v6 TX; stateful AP TCP TX
-remains fail-closed and unqualified. The AP waits for its UDP completion in a
-bounded EL1 `WFE` loop, so only the following receive phase proves scheduler
+and exact frame balance. This qualifies copied UDPv4/v6 TX; stateful AP TCPv4
+is qualified separately below. The AP waits for its UDP completion in a bounded
+EL1 `WFE` loop, so only the following receive phase proves scheduler
 block/idle/wake behavior.
+
+A dedicated image armed by `test.smp-tcp=required` qualifies stateful TCPv4.
+AP1 creates a socket, connects through QEMU slirp to `10.0.2.2:18080`, sends
+exact `MAKOS_AP_TCP_TX\n`, receives exact `MAKOS_CPU0_TCP_RX\n`, and closes.
+Connect and segment operations copy remote addresses, sequence/acknowledgement
+state, flags, window and payload through the eight-slot owner queue. CPU0 alone
+resolves the route, performs SYN/SYN-ACK/ACK, submits data/ACK/FIN and drains
+RX. Socket send/receive mutate the live table entry under its lock, so an AP
+never publishes an obsolete whole-socket snapshot over CPU0 receive state.
+The host fixture delays its reply by 0.5 seconds: AP1 must return from the real
+blocking receive to its idle dispatcher before CPU0's timer pump ingests the
+frame and sends its scheduler SGI. Pi/QEMU 10.0.11 TCG requires exact statuses
+69/70, request/response bytes, one owner RX frame and AP deferral, four AP
+requests/four owner completions (connect, data, ACK, FIN),
+`io_idle_mask=0x2`/`io_resume_mask=0x2`, and exact frame balance. TCPv6 uses the
+same copied service structure but still requires a focused guest runtime.
+
+The scheduler fixture forces its fixed-affinity SmpProbe AP through the normal
+Blocked-to-idle path even when host-vCPU ordering would otherwise make it the
+last runnable task and take the EL1 WFI shortcut. This is confined to the
+opt-in boot probe; production last-runnable behavior is unchanged.
 
 A ninth opt-in fixture qualifies the production virtio-blk owner service. The
 kernel creates a private mode-0600 uid/gid-1000 fixture inode and binds the
@@ -175,11 +196,14 @@ safe general process migration.
   servicing pass the bounded probe. Virtio input now has exclusive CPU0 MMIO
   ownership plus measured AP deferral. Virtio-net now has CPU0-only low-level
   TX/RX ownership, copied AP UDPv4/v6 service, and a real AP DNS receive wake.
-  Virtio-blk now has CPU0-only ring submission and a production timer-bottom-
+  Stateful TCPv4 now has copied CPU0-owned connect, segment, ACK and FIN service
+  plus a real AP blocking-receive/SGI-wake proof. Virtio-blk now has CPU0-only
+  ring submission and a production timer-bottom-
   half service proof for real AP 4 KiB reads, 4 KiB writes, and `fsync`/FLUSH
   through VFS/MakFS4. Virtio-GPU now has CPU0-only low-level submission and a
   production timer-bottom-half proof for composition requested through the AP
-  native surface ABI. Stateful AP TCP TX remains to be qualified.
+  native surface ABI. TCPv6 and general migration/load balancing remain to be
+  qualified.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -217,8 +241,8 @@ a GICv2 SGI only after publishing its enabled state.
      would make wall time advance fourfold.
    - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net low-level
      TX/RX ring service are explicitly CPU0-owned and guarded against AP entry.
-     AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX remains
-     pending equivalent qualification. Virtio-blk ring submission is also
+     AP UDPv4/v6 and TCPv4 use bounded copied-request services; TCPv6 still
+     needs equivalent guest runtime qualification. Virtio-blk ring submission is also
      CPU0-only through a bounded copied-request service. CPU0's timer bottom
      half passes real AP VFS/MakFS4 read, write, and FLUSH traffic, while
      recursively interrupted CPU0 ownership defers one tick. Retained graphics
