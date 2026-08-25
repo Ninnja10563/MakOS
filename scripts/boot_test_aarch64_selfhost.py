@@ -29,8 +29,8 @@ LINKER_MARKER = (
     b"cache=makstate-v2 cache_hits=0 cache_misses=4 state_committed=1 "
     b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c translation_unit_functions=2,1,1 "
     b"c_abi=aapcs64-int32-pointer64 "
-    b"c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
-    b"max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
+    b"c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+    b"max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 three_argument_result=42 three_argument_link=et-rel,same-object six_argument_result=42 six_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
     b"loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
     b"pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
     b"code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
@@ -87,6 +87,12 @@ SIX_FUNCTION_MARKER = (
     b"relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
     b"result=42 max_functions=6 overflow=7-denied"
 )
+SIX_ARGUMENT_MARKER = (
+    b"MAKOS_AARCH64_C_SIX_ARGUMENT_OK parameters=6 call_arguments=6 "
+    b"registers=x0-x5 callee_saved=x23-x28 frame=112 "
+    b"object=elf64-et-rel:808 relocation=R_AARCH64_CALL26 "
+    b"direct_result=42 same_object_call_result=42 overflow=7-denied"
+)
 EXECUTION_MARKER = (
     b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=4 "
     b"languages=aarch64-asm,c-subset-v1 compiler=guest-native "
@@ -98,8 +104,8 @@ EXECUTION_MARKER = (
     b"toolchain_startup=sysv manifest_arg=1 "
     b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c "
     b"translation_unit_functions=2,1,1 c_abi=aapcs64-int32-pointer64 "
-    b"c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
-    b"max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
+    b"c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+    b"max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 three_argument_result=42 three_argument_link=et-rel,same-object six_argument_result=42 six_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
     b"loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
     b"pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
     b"code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
@@ -233,6 +239,9 @@ def main() -> int:
                     selector, process, output, SIX_FUNCTION_MARKER, 60
                 )
                 common.wait_for_output(
+                    selector, process, output, SIX_ARGUMENT_MARKER, 60
+                )
+                common.wait_for_output(
                     selector, process, output, LINKER_MARKER, 60
                 )
                 common.wait_for_output(
@@ -363,8 +372,8 @@ def main() -> int:
         "translation_unit_functions=2,1,1 "
         "max_functions_per_unit=6 six_function_calls=5 six_function_result=42 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
-        "max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
+        "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+        "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 three_argument_result=42 three_argument_link=et-rel,same-object six_argument_result=42 six_argument_link=et-rel,same-object six_argument_object=elf64-et-rel:808 c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "

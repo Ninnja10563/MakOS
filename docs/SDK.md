@@ -67,7 +67,7 @@ See `docs/SYSCALLS.md`.
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
 normal VFS. Its C subset accepts up to six `int` functions in one translation
-unit, each with up to three typed `int`/`int *` parameters. Integer parameters
+unit, each with up to six typed `int`/`int *` parameters. Integer parameters
 may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
 locals, unsigned 16-bit constants, parentheses, unary plus/minus,
@@ -75,7 +75,7 @@ multiplication, signed division/remainder, addition and subtraction, assign
 expressions to declared integer locals, contain
 signed `==`, `!=`, `<`, `<=`, `>`, or `>=` conditions in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
-one through three arguments. A pointer local may be initialized from `&local` or from
+one through six arguments. A pointer local may be initialized from `&local` or from
 `pointer-or-array + constant-or-scalar`, and either form may cross the external-call
 boundary. `*pointer` performs a 32-bit load and `*pointer = expression` a 32-bit
 store through a pointer local or pointer parameter; parenthesized
@@ -97,12 +97,14 @@ within the same four-slot frame budget. The compiler supports constant indexed
 loads/stores and rejects indices outside a known local array; passing a bare
 array to the bounded external call decays it to its 64-bit stack address, and
 `array + constant` passes the scaled derived address.
-It emits AAPCS64 32-bit `int` code, passing up to three arguments in `x0`
-through `x2` (`w0` through `w2` for integers), with
+It emits AAPCS64 32-bit `int` code, passing up to six arguments in `x0`
+through `x5` (`w0` through `w5` for integers), with
 validated forward conditional and signed backward branch fixups
 and a 96-byte non-leaf FP/LR/x19-x24 frame containing four bounded local slots.
 Three-parameter functions additionally preserve `x25` in an aligned unused
-frame slot, while smaller functions retain their prior byte layout. It wraps
+frame slot. Four- through six-parameter functions use a 112-byte frame and
+preserve `x25` through `x28`, while smaller functions retain their prior byte
+layout. It wraps
 the result in a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. Multiple definitions carry distinct `.text` offsets and sizes;
@@ -119,6 +121,9 @@ library fails closed. A separate source emits `sum3(int,int,int)` and its
 three-argument caller `invoke3(int)` as 140 code bytes in a 752-byte object;
 the linker resolves the internal `CALL26`, selects entry offset 80, and both
 functions execute as 42 from RX memory.
+A separate 196-byte `sum6`/`invoke6` unit emits a parsed 808-byte object,
+resolves its same-object `CALL26`, directly executes all six parameter
+registers, and executes its six-argument caller as 42 from RX memory.
 A separate three-definition arithmetic unit emits 168 code bytes in a
 784-byte object and directly executes signed division results `6`/`-6`, signed
 remainders `2`/`-2`, and unary-negation results `-42`/`42`.
@@ -137,7 +142,7 @@ EL0 toolchain with `argv[1]` naming the manifest. `MODE=build` consumes existing
 MakFS files and does not seed or overwrite source/manifest inputs;
 `selfhost-aarch64` alone requests the deterministic `MODE=fixture` seeding path.
 Unsupported tokens and direct literal-zero division/remainder, duplicate
-parameter names, more than three parameters or
+parameter names, more than six parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
@@ -176,7 +181,7 @@ This seed has no general pointer arithmetic beyond constant/scalar-variable
 element addition and typed pointer difference, no pointer-provenance analysis
 or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
-nested/general blocks, more than six functions per translation unit,
+nested/general blocks, more than six functions or parameters per translation unit,
 more than six objects, aggregate linked code beyond 512 bytes, general
 relocations, preprocessing, optimization,
 archives, dynamic linking, transitive dependency/header discovery, variable

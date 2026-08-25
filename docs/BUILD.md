@@ -147,13 +147,13 @@ a distinct absolute output path, and one valid entry symbol. The parsed paths
 drive all source reads, object writes/reopens, entry-symbol emission/selection,
 and the final executable write. Bad version, relative path, colliding paths,
 and missing-link manifests fail closed before compilation. A bounded C
-translation unit accepts up to six `int` functions, each with up to three typed
+translation unit accepts up to six `int` functions, each with up to six typed
 `int`/`int *` parameters, 0..65535 constants,
 parentheses, unary `+`/`-`, and precedence-correct `*`, signed `/`/`%`, `+`,
 and `-`, up to four register locals,
 mutable parameter/local assignments, signed `==`, `!=`, `<`, `<=`, `>`, and
 `>=` comparisons, one conditional `if` block containing a return, a bounded `while` body containing one
-or more assignments, a one- through three-argument function call, and bounded pointer
+or more assignments, a one- through six-argument function call, and bounded pointer
 initializers from `&local` or `pointer-or-array + constant-or-scalar`. Address and pointer
 expressions may be passed to the bounded external call. Dereference expressions
 load a 32-bit `int` through a pointer local or pointer parameter;
@@ -178,12 +178,13 @@ bounded to 0..3 and known local-array indices are checked against the declared
 length. Indexed expressions and assignments emit scaled 32-bit loads/stores;
 a bare array call argument decays to its 64-bit stack address; an accepted
 `array + constant` call argument passes the scaled derived address. Arguments
-occupy AAPCS64 `x0` through `x2`, using the `w` view for `int` values.
+occupy AAPCS64 `x0` through `x5`, using the `w` view for `int` values.
 A final unconditional return is required so every accepted path returns.
 Non-leaf functions preserve FP/LR and x19-x24 in a 96-byte AAPCS64 frame with
 four bounded 32-bit local slots. A three-parameter function additionally saves
-and restores `x25` in the frame's aligned unused slot; one- and two-parameter
-code remains byte-for-byte unchanged. The
+and restores `x25` in the frame's aligned unused slot. Four- through
+six-parameter functions use a 112-byte frame and save/restore `x25` through
+`x28`; one- and two-parameter code remains byte-for-byte unchanged. The
 current `answer` initializes `values[3]` with `(value * 3) - 20`, 40, and zero,
 then calls `adjust(values + 1, 1)` when element zero is at least 40; otherwise it
 returns 86. `adjust(int *pointer, int delta)` accepts its pointer in AAPCS64
@@ -216,7 +217,13 @@ compiles `sum3(int,int,int)` plus `invoke3(int)`, preserves the third parameter
 from `x2` in `x25`, emits 140 code bytes in a 752-byte ELF64 `ET_REL`, resolves
 the same-object `invoke3`→`sum3` `R_AARCH64_CALL26` relocation, links with entry
 offset 80, and executes both `sum3(40,1,1)` and `invoke3(40)` as 42 from RX
-memory. A separate three-definition arithmetic unit emits 168 code bytes in a
+memory. A separate `sum6`/`invoke6` unit exercises all six integer argument
+registers `x0` through `x5`. The six-parameter callee preserves its inputs in
+`x23` through `x28`, uses a 112-byte frame with explicit save/restore pairs,
+emits 196 code bytes in a parsed 808-byte ELF64 `ET_REL`, resolves its
+same-object `R_AARCH64_CALL26`, and executes direct `sum6(10,5,6,7,8,6)` plus
+`invoke6(37)` as 42 from RX memory. Seven-parameter and seven-argument sources
+fail closed. A separate three-definition arithmetic unit emits 168 code bytes in a
 784-byte parsed ELF64 `ET_REL`, links it with entry offset zero, and executes
 positive and negative division (`6`/`-6`), remainder (`2`/`-2`), and negation
 (`-42`/`42`) from RX memory. A separate six-definition unit forms a call chain
@@ -234,7 +241,7 @@ undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
 unproved variable offset from a known-bounded local array, pointer-minus-scalar,
-duplicate functions/parameters, a seventh function, and more than three parameters or call arguments
+duplicate functions/parameters, a seventh function, and more than six parameters or call arguments
 are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
@@ -252,7 +259,7 @@ has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
-blocks, more than six functions per translation unit, general object
+blocks, more than six functions or parameters per translation unit, general object
 count/relocation repertoire, transitive dependency/header discovery, or
 unbounded input graphs. The
 authenticated shell command `makbuild <manifest>` accepts either a name under

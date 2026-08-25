@@ -27,6 +27,17 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The sandboxed AArch64 guest-native C compiler now accepts six typed
+  parameters and six call arguments through AAPCS64 `x0`-`x5`. A separate
+  `sum6`/`invoke6` unit emits 196 code bytes in a parsed 808-byte ELF64
+  `ET_REL`, validates its same-object `R_AARCH64_CALL26`, links at entry offset
+  124, enforces writable/NX then RX, and executes both direct and caller paths
+  as 42. Four- through six-parameter functions use a 112-byte frame that
+  saves/restores `x25`-`x28`; existing smaller layouts remain stable. Seven
+  parameters or arguments fail closed. Focused Pi/QEMU 10.0.11 TCG runtime,
+  release/artifact validation, full `make unit check`, unchanged Firefox-role
+  and Native SMP regressions, and cursor runtime pass. This advances but does
+  not complete the Partial SDK/self-hosting rows.
 - The sandboxed AArch64 guest-native C compiler now accepts six function
   definitions per translation unit and up to eight bounded call relocations.
   A separate `stage1`..`stage6` source produces five genuine same-object
@@ -35,7 +46,7 @@ Preserve existing files and changes.
   definitions fail closed. Focused Pi/QEMU 10.0.11 TCG self-host runtime,
   structural guard, release/image artifacts, unchanged Firefox-role
   production SMP, Native SMP, and cursor regressions pass. Self-hosting remains
-  Partial: parameters are capped at three, build graphs at six objects, linked
+  Partial: parameters are capped at six, build graphs at six objects, linked
   code at 512 bytes, and no substantial in-guest MakOS build exists.
 - AArch64 post-desktop production SMP now admits non-leader ordinary Native
   application workers as well as Firefox-role workers to AP1-3. Leaders,
@@ -49,15 +60,15 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG self-hosting milestone: PID 710770,
-  user service `makos-visible-selfhost-six-function-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG self-hosting milestone: PID 721926,
+  user service `makos-visible-selfhost-six-argument-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv`, private read-only boot
+  `build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
   `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and captures
   `login.ppm`/`login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `77b56e1ec6a4da109056b332c187229415aa5d2387484ad96bd1b031e33ddb67`.
+  `12004f3df4d6bbed71c69004fd08d084149f0aa2341925aa7ffc540e1452100e`.
   It is the sole QEMU process and reports four online PEs,
   the GICv2 network route (INTID 76), both input routes (INTIDs 77/78),
   `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
@@ -66,7 +77,10 @@ Preserve existing files and changes.
   800x600 login PNG has SHA-256
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 699985 and
+  testing; use QMP `quit` before any later runtime gate. Prior PID 710770 and
+  session `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv` were
+  stopped cleanly through QMP before the six-argument self-host work; their
+  files remain. Prior PID 699985 and
   session `build/makos-pi-visible-native-smp-final3-54Bfbyox` were stopped
   cleanly through QMP before the six-function self-host runtime; their files
   remain. Prior PID 668793/session
@@ -433,10 +447,11 @@ Preserve existing files and changes.
   signed equality/inequality and `<`/`<=`/`>`/`>=` comparisons, a signed backward-branch assignment-only
   `while`, bounded `int *pointer = &local`, fixed local `int` arrays with exact
   initializers, checked constant indexing, array decay, bounded constant or
-  scalar-variable element pointer addition, plus up to three independently typed `int`/`int *`
-  parameters and call arguments. AAPCS64 carries them in `x0` through `x2`
-  (`w0` through `w2` for integers) and preserves them in x23 through x25. The
-  x25 stack save/restore is emitted only for three-parameter functions, so
+  scalar-variable element pointer addition, plus up to six independently typed `int`/`int *`
+  parameters and call arguments. AAPCS64 carries them in `x0` through `x5`
+  (`w0` through `w5` for integers) and preserves them in x23 through x28. The
+  x25 stack save/restore is emitted only for three-parameter functions; four
+  through six parameters use a 112-byte frame with paired x25-x28 saves, so
   existing one- and two-parameter code sizes remain exact. Unary `+`/`-` and
   precedence-correct signed `/`/`%` now join multiplication/addition/subtraction;
   division emits 32-bit `SDIV`, remainder uses `SDIV` plus `MSUB`, and direct
@@ -464,6 +479,10 @@ Preserve existing files and changes.
   unit emits 140 code bytes in a 752-byte ELF64 `ET_REL`, resolves a same-object
   `R_AARCH64_CALL26` with entry offset 80, and executes both
   `sum3(40,1,1)` and `invoke3(40)` as 42 from RX memory. A separate
+  `sum6`/`invoke6` translation unit emits 196 code bytes in an 808-byte parsed
+  ELF64 `ET_REL`, resolves its same-object call at offset 172, selects entry
+  offset 124, and executes both `sum6(10,5,6,7,8,6)` and `invoke6(37)` as 42.
+  A separate
   three-definition arithmetic unit emits 168 code bytes in a parsed 784-byte
   `ET_REL` and executes positive/negative division `6`/`-6`, remainder
   `2`/`-2`, and negation `-42`/`42` from RX memory. The fully linked C graph
@@ -474,7 +493,7 @@ Preserve existing files and changes.
   normal loader executes the final ELF twice with status 42. The adjust
   outcomes require real stack address formation and dereference memory writes.
   Unsupported bitwise syntax, direct literal-zero division/remainder, duplicate
-  parameter names, more than three parameters or
+  parameter names, more than six parameters or
   call arguments, missing all-path return, undefined-variable assignment/address target, pointer reassignment,
   pointer/address-as-`int` return, a known two-element array indexed at two, a known
   two-element array advanced by two or an unproved variable amount,
@@ -488,7 +507,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 710770 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 721926 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
@@ -660,8 +679,8 @@ Preserve existing files and changes.
    automatic load balancing and repeated migration contention while retaining
    CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
    any focused runtime.
-3. Expand the bounded guest C compiler beyond its current six-function per
-   translation-unit and three-parameter limits. The primary runtime graph now
+3. Expand the bounded guest C compiler beyond its current six-function and
+   six-parameter per-translation-unit limits. The primary runtime graph now
    spans four objects (with one same-object call, two cross-object calls, and
    one independent helper) and the build driver accepts two through six
    inputs. Continue beyond signed typed-pointer arithmetic into

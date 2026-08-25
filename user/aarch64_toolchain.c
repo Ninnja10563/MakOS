@@ -478,8 +478,8 @@ static size_t assemble(const char *source, size_t source_length,
  * indexing, constant- or scalar-variable-element pointer addition in pointer
  * initializers/calls and parenthesized dereferences, typed pointer subtraction
  * in int elements, signed relational conditions, and a bounded call with up
- * to three arguments and array-to-pointer decay.  Functions take up to three
- * typed integer or pointer parameters in AAPCS64 x0-x2.  The output follows AAPCS64,
+ * to six arguments and array-to-pointer decay.  Functions take up to six
+ * typed integer or pointer parameters in AAPCS64 x0-x5.  The output follows AAPCS64,
  * including a non-leaf save frame, and is wrapped in a genuine ELF64 ET_REL
  * object by emit_object(). A translation unit may contain up to six function
  * definitions and eight call relocations. Unsupported syntax fails closed.
@@ -488,7 +488,7 @@ enum {
     MAX_C_LOCALS = 4,
     MAX_C_STACK_SLOTS = 4,
     MAX_C_FUNCTIONS = 6,
-    MAX_C_PARAMETERS = 3,
+    MAX_C_PARAMETERS = 6,
 };
 
 struct c_definition {
@@ -872,12 +872,13 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
             *compiler->relocation_count == MAX_RELOCATIONS)
             return 0;
         ++compiler->cursor;
-        if (!c_call_argument(compiler, 0)) return 0;
-        if (c_punct(compiler, ',')) {
-            if (!c_call_argument(compiler, 1)) return 0;
-            if (c_punct(compiler, ',')) {
-                if (!c_call_argument(compiler, 2)) return 0;
-            }
+        size_t argument_count = 0;
+        for (;;) {
+            if (argument_count == MAX_C_PARAMETERS ||
+                !c_call_argument(compiler, (uint32_t)argument_count))
+                return 0;
+            ++argument_count;
+            if (!c_punct(compiler, ',')) break;
         }
         if (!c_punct(compiler, ')')) return 0;
         struct relocation *relocation =
@@ -1060,7 +1061,15 @@ static int c_condition(struct c_compiler *compiler,
 }
 
 static int c_epilogue(struct c_compiler *compiler) {
-    return (compiler->parameter_count < 3 ||
+    if (compiler->parameter_count > 3)
+        return c_emit(compiler, UINT32_C(0xa94673fb)) &&
+               c_emit(compiler, UINT32_C(0xa9456bf9)) &&
+               c_emit(compiler, UINT32_C(0xa94363f7)) &&
+               c_emit(compiler, UINT32_C(0xa9425bf5)) &&
+               c_emit(compiler, UINT32_C(0xa94153f3)) &&
+               c_emit(compiler, UINT32_C(0xa8c77bfd)) &&
+               c_emit(compiler, UINT32_C(0xd65f03c0));
+    return (compiler->parameter_count != 3 ||
             c_emit(compiler, UINT32_C(0xf9402bf9))) &&
            c_emit(compiler, UINT32_C(0xa94363f7)) &&
            c_emit(compiler, UINT32_C(0xa9425bf5)) &&
@@ -1319,12 +1328,17 @@ static int c_compile_function(struct c_compiler *compiler,
         if (!c_punct(compiler, ',')) break;
     }
     if (!c_punct(compiler, ')') || !c_punct(compiler, '{')) return 0;
-    /* Preserve FP/LR and x19-x25; reserve four 32-bit local stack slots. */
-    if (!c_emit(compiler, UINT32_C(0xa9ba7bfd)) ||
+    /* Preserve FP/LR and x19-x28; reserve four 32-bit local stack slots. */
+    if (!c_emit(compiler, compiler->parameter_count > 3
+                              ? UINT32_C(0xa9b97bfd)
+                              : UINT32_C(0xa9ba7bfd)) ||
         !c_emit(compiler, UINT32_C(0x910003fd)) ||
         !c_emit(compiler, UINT32_C(0xa90153f3)) ||
         !c_emit(compiler, UINT32_C(0xa9025bf5)) ||
         !c_emit(compiler, UINT32_C(0xa90363f7)) ||
+        (compiler->parameter_count > 3 &&
+         (!c_emit(compiler, UINT32_C(0xa9056bf9)) ||
+          !c_emit(compiler, UINT32_C(0xa90673fb)))) ||
         (compiler->parameter_count == 3 &&
          !c_emit(compiler, UINT32_C(0xf9002bf9))))
         return 0;
@@ -2351,15 +2365,22 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char malformed_duplicate_parameter_source[] =
         "int adjust(int value, int value) { return value; }\n";
     static const char malformed_too_many_parameters_source[] =
-        "int adjust(int first, int second, int third, int fourth) { return first; }\n";
+        "int adjust(int first, int second, int third, int fourth, int fifth, int sixth, int seventh) { return first; }\n";
     static const char malformed_too_many_arguments_source[] =
-        "int answer(int value) { return adjust(value, value, value, value); }\n";
+        "int answer(int value) { return adjust(value, value, value, value, value, value, value); }\n";
     static const char three_argument_source[] =
         "int sum3(int first, int second, int third) {\n"
         "    return first + second + third;\n"
         "}\n"
         "int invoke3(int value) {\n"
         "    return sum3(value, 1, 1);\n"
+        "}\n";
+    static const char six_argument_source[] =
+        "int sum6(int first, int second, int third, int fourth, int fifth, int sixth) {\n"
+        "    return first + second + third + fourth + fifth + sixth;\n"
+        "}\n"
+        "int invoke6(int value) {\n"
+        "    return sum6(value, 1, 1, 1, 1, 1);\n"
         "}\n";
     static const char signed_arithmetic_source[] =
         "int divide(int value) { return value / 3; }\n"
@@ -2389,8 +2410,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=4 cache=makstate-v2 cache_hits=0 cache_misses=4 state_committed=1 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c translation_unit_functions=2,1,1 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
-        "max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
+        "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+        "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 three_argument_result=42 three_argument_link=et-rel,same-object six_argument_result=42 six_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 linked_bytes=500 output_bytes=815 helper_result=42 "
@@ -2751,6 +2772,66 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     if (three_argument_linked_length != 140 || three_argument_entry != 80)
         fail(88);
 
+    uint8_t six_argument_code[256] = {0};
+    struct c_definition six_argument_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t six_argument_definition_count = 0;
+    struct relocation six_argument_relocations[MAX_RELOCATIONS] = {0};
+    size_t six_argument_relocation_count = 0;
+    size_t six_argument_code_length = compile_c_unit(
+        six_argument_source, sizeof(six_argument_source) - 1,
+        six_argument_code, sizeof(six_argument_code),
+        six_argument_definitions, &six_argument_definition_count,
+        six_argument_relocations, &six_argument_relocation_count);
+    if (six_argument_code_length != 196 ||
+        six_argument_definition_count != 2 ||
+        !same_name(six_argument_definitions[0].name,
+                   six_argument_definitions[0].length, "sum6", 4) ||
+        six_argument_definitions[0].offset != 0 ||
+        six_argument_definitions[0].size != 124 ||
+        !same_name(six_argument_definitions[1].name,
+                   six_argument_definitions[1].length, "invoke6", 7) ||
+        six_argument_definitions[1].offset != 124 ||
+        six_argument_definitions[1].size != 72 ||
+        six_argument_relocation_count != 1 ||
+        six_argument_relocations[0].offset != 172 ||
+        !same_name(six_argument_relocations[0].name,
+                   six_argument_relocations[0].length, "sum6", 4))
+        fail(82);
+    if (get32(six_argument_code, 0) != UINT32_C(0xa9b97bfd) ||
+        get32(six_argument_code, 20) != UINT32_C(0xa9056bf9) ||
+        get32(six_argument_code, 24) != UINT32_C(0xa90673fb) ||
+        get32(six_argument_code, 96) != UINT32_C(0xa94673fb) ||
+        get32(six_argument_code, 100) != UINT32_C(0xa9456bf9) ||
+        get32(six_argument_code, 120) != UINT32_C(0xd65f03c0))
+        fail(82);
+    uint8_t six_argument_object[OBJECT_CAPACITY] = {0};
+    size_t six_argument_object_length = emit_object_definitions(
+        six_argument_object, six_argument_code, six_argument_code_length,
+        six_argument_definitions, six_argument_definition_count,
+        six_argument_relocations, six_argument_relocation_count);
+    struct object_view six_argument_view;
+    if (six_argument_object_length != 808 ||
+        !parse_object(six_argument_object, six_argument_object_length,
+                      &six_argument_view) ||
+        six_argument_view.text_length != 196 ||
+        six_argument_view.rela_count != 1 ||
+        six_argument_view.symbol_count != 3)
+        fail(85);
+    const uint8_t *six_argument_objects[MAX_LINK_OBJECTS] = {
+        six_argument_object,
+    };
+    size_t six_argument_object_lengths[MAX_LINK_OBJECTS] = {
+        six_argument_object_length,
+    };
+    uint8_t six_argument_linked[256] = {0};
+    size_t six_argument_entry = 0;
+    size_t six_argument_linked_length = link_objects(
+        six_argument_objects, six_argument_object_lengths, 1,
+        six_argument_linked, sizeof(six_argument_linked), "invoke6",
+        &six_argument_entry);
+    if (six_argument_linked_length != 196 || six_argument_entry != 124)
+        fail(88);
+
     uint8_t signed_arithmetic_code[192] = {0};
     struct c_definition signed_arithmetic_definitions[MAX_C_FUNCTIONS] = {0};
     size_t signed_arithmetic_definition_count = 0;
@@ -2928,6 +3009,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                three_argument_linked_length);
     copy_bytes(relational_jit + 768, signed_arithmetic_linked,
                signed_arithmetic_linked_length);
+    copy_bytes(relational_jit + 1024, six_argument_linked,
+               six_argument_linked_length);
     if (!greater_length || greater_length > 128 ||
         !at_most_length || at_most_length > 128 ||
         !previous_length || previous_length > 128 ||
@@ -2951,6 +3034,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     uint64_t (*compiled_invoke3)(uint64_t) =
         (uint64_t (*)(uint64_t))(uintptr_t)
             (relational_jit + 512 + three_argument_entry);
+    uint64_t (*compiled_sum6)(uint64_t, uint64_t, uint64_t, uint64_t,
+                              uint64_t, uint64_t) =
+        (uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
+                      uint64_t))(uintptr_t)(relational_jit + 1024);
+    uint64_t (*compiled_invoke6)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)
+            (relational_jit + 1024 + six_argument_entry);
     uint64_t (*compiled_divide)(uint64_t) =
         (uint64_t (*)(uint64_t))(uintptr_t)(relational_jit + 768);
     uint64_t (*compiled_remainder)(uint64_t) =
@@ -2966,6 +3056,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         (uint32_t)compiled_distance(distance_values, distance_values + 3) !=
             UINT32_MAX - 2 ||
         compiled_sum3(40, 1, 1) != 42 || compiled_invoke3(40) != 42 ||
+        compiled_sum6(10, 5, 6, 7, 8, 6) != 42 ||
+        compiled_invoke6(37) != 42 ||
         compiled_divide(20) != 6 ||
         (uint32_t)compiled_divide(UINT32_MAX - 19) != UINT32_MAX - 5 ||
         compiled_remainder(20) != 2 ||
@@ -2973,6 +3065,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         (uint32_t)compiled_negate(42) != UINT32_MAX - 41 ||
         compiled_negate(UINT32_MAX - 41) != 42)
         fail(83);
+    static const char six_argument_marker[] =
+        "MAKOS_AARCH64_C_SIX_ARGUMENT_OK parameters=6 call_arguments=6 "
+        "registers=x0-x5 callee_saved=x23-x28 frame=112 "
+        "object=elf64-et-rel:808 relocation=R_AARCH64_CALL26 "
+        "direct_result=42 same_object_call_result=42 overflow=7-denied\n";
+    write_bytes(six_argument_marker, sizeof(six_argument_marker) - 1);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
     if ((uintptr_t)jit == UINT64_MAX) fail(83);

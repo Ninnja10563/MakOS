@@ -4,6 +4,18 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the sandboxed AArch64 guest-native C compiler now accepts six
+  typed parameters and six call arguments through AAPCS64 `x0`-`x5`. Values
+  are retained in callee-saved `x23`-`x28`; four- through six-parameter
+  functions use a 112-byte frame with explicit pair saves/restores while the
+  existing one- through three-parameter layouts remain stable. A real
+  `sum6`/`invoke6` translation unit emits 196 code bytes in a parsed 808-byte
+  ELF64 `ET_REL`, carries one same-object `R_AARCH64_CALL26`, links with
+  `invoke6` selected, transitions through writable/NX to RX, and executes both
+  `sum6(10,5,6,7,8,6)` and `invoke6(37)` as 42. Seven parameters or arguments
+  fail closed. Focused Pi/QEMU 10.0.11 TCG runtime, AArch64 release/artifact
+  checks, full `make unit check`, unchanged Firefox-role and Native SMP
+  regressions, and cursor runtime pass. This remains a bounded compiler seed.
 - 2026-08-26 the sandboxed AArch64 guest-native C compiler now accepts up to
   six function definitions per translation unit instead of three, with a
   bounded eight-entry call-relocation table. A new source defines `stage1`
@@ -15,7 +27,7 @@ Last updated: 2026-08-26.
   10.0.11 TCG self-host runtime, structural guard, AArch64 release/image
   artifact validation, unchanged Firefox-role production SMP, ordinary Native
   SMP, and cursor regressions pass. This advances but does not complete the
-  SDK/self-hosting rows: parameters remain capped at three, build graphs at
+  SDK/self-hosting rows: parameters remain capped at six, build graphs at
   six objects, linked code at 512 bytes, and no substantial in-guest MakOS
   build exists yet.
 - 2026-08-26 AArch64 post-desktop production SMP is no longer restricted to
@@ -328,13 +340,13 @@ Last updated: 2026-08-26.
   old-version, or malformed state safely forces a full rebuild.
   Each bounded C
   translation unit accepts up to six
-  AAPCS64 `int` functions, each with up to three typed parameters and up to four
+  AAPCS64 `int` functions, each with up to six typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, unary `+`/`-`,
   precedence-correct `*`/signed `/`/`%`/`+`/`-`, mutable parameter/local
   assignments, signed
   `==`/`!=`/`<`/`<=`/`>`/`>=` comparisons, a conditional `if`, a bounded
   assignment-only `while`, and a
-  one- through three-argument call within or across objects. Parameters may independently
+  one- through six-argument call within or across objects. Parameters may independently
   be `int` or `int *`; the compiler also accepts `int *pointer = &local`, address expressions passed across
   the call boundary, dereference loads inside expressions, and
   `*pointer = expression` stores. Pointer locals and call arguments now also
@@ -353,10 +365,11 @@ Last updated: 2026-08-26.
   from memory, while pointer locals use preserved 64-bit registers. Forward
   conditional and signed backward unconditional branches are range-checked
   before patching. Emitted non-leaf functions preserve FP/LR and x19-x24 in a
-  96-byte frame. Up to three arguments use AAPCS64 `x0` through `x2` (`w0`
-  through `w2` for integers) and are preserved in x23 through x25. The `x25`
-  stack slot is emitted only for a three-parameter function, preserving the
-  exact existing one- and two-parameter code sizes. The current linked call invokes
+  96-byte frame. Up to six arguments use AAPCS64 `x0` through `x5` (`w0`
+  through `w5` for integers) and are preserved in x23 through x28. The `x25`
+  stack slot is emitted only for a three-parameter function; four through six
+  parameters select a 112-byte frame with paired x25-x28 preservation,
+  preserving the exact existing one- and two-parameter code sizes. The current linked call invokes
   `adjust(values + 1, 1)`; `adjust(int *pointer, int delta)` derives
   `next = pointer + delta`, computes the signed element count
   `distance = next - pointer` through 64-bit `SUB`/arithmetic shift-right two,
@@ -379,8 +392,10 @@ Last updated: 2026-08-26.
   two-function source compiles `sum3(int,int,int)` and `invoke3(int)` into 140
   code bytes and a 752-byte ELF64 `ET_REL`; the linker resolves its same-object
   `CALL26`, selects entry offset 80, and RX execution requires both calls to
-  return 42. Duplicate parameter names, more than three parameters, more than
-  three call arguments, unsupported bitwise syntax, direct literal-zero
+  return 42. A separate `sum6`/`invoke6` unit emits 196 code bytes in an
+  808-byte parsed object, resolves its internal call with entry offset 124,
+  and executes both paths as 42. Duplicate parameter names, more than six parameters, more than
+  six call arguments, unsupported bitwise syntax, direct literal-zero
   division/remainder,
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
@@ -408,12 +423,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  self-hosting milestone is PID 710770 under the user service
-  `makos-visible-selfhost-six-function-final.service`, with
+  self-hosting milestone is PID 721926 under the user service
+  `makos-visible-selfhost-six-argument-final.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv`; its boot clone
+  `build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2`; its boot clone
   exactly matches the current release image SHA-256
-  `77b56e1ec6a4da109056b332c187229415aa5d2387484ad96bd1b031e33ddb67`.
+  `12004f3df4d6bbed71c69004fd08d084149f0aa2341925aa7ffc540e1452100e`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

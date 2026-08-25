@@ -17,10 +17,11 @@ runtime. The guest-native AArch64 toolchain now reads a valid multi-statement
 assembly startup and three C sources containing four functions from MakFS, compiles parameterized
 arithmetic including unary negation and signed division/remainder, register
 locals, mutable parameter/local assignments,
-signed equality/inequality/ordering control flow, a backward-branch `while`, a 96-byte non-leaf
+signed equality/inequality/ordering control flow, a backward-branch `while`, 96/112-byte non-leaf
 frame preserving x19-x24, bounded local address-of/dereference memory loads/stores,
-up to three independently typed `int`/`int *` parameters and call arguments in
-AAPCS64 x0-x2, with conditional x25 preservation for the third parameter,
+up to six independently typed `int`/`int *` parameters and call arguments in
+AAPCS64 x0-x5, with conditional x25 preservation for the third parameter and
+paired x25-x28 preservation for four through six parameters,
 fixed local `int` arrays, checked constant indexing, array decay,
 bounded scaled `pointer-or-array + constant-or-scalar` expressions in pointer
 initializers/calls, signed `SXTW #2` dynamic offsets, parenthesized
@@ -50,6 +51,9 @@ emits 500 linked bytes in an 815-byte `ET_EXEC`, directly executes
 `helper(40)=42`, and separately compiles `sum3(int,int,int)` plus
 `invoke3(int)` into 140 bytes and a parsed 752-byte `ET_REL`, resolves its
 same-object `CALL26` with entry offset 80, and executes both as 42,
+emits a separate 196-byte `sum6`/`invoke6` unit in a parsed 808-byte
+`ET_REL`, resolves its same-object call with entry offset 124, and executes
+both direct and six-argument caller paths as 42 while denying a seventh,
 emits a separate 168-byte three-definition arithmetic unit in a parsed 784-byte
 `ET_REL` and executes signed division `6`/`-6`, remainder `2`/`-2`, and unary
 negation `-42`/`42` while rejecting direct literal-zero divisors,
@@ -117,13 +121,13 @@ built-in/service roles remain Partial. Use
 `docs/MACOS-HVF-TEST-AGENT-PROMPT.md` to hand this large milestone to the
 macOS testing agent; it preserves every strict Firefox threshold.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 710770, user
-service `makos-visible-selfhost-six-function-final.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 721926, user
+service `makos-visible-selfhost-six-argument-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv/qmp.sock`. Its
+`build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`77b56e1ec6a4da109056b332c187229415aa5d2387484ad96bd1b031e33ddb67`;
+`12004f3df4d6bbed71c69004fd08d084149f0aa2341925aa7ffc540e1452100e`;
 the inspected 800x600 login PNG is
 `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
 Stop it through QMP before

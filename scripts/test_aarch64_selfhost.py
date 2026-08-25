@@ -118,7 +118,7 @@ for fragment in (
     "MAX_C_LOCALS = 4",
     "OBJECT_CAPACITY = 2048",
     "MAX_C_FUNCTIONS = 6",
-    "MAX_C_PARAMETERS = 3",
+    "MAX_C_PARAMETERS = 6",
     "MAX_RELOCATIONS = 8",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x1ac00c00)",
@@ -162,11 +162,26 @@ for fragment in (
     "malformed_duplicate_parameter_source",
     "malformed_too_many_parameters_source",
     "malformed_too_many_arguments_source",
-    '"int adjust(int first, int second, int third, int fourth) { return first; }\\n"',
-    '"int answer(int value) { return adjust(value, value, value, value); }\\n"',
+    '"int adjust(int first, int second, int third, int fourth, int fifth, int sixth, int seventh) { return first; }\\n"',
+    '"int answer(int value) { return adjust(value, value, value, value, value, value, value); }\\n"',
     "three_argument_source",
     '"int sum3(int first, int second, int third) {\\n"',
     '"    return sum3(value, 1, 1);\\n"',
+    "six_argument_source",
+    '"int sum6(int first, int second, int third, int fourth, int fifth, int sixth) {\\n"',
+    '"    return sum6(value, 1, 1, 1, 1, 1);\\n"',
+    "six_argument_code_length != 196",
+    "six_argument_object_length != 808",
+    "six_argument_relocations[0].offset != 172",
+    "compiled_sum6(10, 5, 6, 7, 8, 6) != 42",
+    "compiled_invoke6(37) != 42",
+    "MAKOS_AARCH64_C_SIX_ARGUMENT_OK parameters=6 call_arguments=6",
+    "UINT32_C(0xa9b97bfd)",
+    "UINT32_C(0xa9056bf9)",
+    "UINT32_C(0xa90673fb)",
+    "UINT32_C(0xa94673fb)",
+    "UINT32_C(0xa9456bf9)",
+    "UINT32_C(0xa8c77bfd)",
     "signed_arithmetic_source",
     '"int divide(int value) { return value / 3; }\\n"',
     '"int remainder(int value) { return value % 6; }\\n"',
@@ -327,9 +342,10 @@ require(SHELL, "build_manifest=/home/user/generated.build")
 require(SHELL, "build_driver=makbuild-v1 build_inputs=4")
 require(SHELL, "translation_unit_functions=2,1,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
-require(SHELL, "max_parameters=3 max_call_arguments=3 nonleaf_frame=96")
+require(SHELL, "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
+require(SHELL, "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112")
 require(SHELL, "three_argument_result=42 three_argument_link=et-rel,same-object")
+require(SHELL, "six_argument_result=42 six_argument_link=et-rel,same-object")
 require(SHELL, "c_operators=mul,sdiv,srem,neg,sub,add")
 require(SHELL, "signed_division_results=20:6,-20:-6")
 require(SHELL, "signed_remainder_results=20:2,-20:-2")
@@ -364,6 +380,9 @@ require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "SIX_FUNCTION_MARKER")
 require(FOCUSED_RUNTIME, "max_functions_per_unit=6 six_function_calls=5 six_function_result=42")
+require(FOCUSED_RUNTIME, "SIX_ARGUMENT_MARKER")
+require(FOCUSED_RUNTIME, "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112")
+require(FOCUSED_RUNTIME, "six_argument_object=elf64-et-rel:808")
 require(FOCUSED_RUNTIME, "FIXTURE_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "WARM_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "SELECTIVE_BUILD_MARKER")

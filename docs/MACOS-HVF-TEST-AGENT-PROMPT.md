@@ -33,7 +33,13 @@ Branch: main
    emission, five `R_AARCH64_CALL26` relocations, one-object guest linking,
    W^X execution result 42, `max_functions=6`, and a denied seventh function.
    Its final host marker must include `max_functions_per_unit=6`,
-   `six_function_calls=5`, and `six_function_result=42`. The Native gate must
+   `six_function_calls=5`, and `six_function_result=42`. It must also report
+   `MAKOS_AARCH64_C_SIX_ARGUMENT_OK parameters=6 call_arguments=6`, registers
+   `x0-x5`, callee-saved `x23-x28`, frame 112, parsed ELF64 ET_REL object size
+   808, one `R_AARCH64_CALL26`, direct and same-object-call results 42, and a
+   denied seventh parameter/argument. The final host marker must retain
+   `max_parameters=6`, `max_call_arguments=6`, `nonleaf_frame=96,112`, and
+   `six_argument_object=elf64-et-rel:808`. The Native gate must
    report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero
    dispatch counts on AP1/AP2/AP3, a live/final overlap match containing at

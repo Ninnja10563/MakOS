@@ -140,22 +140,24 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
   startup and three C sources from MakFS. A bounded source-driven C compiler emits
   AAPCS64 integer/pointer expressions including unary negation and signed
-  division/remainder, up to three typed parameters/call arguments
-  in x0-x2, register locals, mutable integer parameter/local
+  division/remainder, up to six typed parameters/call arguments
+  in x0-x5, register locals, mutable integer parameter/local
   assignments, signed equality/inequality/ordering control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
   loads and stores, fixed local `int` arrays with checked constant indexing,
   array decay, constant and signed scalar-variable element pointer addition
   with known-bound fail-closed rejection, signed typed pointer difference,
   typed pointer parameters, non-leaf frames preserving x19-x24 and conditionally
-  x25 for a third parameter,
+  x25 for a third parameter, or x25-x28 in a 112-byte four-to-six-parameter frame,
   one same-object plus one external C-to-C call that mutate caller-owned array elements, and
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
   loop/memory outcomes execute in EL0. A separate 140-byte `sum3`/`invoke3`
   unit emits a 752-byte object, resolves its same-object call, and executes both
   three-argument paths as 42. A 784-byte three-definition arithmetic object
   directly proves positive and negative `SDIV`, `MSUB` remainder, and negation.
-  The assembler emits `_start`. The guest static
+  A separate 196-byte `sum6`/`invoke6` unit emits a parsed 808-byte object,
+  resolves its same-object call, and executes both direct and six-argument
+  caller paths as 42. The assembler emits `_start`. The guest static
   linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
   external `adjust`→`combine` across the required three persisted objects,
   also persists/links an independent 56-byte `helper` definition as a fourth
