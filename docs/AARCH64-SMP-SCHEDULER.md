@@ -2,12 +2,19 @@
 
 ## Current verified boundary
 
-QEMU `virt`/HVF starts four PEs through PSCI `CPU_ON_64`. Every PE has a
+QEMU `virt` starts four PEs through PSCI `CPU_ON_64`. Every PE has a
 private 64 KiB EL1 stack, VBAR, GICC interface, logical ID in `TPIDR_EL1`, and
 coherent identity-mapped kernel tables. A boot rendezvous proves all APs make
-parallel EL1 progress. APs then enter a closed-gate, interrupt-masked WFI idle
-dispatcher. Only CPU0 executes EL0 today; `userspace_scheduler_cpus=1` remains
-the truthful runtime marker.
+parallel EL1 progress. A bounded boot probe then sends a GICv2 SGI, enables each
+AP's banked virtual-timer PPI, and runs four independent EL0 processes at once.
+The three AP dispatchers publish their active bits and wait immediately before
+EL0 transition; CPU0 joins that rendezvous and releases all four PEs together.
+Pi/QEMU TCG requires four distinct TIDs, `overlap_mask=0xf`, unique statuses
+40-43, complete address-space reap, and exact frame recovery. This explicit
+release barrier keeps the correctness fixture independent of host emulation
+speed. The gate then closes and APs return to interrupt-masked WFI. General
+desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
+the truthful scope marker.
 
 The offline scheduler foundation adds:
 
@@ -19,8 +26,9 @@ The offline scheduler foundation adds:
 - per-CPU active TTBR0 caches, cross-CPU active-root teardown rejection, and
   inner-shareable page invalidation (`TLBI VAE1IS`) for shared process roots.
 
-These changes preserve existing CPU0 wrappers. They do not release APs into
-EL0 and are not evidence of parallel Firefox execution.
+These changes preserve existing CPU0 wrappers. The boot probe is genuine
+parallel EL0 evidence, but it is not evidence of parallel Firefox execution or
+safe general process migration.
 
 ## Next enablement blockers
 
@@ -33,14 +41,15 @@ EL0 and are not evidence of parallel Firefox execution.
 - Exit/session teardown must distinguish no local successor from no live
   session. `exit_group` must first stop/ack remote-running siblings; current
   administrative `terminate` correctly rejects a task owned by another CPU.
-- APs need banked virtual-timer PPI enable/programming. AP timer IRQs must skip
-  CPU0-owned tick advancement, socket pumping, input polling, and graphics.
+- AP banked virtual-timer PPI enable/programming and CPU0-only global tick/device
+  servicing pass the bounded probe. General AP syscalls still require a complete
+  device/service ownership audit.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
-Until these land and boot proof passes, APs remain in closed-gate WFI at EL1.
-Routine BSP `SEV` traffic cannot wake this gate and consume host CPU. Eventual
-gate enablement must issue a per-AP SGI after publishing the enabled state.
+Outside the bounded boot proof, APs remain in closed-gate WFI at EL1. Routine
+BSP `SEV` traffic cannot wake this gate and consume host CPU. The probe issues
+a GICv2 SGI only after publishing its enabled state.
 
 ## Required runtime architecture
 

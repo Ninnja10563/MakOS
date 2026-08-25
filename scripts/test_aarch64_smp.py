@@ -22,6 +22,8 @@ required = (
     "static SMP_USER_SCHEDULER_ENABLED: AtomicBool = AtomicBool::new(false);",
     "fn secondary_scheduler_idle() -> !",
     "fn init_secondary_timer_on_current_cpu()",
+    "pub(crate) fn enable_smp_probe_scheduler()",
+    "GICD_SGIR",
     'unsafe { asm!("wfi", options(nomem, nostack)) };',
 )
 for token in required:
@@ -35,5 +37,5 @@ assert timer < smp < userspace
 print(
     "MAKOS_AARCH64_SMP_STATIC_OK psci=cpu_on_64 conduit=hvc "
     "secondary_entry=identity-mapped per_cpu=stack,vbar,logical-id "
-    "parallel_el1=counter-growth scheduler_scope=bsp-only ap_idle=wfi gate=closed"
+    "parallel_el1=counter-growth scheduler_scope=boot-probe ap_idle=wfi desktop_gate=closed"
 )

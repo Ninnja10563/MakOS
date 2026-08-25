@@ -27,15 +27,24 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/TCG login milestone for pushed commit `eff2cd7`: PID 82718,
+- Previous visible Pi/TCG login milestone for pushed commit `eff2cd7`: PID 82718,
   VNC `127.0.0.1:5901`, session `build/makos-pi-visible-gzdjjY`, private data
   clone `build/makos-pi-visible-gzdjjY/data.img`, private variables
   `build/makos-pi-visible-gzdjjY/vars.fd`, QMP
   `build/makos-pi-visible-gzdjjY/qmp.sock`, serial
   `build/makos-pi-visible-gzdjjY/serial.log`, and PID file
   `build/makos-pi-visible-gzdjjY/qemu.pid`. Markers pass truthful ABI discovery,
-  `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`. Do not launch concurrent
-  QEMU; quit this instance cleanly through QMP before a runtime gate.
+  `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`. It exited cleanly through
+  QMP before the SMP runtime gate; no longer active.
+- A bounded four-PE AArch64 EL0 scheduler proof now passes on Pi/QEMU 10.0.11
+  TCG: a GICv2 SGI wakes the AP gate, each AP enables its banked virtual-timer
+  PPI, the four contexts rendezvous immediately before EL0 entry, and four
+  independent ELF processes report TIDs `4,2,3,1`, statuses 40-43 and
+  `overlap_mask=0xf`. All roots/frames reap to baseline. Current release/image
+  artifact checks, full `make check`, both structural guards, and visible login
+  pass. The gate closes before the desktop; general desktop/Firefox AP
+  scheduling remains pending remote teardown, block-to-idle, device-affinity
+  and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates

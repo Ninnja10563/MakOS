@@ -4,6 +4,19 @@ Last updated: 2026-08-25.
 
 ## Implemented
 
+- 2026-08-25 AArch64 has its first genuine four-PE EL0 scheduling proof. After
+  PSCI/GIC bring-up, the kernel publishes a bounded boot-probe gate and sends a
+  GICv2 SGI to three WFI APs. Each AP enables its banked virtual-timer PPI; four
+  independent ELF processes rendezvous immediately before EL0 entry and then
+  overlap across CPU0-3 with distinct TIDs and exit statuses 40-43. The final
+  Pi/QEMU 10.0.11 TCG run reports TIDs `4,2,3,1`, `overlap_mask=0xf`, reaps all
+  roots, restores exact free-frame balance, closes the AP gate, and reaches the
+  visible login. The current AArch64 release image/artifact check, full
+  `make check`, and both SMP structural guards pass. General
+  desktop/Firefox AP scheduling remains gated pending block-to-idle, remote
+  group-exit acknowledgement, device affinity and contention proof, so the
+  scheduler audit row remains Partial and still reports one desktop scheduler
+  CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment

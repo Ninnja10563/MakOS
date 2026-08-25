@@ -39,6 +39,8 @@ const GICD_ICENABLER0: u64 = 0x180;
 const GICD_ICPENDR0: u64 = 0x280;
 const GICD_IPRIORITYR: u64 = 0x400;
 const GICD_ICFGR1: u64 = 0xc04;
+const GICD_SGIR: u64 = 0xf00;
+const SMP_SCHEDULER_SGI: u32 = 1;
 const GICC_CTLR: u64 = 0x000;
 const GICC_PMR: u64 = 0x004;
 const GICC_BPR: u64 = 0x008;
@@ -97,9 +99,9 @@ static SMP_ONLINE_MASK: AtomicU64 = AtomicU64::new(1);
 static SMP_TEST_RUN: AtomicBool = AtomicBool::new(false);
 static SMP_BSP_WORK_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SMP_TEST_READY_MASK: AtomicU64 = AtomicU64::new(0);
-// Deliberately private, initialized false, never written true. AP scheduler
-// enablement requires completing affinity, blocking, teardown, and boot-proof
-// gates first; until then APs only wait for events in EL1.
+// Enabled only for the bounded boot-time EL0 multicore probe. General desktop
+// and Firefox AP dispatch stays gated until remote teardown/device ownership
+// is complete.
 static SMP_USER_SCHEDULER_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[repr(align(64))]
@@ -1626,6 +1628,35 @@ fn secondary_scheduler_idle() -> ! {
     crate::aarch64_process::run_secondary_scheduler()
 }
 
+pub(crate) fn enable_smp_probe_scheduler() {
+    SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);
+    let distributor = GIC_DISTRIBUTOR_BASE.load(Ordering::Acquire);
+    if distributor == 0 {
+        crate::fatal("AArch64 SMP scheduler enable before GIC");
+    }
+    unsafe {
+        asm!("dsb ish", options(nostack));
+        // Target-list filter 1 sends this SGI to every PE except the BSP.
+        mmio_write32(distributor + GICD_SGIR, (1 << 24) | SMP_SCHEDULER_SGI);
+        asm!("dsb ish", "isb", options(nostack));
+    }
+}
+
+pub(crate) fn disable_smp_probe_scheduler() {
+    SMP_USER_SCHEDULER_ENABLED.store(false, Ordering::Release);
+    unsafe { asm!("dsb ish", "sev", options(nostack)) };
+}
+
+pub(crate) fn smp_probe_scheduler_enabled() -> bool {
+    SMP_USER_SCHEDULER_ENABLED.load(Ordering::Acquire)
+}
+
+pub(crate) fn idle_secondary_after_smp_probe() -> ! {
+    disable_interrupts();
+    unsafe { asm!("msr CNTV_CTL_EL0, {value}", value = in(reg) 0u64, options(nostack)) };
+    secondary_scheduler_idle()
+}
+
 fn init_exceptions_on_current_cpu() {
     let mut cpacr: u64;
     unsafe {
@@ -1751,6 +1782,15 @@ fn secondary_park_forever() -> ! {
 
 pub fn monotonic_ticks() -> u64 {
     TIMER_TICKS.load(Ordering::Acquire)
+}
+
+pub(crate) fn counter_deadline_millis(milliseconds: u64) -> u64 {
+    let frequency = TIMER_FREQUENCY.load(Ordering::Acquire);
+    read_virtual_counter().saturating_add(frequency.saturating_mul(milliseconds) / 1_000)
+}
+
+pub(crate) fn counter_deadline_expired(deadline: u64) -> bool {
+    read_virtual_counter() >= deadline
 }
 
 pub fn uptime_millis() -> u64 {
@@ -5395,6 +5435,7 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
         );
     }
     let timer = intid == TIMER_INTID.load(Ordering::Acquire);
+    let scheduler_sgi = intid == SMP_SCHEDULER_SGI;
     if timer {
         let interval = TIMER_INTERVAL.load(Ordering::Acquire);
         program_virtual_timer(read_virtual_counter().saturating_add(interval));
@@ -5403,7 +5444,7 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
         if cpu_index() == 0 {
             TIMER_TICKS.fetch_add(1, Ordering::AcqRel);
         }
-    } else if intid < 1020 {
+    } else if intid < 1020 && !scheduler_sgi {
         UNEXPECTED_IRQS.fetch_add(1, Ordering::AcqRel);
     }
     if intid < 1020 {

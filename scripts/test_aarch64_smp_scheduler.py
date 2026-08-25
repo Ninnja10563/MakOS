@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline invariants for the not-yet-enabled AArch64 SMP EL0 scheduler."""
+"""Offline invariants for bounded AArch64 SMP EL0 proof and gated desktop."""
 
 from pathlib import Path
 
@@ -34,6 +34,8 @@ for token in (
     "fn secondary_scheduler_idle() -> !",
     "fn init_secondary_timer_on_current_cpu()",
     "if cpu_index() == 0",
+    "SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);",
+    "SMP_USER_SCHEDULER_ENABLED.store(false, Ordering::Release);",
 ):
     assert token in ARCH, token
 
@@ -49,6 +51,11 @@ for token in (
     "schedule_next_where_on(cpu, |info|",
     "slot.pid != slot.group_pid",
     "slot.role == ProcessRole::Firefox",
+    "slot.role == ProcessRole::SmpProbe",
+    "pub fn run_smp_userspace_self_test()",
+    "SMP_PROBE_PEAK_MASK",
+    "statuses != [40, 41, 42, 43]",
+    "peak != 0b1111",
     'asm!("dsb ish", "sev", options(nostack))',
 ):
     assert token in PROCESS, token
@@ -65,8 +72,6 @@ for cpu0_wrapper in (
 ):
     assert cpu0_wrapper not in PROCESS, cpu0_wrapper
 
-assert "SMP_USER_SCHEDULER_ENABLED.store(true" not in ARCH
-
 assert "Until every gate passes, MakOS reports `userspace_scheduler_cpus=1`." in DESIGN
 assert "Firefox first paint/navigation" in DESIGN
 
@@ -74,5 +79,5 @@ print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "
     "exception_paths=per-cpu kernel_return=per-cpu ttbr_cache=per-cpu "
     "tlbi=inner-shareable "
-    "runtime_enabled=0 truthful_marker=userspace_scheduler_cpus=1"
+    "runtime=boot-probe,4cpus desktop_enabled=0 truthful_marker=userspace_scheduler_cpus=1"
 )

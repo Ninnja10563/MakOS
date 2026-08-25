@@ -49,6 +49,8 @@ static MUSL_EXEC_CALLER_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-musl-exec-caller.elf"));
 static TOOLCHAIN_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-toolchain.elf"));
+static SMP_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-probe.elf"));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -62,6 +64,7 @@ pub enum ProcessRole {
     Python,
     Nano,
     Native,
+    SmpProbe,
     Firefox,
 }
 
@@ -159,6 +162,9 @@ impl SchedulerState {
         let contexts = &self.contexts;
         self.table.schedule_next_where_on(cpu, |info| {
             cpu == 0
+                || contexts
+                    .iter()
+                    .any(|slot| slot.pid == info.pid && slot.role == ProcessRole::SmpProbe)
                 || contexts.iter().any(|slot| {
                     slot.pid == info.pid
                         && slot.pid != slot.group_pid
@@ -194,6 +200,10 @@ static SURFACE_MAIN_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_PRIORITY_REPORTED: AtomicBool = AtomicBool::new(false);
 static THREAD_CREATE_TRACES: AtomicU64 = AtomicU64::new(0);
 static THREAD_EXIT_TRACES: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_ACTIVE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_PEAK_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_TIDS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static SMP_PROBE_RELEASE: AtomicBool = AtomicBool::new(false);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -267,6 +277,7 @@ pub fn report_runtime_tasks() {
                 ProcessRole::Python => "python",
                 ProcessRole::Nano => "nano",
                 ProcessRole::Native => "native",
+                ProcessRole::SmpProbe => "smp-probe",
                 ProcessRole::Firefox => "firefox",
             };
             let task_state = match info.state {
@@ -372,6 +383,123 @@ pub fn run_init_self_test() -> ProcessReport {
         exit_status,
         reclaimed_frames,
     }
+}
+
+pub fn run_smp_userspace_self_test() {
+    const PROBE_COUNT: usize = 4;
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_PEAK_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(false, Ordering::Release);
+    for tid in &SMP_PROBE_TIDS {
+        tid.store(0, Ordering::Release);
+    }
+    let mut pids = [0u64; PROBE_COUNT];
+    for (index, pid) in pids.iter_mut().enumerate() {
+        *pid = spawn_process(
+            0,
+            SMP_PROBE_ELF,
+            index as u64,
+            ProcessRole::SmpProbe,
+        )
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP probe spawn failed"))
+        .0;
+    }
+
+    crate::arch::enable_smp_probe_scheduler();
+    let dispatch_deadline = crate::arch::counter_deadline_millis(2_000);
+    while SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) & 0b1110 != 0b1110 {
+        if crate::arch::counter_deadline_expired(dispatch_deadline) {
+            crate::fatal("AArch64 SMP probe AP dispatch timeout");
+        }
+        core::hint::spin_loop();
+    }
+
+    let (pid, context) = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP probe BSP run queue empty"));
+        let context = state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == process.pid)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP probe BSP context absent"))
+            .context;
+        (process.pid, context)
+    });
+    smp_probe_enter(pid);
+    // APs have selected distinct contexts and wait immediately before their
+    // EL0 transition. Release all four PEs together so the overlap proof is
+    // deterministic on both fast HVF and constrained TCG hosts.
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    unsafe { asm!("dsb ish", "sev", options(nostack)) };
+    crate::arch::switch_address_space(context.ttbr0);
+    let _ = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let complete = with_state(|state| {
+            pids.iter().all(|pid| {
+                state.table.get(*pid).is_some_and(|info| {
+                    info.state == makos_process_table::ProcessState::Zombie
+                })
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP probe completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let mut statuses = [0u64; PROBE_COUNT];
+    for (index, pid) in pids.iter().copied().enumerate() {
+        let (resource, status) = with_state(|state| {
+            let WaitResult::Reaped {
+                resource,
+                exit_status,
+                ..
+            } = state.table.wait(0, pid)
+            else {
+                crate::fatal("AArch64 SMP probe reap failed");
+            };
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) {
+                *slot = ContextSlot::EMPTY;
+            }
+            (resource, exit_status)
+        });
+        statuses[index] = status;
+        cleanup_reaped(pid, resource, status);
+    }
+    let tids = [
+        SMP_PROBE_TIDS[0].load(Ordering::Acquire),
+        SMP_PROBE_TIDS[1].load(Ordering::Acquire),
+        SMP_PROBE_TIDS[2].load(Ordering::Acquire),
+        SMP_PROBE_TIDS[3].load(Ordering::Acquire),
+    ];
+    let peak = SMP_PROBE_PEAK_MASK.load(Ordering::Acquire);
+    if statuses != [40, 41, 42, 43]
+        || peak != 0b1111
+        || tids.contains(&0)
+        || tids
+            .iter()
+            .enumerate()
+            .any(|(index, tid)| tids[..index].contains(tid))
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_USER_OK cpus=4 tids={},{},{},{} overlap_mask={:#x} el=0 timer_ppi=per-cpu statuses=40,41,42,43 scheduler_scope=boot-probe desktop_gate=closed free_balance=1",
+        tids[0], tids[1], tids[2], tids[3], peak,
+    );
+    reset_scheduler();
 }
 
 pub fn run_desktop_shell() -> ! {
@@ -1568,7 +1696,10 @@ pub(crate) fn run_secondary_scheduler() -> ! {
         crate::fatal("AArch64 secondary dispatcher entered on BSP");
     }
     loop {
-        let context = with_state(|state| {
+        if !crate::arch::smp_probe_scheduler_enabled() {
+            crate::arch::idle_secondary_after_smp_probe();
+        }
+        let selected = with_state(|state| {
             if !state.session_active {
                 return None;
             }
@@ -1577,16 +1708,44 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                 .contexts
                 .iter()
                 .find(|slot| slot.pid == process.pid)
-                .map(|slot| slot.context)
+                .map(|slot| (process.pid, slot.context))
         });
-        let Some(context) = context else {
+        let Some((pid, context)) = selected else {
             unsafe { asm!("wfe", options(nomem, nostack)) };
             continue;
         };
+        smp_probe_enter(pid);
+        while !SMP_PROBE_RELEASE.load(Ordering::Acquire) {
+            unsafe { asm!("wfe", options(nomem, nostack)) };
+        }
         crate::arch::switch_address_space(context.ttbr0);
         let _ = crate::arch::enter_user_context(&context);
         crate::arch::switch_address_space(crate::arch::kernel_root());
+        smp_probe_leave();
     }
+}
+
+fn smp_probe_enter(tid: u64) {
+    let cpu = scheduler_cpu();
+    let bit = 1u64 << cpu;
+    SMP_PROBE_TIDS[cpu].store(tid, Ordering::Release);
+    let active = SMP_PROBE_ACTIVE_MASK.fetch_or(bit, Ordering::AcqRel) | bit;
+    let mut peak = SMP_PROBE_PEAK_MASK.load(Ordering::Acquire);
+    while active.count_ones() > peak.count_ones() {
+        match SMP_PROBE_PEAK_MASK.compare_exchange_weak(
+            peak,
+            active,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(current) => peak = current,
+        }
+    }
+}
+
+fn smp_probe_leave() {
+    SMP_PROBE_ACTIVE_MASK.fetch_and(!(1u64 << scheduler_cpu()), Ordering::AcqRel);
 }
 
 fn spawn_process(
@@ -2933,6 +3092,7 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
         exit_thread_from_exception(status, frame);
         return;
     }
+    let smp_probe = current_app_role() == ProcessRole::SmpProbe;
     robust_list_on_current_exit();
     clear_child_tid_on_exit();
     let (pid, next) = with_state(|state| {
@@ -2959,18 +3119,25 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
             state.timer_dispatches[index] = state.timer_dispatches[index].saturating_add(1);
             state.contexts[index].context
         });
-        if next.is_none() {
+        if next.is_none()
+            && !state
+                .contexts
+                .iter()
+                .any(|slot| slot.pid != 0 && state.table.running_cpu(slot.pid).is_some())
+        {
             state.session_active = false;
         }
         (process.pid, next)
     });
     let closed_ipc_handles = crate::ipc::close_all(pid);
-    crate::serial_println!(
-        "process-exit arch=aarch64 pid={} status={} closed_ipc_handles={}",
-        pid,
-        status,
-        closed_ipc_handles,
-    );
+    if !smp_probe {
+        crate::serial_println!(
+            "process-exit arch=aarch64 pid={} status={} closed_ipc_handles={}",
+            pid,
+            status,
+            closed_ipc_handles,
+        );
+    }
     if let Some(context) = next {
         context.restore(frame);
         crate::arch::switch_address_space(context.ttbr0);
