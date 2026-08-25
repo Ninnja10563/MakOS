@@ -27,32 +27,37 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG `MAKSTATE2` variable-graph milestone:
-  PID 504710, user service `makos-visible-makstate2-graph-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG Firefox input-affinity milestone:
+  PID 549619, user service
+  `makos-visible-firefox-input-affinity-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe`, private boot clone
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/boot.img`, private sparse
-  data image `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/data.img`,
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N`, private boot clone
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/boot.img`, private sparse
+  data image `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/data.img`,
   private variables
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/vars.fd`, QMP
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/qmp.sock`, serial
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/serial.log`, PID file
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/qemu.pid`, and QMP
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/vars.fd`, QMP
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/qmp.sock`, serial
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/serial.log`, PID file
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/qemu.pid`, and QMP
   framebuffer capture `login.png`. Its boot
   clone SHA-256 is
-  `32d1a301770f34c6687eef09753d5b10eda61f93904e05f50a8ef21fedecb0a6`,
+  `d52ef39b7d81d783f8093c0dbfe58eba001c8262709f204d11542e1aa710edd1`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `87,129,84`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
+  counters `97,101,99`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
   `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`; it was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 504710/session
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe` was stopped cleanly
+  through QMP before the Firefox input-affinity runtime; its private files
+  remain.
   Prior PID 491323/session
   `build/makos-pi-visible-makstate-cache-final-KHjut1RP` was stopped cleanly
   through QMP before the variable-graph runtime; its private files remain.
@@ -418,12 +423,12 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 504710 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 549619 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- The shared-Ready-queue milestone is the current implementation state; forced
-  migration, stateful TCP owner service and CPU0-owned device services remain
-  its foundations. Generated
+- The Firefox input-affinity milestone is the current implementation state;
+  shared-Ready dispatch, forced migration, stateful TCP owner service and
+  CPU0-owned device services remain its foundations. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -452,6 +457,18 @@ Preserve existing files and changes.
   6.6 GiB compressed, with Zen/WindowServer consuming multiple cores. Prior
   current-package strict pass remains valid evidence, but latest Gate 3 is not
   green. Do not relax thresholds. Rerun unchanged only after host pressure clears.
+- 2026-08-26 Pi/QEMU 10.0.11 TCG production-SMP runtime now proves the real
+  Firefox-role input wake path deterministically. The upstream-musl fixture
+  owns overflow surface 7, blocks watcher TID 8 in syscall 140, receives QMP
+  Ctrl-A, dispatches that TID on AP2, then dispatches the group leader once on
+  CPU0. Priority hints are role-affine and one-shot after selection; the
+  1,000-tick deadline only expires stale hints. This also fixed CPU0-leader
+  starvation of a freshly forked Firefox child during the fixture's typed-IPC
+  phase. Final evidence is `cpu_mask=0xe`, dispatches `9826,11253,9695`,
+  `overlap_mask=0x6`, TIDs 5/6, watcher 8/AP2, status 42. Full `make unit check`,
+  structural guards, release image and artifact checks pass. This is Pi/TCG
+  functional evidence only; it does not replace the unchanged idle-macOS/HVF
+  strict Firefox gate.
 - The Raspberry Pi was idle when the unchanged Firefox Make target was retried,
   but preflight stopped before QEMU launch: this host does not contain exact
   `build/makos-integrated-a9c604254f094de2.img` or the staged Firefox package,

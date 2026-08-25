@@ -48,6 +48,21 @@ static unsigned requeue_release;
 static unsigned requeue_completed;
 static volatile unsigned production_smp_ready;
 static volatile unsigned production_smp_release;
+static volatile unsigned production_input_ready;
+static long production_input_surface;
+
+struct makos_surface_event {
+	uint32_t kind;
+	uint32_t key;
+	uint32_t modifiers;
+	int32_t x;
+	int32_t y;
+	uint32_t width;
+	uint32_t height;
+};
+
+_Static_assert(sizeof(struct makos_surface_event) == 28,
+	"MakOS surface event ABI size");
 
 struct robust_probe_head {
 	volatile void *volatile head;
@@ -64,6 +79,8 @@ static struct robust_probe_head robust_head;
 static struct robust_probe_node robust_node;
 
 static long makos_call(long number, long first, long second);
+static long makos_call4(long number, long first, long second, long third,
+	long fourth);
 
 static void winch_handler(int signal)
 {
@@ -82,9 +99,22 @@ static void *production_smp_worker(void *argument)
 	return 0;
 }
 
+static void *production_input_watcher(void *argument)
+{
+	struct makos_surface_event event = {0};
+	(void)argument;
+	__atomic_store_n(&production_input_ready, 1, __ATOMIC_RELEASE);
+	long result = makos_call4(140, production_input_surface, (long)&event,
+		sizeof event, 0);
+	if (result != sizeof event || event.kind != 1 || event.key != 132)
+		return (void *)(uintptr_t)1;
+	return 0;
+}
+
 static int production_smp_overlap_probe(void)
 {
 	pthread_t workers[3];
+	pthread_t input_watcher;
 	void *result = 0;
 	production_smp_ready = 0;
 	production_smp_release = 0;
@@ -104,9 +134,23 @@ static int production_smp_overlap_probe(void)
 	__atomic_store_n(&production_smp_release, 1, __ATOMIC_RELEASE);
 	for (unsigned index = 0; index < 3; index++)
 		if (pthread_join(workers[index], &result) || result) return 3;
+	production_input_surface = makos_call4(8, 96, 64, 7, 0);
+	if (production_input_surface <= 0 ||
+	    makos_call4(10, production_input_surface, 0, 0, 0) != 1)
+		return 4;
+	production_input_ready = 0;
+	if (pthread_create(&input_watcher, 0, production_input_watcher, 0)) return 5;
+	for (unsigned attempts = 0; attempts < 100000; attempts++) {
+		if (__atomic_load_n(&production_input_ready, __ATOMIC_ACQUIRE)) break;
+		makos_call(1, 0, 0);
+	}
+	if (!__atomic_load_n(&production_input_ready, __ATOMIC_ACQUIRE)) return 6;
+	if (pthread_join(input_watcher, &result) || result) return 7;
+	if (makos_call4(123, production_input_surface, 0, 0, 0) != 1) return 8;
 	static const char marker[] =
-		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded\n";
-	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 4;
+		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded\n"
+		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event\n";
+	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;
 }
 

@@ -29,6 +29,10 @@ READY_MARKER = (
 PROCESS_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK"
 RESULT_MARKER = b"MAKOS_AARCH64_PRODUCTION_SMP_OK"
 OVERLAP_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK"
+WATCHER_BLOCKED_MARKER = b"MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK"
+WATCHER_AP_MARKER = b"MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK"
+LEADER_DISPATCH_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK"
+INPUT_PRIORITY_MARKER = b"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK"
 REAP_MARKER = (
     b"MAKOS_AARCH64_FIREFOX_SMP_REAP_OK fixture=upstream-musl-pthread "
     b"role=firefox status=42"
@@ -69,6 +73,8 @@ def main() -> int:
     dispatches = (0, 0, 0)
     overlap_mask = 0
     overlap_tids = (0, 0, 0)
+    watcher_tid = 0
+    watcher_cpu = 0
 
     with tempfile.TemporaryDirectory(
         prefix="makos-production-smp-focused-", dir=output_root
@@ -158,6 +164,17 @@ def main() -> int:
                 common.send_command(stream, "firefox-smp")
                 common.wait_for_output(selector, process, output, PROCESS_MARKER, 30)
                 common.wait_for_output(selector, process, output, OVERLAP_MARKER, 60)
+                common.wait_for_output(
+                    selector, process, output, WATCHER_BLOCKED_MARKER, 30
+                )
+                common.send_key(stream, "ctrl-a")
+                common.wait_for_output(selector, process, output, WATCHER_AP_MARKER, 30)
+                common.wait_for_output(
+                    selector, process, output, LEADER_DISPATCH_MARKER, 30
+                )
+                common.wait_for_output(
+                    selector, process, output, INPUT_PRIORITY_MARKER, 30
+                )
                 common.wait_for_output(selector, process, output, RESULT_MARKER, 60)
                 common.wait_for_output(selector, process, output, REAP_MARKER, 20)
 
@@ -172,9 +189,44 @@ def main() -> int:
                 )
                 if not process_matches or not overlap_matches:
                     raise AssertionError("production SMP overlap fields were malformed")
+                watcher_matches = re.findall(
+                    r"MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK tid=(\d+) "
+                    r"group_pid=(\d+) cpu=(\d+) wait=surface-event retry=svc",
+                    decoded,
+                )
+                priority_matches = re.findall(
+                    r"MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK tid=(\d+) cpu=(\d+) "
+                    r"target=firefox-input-watcher affinity=nonleader-ap "
+                    r"ownership=exclusive",
+                    decoded,
+                )
+                leader_matches = re.findall(
+                    r"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK tid=(\d+) cpu=0 "
+                    r"source=bounded-handoff affinity=leader-cpu0",
+                    decoded,
+                )
+                if not watcher_matches or not priority_matches or not leader_matches:
+                    raise AssertionError("production input-priority fields were malformed")
                 overlap_group, marker_mask, mt1, mt2, mt3 = overlap_matches[-1]
                 if overlap_group != process_matches[-1]:
                     raise AssertionError("production SMP overlap group did not match launch")
+                blocked_tid, blocked_group, _blocked_cpu = watcher_matches[-1]
+                priority_tid, priority_cpu = priority_matches[-1]
+                leader_tid = leader_matches[-1]
+                watcher_tid = int(priority_tid)
+                watcher_cpu = int(priority_cpu)
+                if (
+                    blocked_group != process_matches[-1]
+                    or blocked_tid != priority_tid
+                    or leader_tid != process_matches[-1]
+                    or watcher_tid == int(leader_tid)
+                    or watcher_cpu not in (1, 2, 3)
+                ):
+                    raise AssertionError(
+                        "Firefox watcher/leader affinity handoff was inconsistent: "
+                        f"blocked={watcher_matches[-1]} priority={priority_matches[-1]} "
+                        f"leader={leader_matches[-1]}"
+                    )
                 matches = re.findall(
                     r"MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask=(0x[0-9a-f]+) "
                     r"dispatches=(\d+),(\d+),(\d+) overlap_mask=(0x[0-9a-f]+) "
@@ -229,7 +281,9 @@ def main() -> int:
         f"accel={accel} cpu_mask={cpu_mask:#x} worker_cpus={worker_cpus} "
         f"dispatches={dispatches[0]},{dispatches[1]},{dispatches[2]} "
         f"overlap_mask={overlap_mask:#x} overlap_tids={overlap_tids[0]},{overlap_tids[1]},{overlap_tids[2]} "
+        f"input_watcher_tid={watcher_tid} input_watcher_cpu={watcher_cpu} "
         "fixture=upstream-musl-pthread role=firefox leader_cpu=0 "
+        "input_priority=watcher-ap,leader-cpu0 key=ctrl-a "
         "device_mmio_owner=cpu0 ownership=exclusive concurrent=1 block=ap-idle status=42"
     )
     return 0

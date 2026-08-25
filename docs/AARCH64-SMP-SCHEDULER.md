@@ -51,6 +51,20 @@ fixture is not real-Firefox qualification. Because several PEs can log during
 this interval, PL011 formatted and raw writes use an IRQ-masked cross-PE lock;
 the final repeat emits intact records.
 
+Surface-key priority follows the same affinity split. A Firefox thread blocked
+in `surface_wait_event` publishes its TID; AP1-3 may select that non-leader
+watcher even while CPU0 is busy, and CPU0 alone selects the leader after the
+watcher dequeues a key. A racing PE that observes the selected TID Running on
+another PE preserves the hint. Each watcher or leader hint is consumed after
+one successful dispatch; the 1,000-tick deadline is only stale-hint cleanup,
+not a priority time slice. This one-shot rule prevents a yielding CPU0 leader
+from starving a newly forked same-affinity Firefox child. The focused Pi/TCG
+runtime creates a real process-owned overflow surface, blocks a non-leader
+upstream-musl pthread in syscall 140, injects QMP Ctrl-A, and requires the same
+watcher TID on AP1-3 plus the group leader on CPU0 before full status-42 reap.
+Its final run selected watcher TID 8 on AP2. This is deterministic wake and
+affinity evidence, not macOS/HVF Firefox latency qualification.
+
 A third embedded EL0 program proves remote-running group teardown. Its leader
 clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
 worker publishes a release-ordered running flag before spinning in EL0. The

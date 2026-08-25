@@ -63,11 +63,26 @@ seed, not a general C toolchain, transitive dependency/arbitrary-graph build
 system, or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 504710, user
-service `makos-visible-makstate2-graph-final.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe`, private
+Firefox input scheduling now has a deterministic production-role Pi/TCG proof.
+A real non-leader upstream-musl pthread blocks in surface syscall 140, QMP
+Ctrl-A dispatches that exact watcher on AP1-3, and the group leader receives a
+one-shot CPU0 handoff. The final run reports watcher TID 8 on AP2,
+`cpu_mask=0xe`, `overlap_mask=0x6`, dispatches `9826,11253,9695`, and status 42
+after the complete pthread/typed-IPC workload. The stale deadline no longer
+acts as a priority time slice, fixing observed fork-child starvation. Full
+`make unit check` passes. This is functional Pi/TCG evidence only; strict
+Firefox timing still needs the unchanged idle macOS/HVF gate.
+
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 549619, user
+service `makos-visible-firefox-input-affinity-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/qmp.sock`. Its
+boot SHA-256 matches `build/makos-aarch64.img` at
+`d52ef39b7d81d783f8093c0dbfe58eba001c8262709f204d11542e1aa710edd1`;
+the inspected 800x600 login PNG is
+`133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
+Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

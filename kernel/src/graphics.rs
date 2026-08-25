@@ -11,7 +11,8 @@ use makos_tty::{
 const MAX_WIDTH: u32 = 720;
 const MAX_HEIGHT: u32 = 420;
 const MAX_PIXELS: usize = MAX_WIDTH as usize * MAX_HEIGHT as usize;
-const MAX_SURFACES: usize = 6;
+const MAX_SURFACES: usize = 7;
+const DESKTOP_SURFACES: usize = 6;
 const CURSOR_WIDTH: usize = 12;
 const CURSOR_HEIGHT: usize = 17;
 const CURSOR_PIXELS: usize = CURSOR_WIDTH * CURSOR_HEIGHT;
@@ -285,7 +286,7 @@ static GRAPHICS: LockedState = LockedState {
         framebuffer: FramebufferInfo::EMPTY,
         pixels: [[0; MAX_PIXELS]; MAX_SURFACES],
         surfaces: [Surface::EMPTY; MAX_SURFACES],
-        z_order: [0, 1, 2, 3, 4, 5],
+        z_order: [0, 1, 2, 3, 4, 5, 6],
         focused_surface: None,
         cursor_x: 640,
         cursor_y: 400,
@@ -3464,7 +3465,7 @@ fn taskbar_hit(state: &State, x: u32, y: u32) -> Option<usize> {
     }
     let app_width = taskbar_app_width(state.framebuffer.width);
     let mut column = 0u32;
-    for index in 0..MAX_SURFACES {
+    for index in 0..DESKTOP_SURFACES {
         let surface = state.surfaces[index];
         if !surface.created || !surface.presented {
             continue;
@@ -3493,7 +3494,7 @@ fn start_menu_item_hit(state: &State, x: u32, y: u32) -> Option<usize> {
         .height
         .saturating_sub(TASKBAR_HEIGHT + start_menu_height(state));
     let mut row = 0u32;
-    for index in 0..MAX_SURFACES {
+    for index in 0..DESKTOP_SURFACES {
         if !state.surfaces[index].created {
             continue;
         }
@@ -3559,7 +3560,7 @@ fn draw_taskbar(state: &State, screen: &mut crate::framebuffer::Screen, screen_w
     );
     let app_width = taskbar_app_width(screen_width);
     let mut column = 0u32;
-    for index in 0..MAX_SURFACES {
+    for index in 0..DESKTOP_SURFACES {
         let surface = state.surfaces[index];
         if !surface.created || !surface.presented {
             continue;
@@ -3636,8 +3637,8 @@ fn taskbar_app_width(screen_width: u32) -> u32 {
     let tray_left = screen_width.saturating_sub(146);
     tray_left
         .saturating_sub(TASKBAR_APP_X)
-        .saturating_sub(TASKBAR_APP_GAP * (MAX_SURFACES as u32 - 1))
-        / MAX_SURFACES as u32
+        .saturating_sub(TASKBAR_APP_GAP * (DESKTOP_SURFACES as u32 - 1))
+        / DESKTOP_SURFACES as u32
 }
 
 #[derive(Clone, Copy)]
@@ -4031,7 +4032,7 @@ fn draw_start_menu(state: &State, screen: &mut crate::framebuffer::Screen, taskb
         crate::framebuffer::Color::new(0, 0, 0),
     );
     let mut row = 0u32;
-    for index in 0..MAX_SURFACES {
+    for index in 0..DESKTOP_SURFACES {
         if !state.surfaces[index].created {
             continue;
         }
@@ -4079,6 +4080,7 @@ fn start_menu_height(state: &State) -> u32 {
     let items = state
         .surfaces
         .iter()
+        .take(DESKTOP_SURFACES)
         .filter(|surface| surface.created)
         .count() as u32;
     14 + (items + 1) * (START_MENU_ITEM_HEIGHT + 4)

@@ -170,6 +170,7 @@ pub enum SessionProcessRole {
     Toolchain,
     NativeIpc,
     Firefox,
+    FirefoxProbe,
 }
 
 pub fn has_capability(capability: u64) -> bool {
@@ -411,7 +412,7 @@ pub fn register_session_process(pid: u64, role: SessionProcessRole) -> bool {
                     | CAP_NETWORK
                     | CAP_SERVICE_PUBLISH
             }
-            SessionProcessRole::Firefox => {
+            SessionProcessRole::Firefox | SessionProcessRole::FirefoxProbe => {
                 CAP_GRAPHICS
                     | CAP_NETWORK
                     | CAP_INPUT
@@ -419,6 +420,11 @@ pub fn register_session_process(pid: u64, role: SessionProcessRole) -> bool {
                     | CAP_CONSOLE
                     | CAP_IPC
                     | CAP_SYNC
+                    | if role == SessionProcessRole::FirefoxProbe {
+                        CAP_SERVICE_PUBLISH
+                    } else {
+                        0
+                    }
             }
         };
         let Some(binding) = session

@@ -4,6 +4,26 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 Firefox surface-key scheduling is now role-affine across the
+  production AArch64 SMP policy. A blocked non-leader Firefox native-event
+  watcher is selected only on AP1-3, while its bounded main-thread handoff is
+  selected only on CPU0. A valid priority hint is retained when another PE
+  owns the target, but is consumed after one successful dispatch; its
+  1,000-tick deadline now only expires stale hints. This fixed a real
+  starvation found by the focused fixture: retaining the CPU0 leader hint
+  across fast yields prevented a newly forked Firefox child from reaching its
+  typed-IPC service before the parent timed out. The production-only
+  `FirefoxProbe` credential profile adds service publication for the existing
+  full pthread/IPC fixture without broadening ordinary Firefox privileges.
+  The compositor has a seventh owned overflow surface for that fixture while
+  preserving the six stable launcher/taskbar slots and their geometry. The
+  final Raspberry Pi/QEMU 10.0.11 TCG run reports `cpu_mask=0xe`, dispatches
+  `9826,11253,9695`, `overlap_mask=0x6` with TIDs 5/6, watcher TID 8 on AP2,
+  one CPU0 leader dispatch, and final status 42 after the full upstream-musl
+  pthread workload. Structural scheduler/priority guards, artifact checks,
+  and full `make unit check` pass. This is Pi/TCG functional evidence only:
+  unchanged strict Firefox Gate 3 still requires an idle macOS/HVF rerun, and
+  the scheduler/graphics audit rows remain Partial.
 - 2026-08-25 AArch64 now opens a bounded production scheduler gate after
   driver and login-UI initialization. Process leaders, shell/UI tasks,
   and every non-Firefox role remain on CPU0; non-leader Firefox-role threads
@@ -271,12 +291,13 @@ Last updated: 2026-08-26.
   The library function is executed directly as `combine(40,2)=42`; the linked
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
-  `make unit check`, and a fresh visible Pi/TCG login pass. The visible guest is
-  PID 504710 under `makos-visible-makstate2-graph-final.service`, with private
-  boot/data/variables and QMP in
-  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe`; its boot clone exactly
-  matches the current release image SHA-256
-  `32d1a301770f34c6687eef09753d5b10eda61f93904e05f50a8ef21fedecb0a6`.
+  `make unit check`, and a fresh visible Pi/TCG login pass. That visible guest
+  was later stopped cleanly. The current visible input-affinity milestone is
+  PID 549619 under `makos-visible-firefox-input-affinity-final.service`, with
+  private boot/data/variables and QMP in
+  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N`; its boot clone
+  exactly matches the current release image SHA-256
+  `d52ef39b7d81d783f8093c0dbfe58eba001c8262709f204d11542e1aa710edd1`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

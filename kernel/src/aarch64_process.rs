@@ -213,12 +213,18 @@ impl SchedulerState {
 
     fn schedule_next_for_cpu(&mut self, cpu: usize) -> Option<makos_process_table::ProcessInfo> {
         let contexts = &self.contexts;
+        let surface_priority_tid = active_surface_priority_tid();
         let selected = self.table.schedule_next_where_on(cpu, |info| {
             let slot = contexts.iter().find(|slot| slot.pid == info.pid);
             if slot.is_some_and(|slot| {
                 slot.group_pid == REMOTE_GROUP_STOP_PID.load(Ordering::Acquire)
             }) {
                 return false;
+            }
+            if info.pid == surface_priority_tid
+                && slot.is_some_and(|slot| slot.role == ProcessRole::Firefox)
+            {
+                return slot.is_some_and(|slot| surface_priority_cpu_eligible(slot, cpu));
             }
             if slot.is_some_and(|slot| slot.role == ProcessRole::SmpProbe) {
                 cpu < SMP_PROBE_AFFINITY.len()
@@ -284,6 +290,9 @@ static SURFACE_PRIORITY_DEADLINE: AtomicU64 = AtomicU64::new(0);
 static SURFACE_MAIN_HANDOFF_PENDING: AtomicBool = AtomicBool::new(false);
 static SURFACE_MAIN_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_PRIORITY_REPORTED: AtomicBool = AtomicBool::new(false);
+static FIREFOX_INPUT_WATCHER_BLOCK_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_PRIORITY_AP_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_MAIN_DISPATCH_REPORTED: AtomicBool = AtomicBool::new(false);
 static THREAD_CREATE_TRACES: AtomicU64 = AtomicU64::new(0);
 static THREAD_EXIT_TRACES: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_ACTIVE_MASK: AtomicU64 = AtomicU64::new(0);
@@ -2600,7 +2609,9 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
             .iter()
             .position(|slot| slot.pid == tid)
             .ok_or(IoBlockResult::Failed)?;
-        if state.contexts[index].role == ProcessRole::Firefox {
+        let firefox_waiter = state.contexts[index].role == ProcessRole::Firefox;
+        let group_pid = state.contexts[index].group_pid;
+        if firefox_waiter {
             FIREFOX_INPUT_WATCHER_TID.store(tid, Ordering::Release);
         }
         state.contexts[index].input_wait = true;
@@ -2615,7 +2626,7 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
                 if SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
                     SMP_PROBE_INPUT_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
                 }
-                return Ok((tid, None));
+                return Ok((tid, None, firefox_waiter, group_pid, cpu));
             }
             state.contexts[index].input_wait = false;
             let _ = state.table.wake(tid);
@@ -2628,10 +2639,10 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
             .find(|slot| slot.pid == next.pid)
             .map(|slot| slot.context)
             .ok_or(IoBlockResult::Failed)?;
-        Ok((tid, Some(context)))
+        Ok((tid, Some(context), firefox_waiter, group_pid, cpu))
     });
     match switched {
-        Ok((tid, context)) => {
+        Ok((tid, context, firefox_waiter, group_pid, blocked_cpu)) => {
             let returned_to_idle = context.is_none();
             if let Some(context) = context {
                 context.restore(frame);
@@ -2643,6 +2654,16 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
                 crate::serial_println!(
                     "MAKOS_AARCH64_INPUT_BLOCK_OK tid={} scheduler=blocked retry=svc",
                     tid,
+                );
+            }
+            if firefox_waiter
+                && !FIREFOX_INPUT_WATCHER_BLOCK_REPORTED.swap(true, Ordering::AcqRel)
+            {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK tid={} group_pid={} cpu={} wait=surface-event retry=svc",
+                    tid,
+                    group_pid,
+                    blocked_cpu,
                 );
             }
             if returned_to_idle && SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
@@ -3521,6 +3542,15 @@ fn record_smp_load_dispatch(state: &SchedulerState, pid: u64, cpu: usize) {
 }
 
 fn reset_production_worker_evidence() {
+    FIREFOX_INPUT_WATCHER_TID.store(0, Ordering::Release);
+    SURFACE_PRIORITY_TID.store(0, Ordering::Release);
+    SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_PENDING.store(false, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_REPORTED.store(false, Ordering::Release);
+    SURFACE_PRIORITY_REPORTED.store(false, Ordering::Release);
+    FIREFOX_INPUT_WATCHER_BLOCK_REPORTED.store(false, Ordering::Release);
+    SURFACE_PRIORITY_AP_REPORTED.store(false, Ordering::Release);
+    SURFACE_MAIN_DISPATCH_REPORTED.store(false, Ordering::Release);
     PRODUCTION_WORKER_CPU_MASK.store(0, Ordering::Release);
     PRODUCTION_WORKER_REPORTED_MASK.store(0, Ordering::Release);
     PRODUCTION_WORKER_GROUP_PID.store(0, Ordering::Release);
@@ -3623,15 +3653,25 @@ pub(crate) fn run_secondary_scheduler() -> ! {
             if !state.session_active {
                 return None;
             }
-            let process = state.schedule_next_for_cpu(cpu)?;
+            let prior_pid = state.table.current_pid_on(cpu).unwrap_or(0);
+            let priority = select_surface_priority(state, prior_pid, cpu);
+            let process = priority.or_else(|| state.schedule_next_for_cpu(cpu))?;
             record_smp_load_dispatch(state, process.pid, cpu);
             state
                 .contexts
                 .iter()
                 .find(|slot| slot.pid == process.pid)
-                .map(|slot| (process.pid, slot.group_pid, slot.role, slot.context))
+                .map(|slot| {
+                    (
+                        process.pid,
+                        slot.group_pid,
+                        slot.role,
+                        slot.context,
+                        priority.is_some(),
+                    )
+                })
         });
-        let Some((pid, group_pid, role, context)) = selected else {
+        let Some((pid, group_pid, role, context, surface_priority)) = selected else {
             // The EL1 return trampoline leaves IRQs masked. Unmask around the
             // idle instruction so a scheduler SGI is acknowledged rather than
             // depending on implementation-specific masked-WFI behavior, then
@@ -3645,6 +3685,9 @@ pub(crate) fn run_secondary_scheduler() -> ! {
         };
         if SMP_PROBE_SCHEDULER_IDLE_MASK.load(Ordering::Acquire) & cpu_bit != 0 {
             SMP_PROBE_SCHEDULER_REDISPATCH_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+        }
+        if surface_priority {
+            report_surface_priority_dispatch(pid, cpu, pid == group_pid);
         }
         let boot_probe = matches!(role, ProcessRole::SmpProbe | ProcessRole::SmpLoad);
         if boot_probe {
@@ -4406,7 +4449,7 @@ pub fn spawn_firefox_smp_probe() -> Option<u64> {
     )?;
     if !crate::security::register_session_process(
         pid,
-        crate::security::SessionProcessRole::NativeIpc,
+        crate::security::SessionProcessRole::FirefoxProbe,
     ) {
         discard_spawned(pid);
         return None;
@@ -5809,19 +5852,37 @@ fn clear_child_tid_on_exit() {
     }
 }
 
-fn select_surface_priority(
-    state: &mut SchedulerState,
-    prior_pid: u64,
-) -> Option<makos_process_table::ProcessInfo> {
+fn active_surface_priority_tid() -> u64 {
     let tid = SURFACE_PRIORITY_TID.load(Ordering::Acquire);
     if tid == 0 {
-        return None;
+        return 0;
     }
     let now = crate::arch::monotonic_ticks();
     let deadline = SURFACE_PRIORITY_DEADLINE.load(Ordering::Acquire);
     if deadline == 0 || now > deadline {
         SURFACE_PRIORITY_TID.store(0, Ordering::Release);
         SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        return 0;
+    }
+    tid
+}
+
+fn surface_priority_cpu_eligible(slot: &ContextSlot, cpu: usize) -> bool {
+    slot.role == ProcessRole::Firefox
+        && if slot.pid == slot.group_pid {
+            cpu == 0
+        } else {
+            cpu != 0
+        }
+}
+
+fn select_surface_priority(
+    state: &mut SchedulerState,
+    prior_pid: u64,
+    cpu: usize,
+) -> Option<makos_process_table::ProcessInfo> {
+    let tid = active_surface_priority_tid();
+    if tid == 0 {
         return None;
     }
     let Some(info) = state.table.get(tid) else {
@@ -5829,10 +5890,29 @@ fn select_surface_priority(
         SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
         return None;
     };
+    let Some(slot) = state.contexts.iter().find(|slot| slot.pid == tid) else {
+        SURFACE_PRIORITY_TID.store(0, Ordering::Release);
+        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        return None;
+    };
+    if slot.role != ProcessRole::Firefox {
+        SURFACE_PRIORITY_TID.store(0, Ordering::Release);
+        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        return None;
+    }
     match info.state {
         makos_process_table::ProcessState::Running if tid == prior_pid => Some(info),
+        // Another CPU already owns the selected context. Preserve the hint so
+        // that owner can retain it at its next exception instead of letting a
+        // racing scheduler clear a valid cross-CPU handoff.
+        makos_process_table::ProcessState::Running => None,
         makos_process_table::ProcessState::Ready => {
-            if state.table.activate_on(scheduler_cpu(), tid).is_err() {
+            // Firefox leaders and device work remain on CPU0. A native-event
+            // watcher is a non-leader thread and is dispatched on AP1-3, so
+            // input priority no longer serializes it behind the busy leader.
+            if !surface_priority_cpu_eligible(slot, cpu)
+                || state.table.activate_on(cpu, tid).is_err()
+            {
                 return None;
             }
             state.table.get(tid)
@@ -5843,6 +5923,45 @@ fn select_surface_priority(
             SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
             None
         }
+    }
+}
+
+fn report_surface_priority_dispatch(tid: u64, cpu: usize, leader: bool) {
+    if !SURFACE_PRIORITY_REPORTED.swap(true, Ordering::AcqRel) {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SURFACE_PRIORITY_OK tid={} source=key scheduler=next-ready bounded_ticks={} cpu={}",
+            tid,
+            SURFACE_PRIORITY_TICKS,
+            cpu,
+        );
+    }
+    if !leader && cpu != 0
+        && !SURFACE_PRIORITY_AP_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK tid={} cpu={} target=firefox-input-watcher affinity=nonleader-ap ownership=exclusive",
+            tid,
+            cpu,
+        );
+    }
+    if leader && cpu == 0
+        && !SURFACE_MAIN_DISPATCH_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK tid={} cpu=0 source=bounded-handoff affinity=leader-cpu0",
+            tid,
+        );
+    }
+    // The deadline bounds a stale hint; it is not a time slice. One selected
+    // dispatch is sufficient for the watcher to dequeue or the leader to run
+    // its posted callback. Keeping the hint after that dispatch can starve a
+    // same-affinity Firefox child that the selected thread immediately yields
+    // to, because yields can outpace timer ticks by orders of magnitude.
+    if SURFACE_PRIORITY_TID
+        .compare_exchange(tid, 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
     }
 }
 
@@ -5885,11 +6004,7 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             REMOTE_GROUP_STOP_ACK_MASK.fetch_or(bit, Ordering::AcqRel);
             return (prior_pid, None, true);
         }
-        let priority = if cpu == 0 {
-            select_surface_priority(state, prior_pid)
-        } else {
-            None
-        };
+        let priority = select_surface_priority(state, prior_pid, cpu);
         let next = priority
             .or_else(|| state.schedule_next_for_cpu(cpu))
             .unwrap_or_else(|| crate::fatal("AArch64 schedule found no runnable process"));
@@ -5905,26 +6020,27 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
         }
         (
             prior_pid,
-            Some((next.pid, state.contexts[index].context, priority.is_some())),
+            Some((
+                next.pid,
+                state.contexts[index].context,
+                priority.is_some(),
+                state.contexts[index].pid == state.contexts[index].group_pid,
+            )),
             false,
         )
     });
     if remote_stopped {
         return;
     }
-    let Some((next_pid, context, surface_priority)) = next else {
+    let Some((next_pid, context, surface_priority, surface_priority_leader)) = next else {
         return;
     };
     context.restore(frame);
     if next_pid != prior_pid {
         crate::arch::switch_address_space(context.ttbr0);
     }
-    if surface_priority && !SURFACE_PRIORITY_REPORTED.swap(true, Ordering::AcqRel) {
-        crate::serial_println!(
-            "MAKOS_AARCH64_SURFACE_PRIORITY_OK tid={} source=key scheduler=next-ready bounded_ticks={}",
-            next_pid,
-            SURFACE_PRIORITY_TICKS,
-        );
+    if surface_priority {
+        report_surface_priority_dispatch(next_pid, cpu, surface_priority_leader);
     }
 }
 

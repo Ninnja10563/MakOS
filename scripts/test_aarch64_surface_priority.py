@@ -8,6 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
 INPUT = (ROOT / "kernel/src/aarch64_virtio_input.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
+SECURITY = (ROOT / "kernel/src/security.rs").read_text()
+GRAPHICS = (ROOT / "kernel/src/graphics.rs").read_text()
+PTHREAD_PROBE = (ROOT / "ports/musl/pthread-probe.c").read_text()
+PRODUCTION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_production_smp.py").read_text()
 
 
 def function_body(source: str, signature: str) -> str:
@@ -29,12 +33,16 @@ poll = function_body(INPUT, "pub fn poll()")
 prioritize = function_body(PROCESS, "pub(crate) fn prioritize_firefox_surface_thread")
 handoff = function_body(PROCESS, "pub(crate) fn arm_firefox_process_leader_handoff")
 set_priority = function_body(PROCESS, "fn set_surface_priority")
+active_priority = function_body(PROCESS, "fn active_surface_priority_tid")
+priority_affinity = function_body(PROCESS, "fn surface_priority_cpu_eligible")
+input_block = function_body(PROCESS, "pub(crate) fn block_current_for_input")
 futex_wake = function_body(PROCESS, "fn wake_futex_in_state")
 activate_wakes = function_body(PROCESS, "fn activate_futex_wakes")
 dispatch = function_body(ARCH, "fn handle_svc")
 timer_irq = function_body(ARCH, "fn handle_irq")
 select = function_body(PROCESS, "fn select_surface_priority")
 schedule = function_body(PROCESS, "fn schedule_from_exception")
+secondary = function_body(PROCESS, "pub(crate) fn run_secondary_scheduler")
 
 assert "SURFACE_KEY_QUEUED.store(true" in route
 assert "if routed" in route
@@ -50,6 +58,11 @@ assert prioritize.index("FIREFOX_INPUT_WATCHER_TID.load") < prioritize.index(
 assert ".or_else(||" in prioritize
 assert "set_surface_priority(tid)" in prioritize
 assert "saturating_add(SURFACE_PRIORITY_TICKS)" in set_priority
+assert "now > deadline" in active_priority
+assert "slot.pid == slot.group_pid" in priority_affinity
+assert "cpu == 0" in priority_affinity and "cpu != 0" in priority_affinity
+assert "FIREFOX_INPUT_WATCHER_BLOCK_REPORTED" in input_block
+assert "MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK" in input_block
 assert "SURFACE_MAIN_HANDOFF_PENDING.store(true" in handoff
 assert "SURFACE_PRIORITY_TID.store(0" in handoff
 assert "slot.pid == slot.group_pid" in handoff
@@ -70,18 +83,46 @@ assert "service_input_on_owner_cpu();" in timer_irq
 assert timer_irq.index("service_input_on_owner_cpu();") < timer_irq.index(
     "crate::aarch64_process::preempt_from_timer(frame);"
 )
-assert "ProcessState::Ready" in select and "table.activate_on(scheduler_cpu(), tid)" in select
+assert "ProcessState::Ready" in select and "state.table.activate_on(cpu, tid)" in select
 assert "ProcessState::Running if tid == prior_pid => Some(info)" in select
 assert "ProcessState::Blocked => None" in select
-assert "now > deadline" in select
-assert "select_surface_priority(state, prior_pid)" in schedule
+assert "ProcessState::Running => None" in select
+assert "surface_priority_cpu_eligible(slot, cpu)" in select
+assert "select_surface_priority(state, prior_pid, cpu)" in schedule
 assert ".or_else(|| state.schedule_next_for_cpu(cpu))" in schedule
+assert "select_surface_priority(state, prior_pid, cpu)" in secondary
+assert "report_surface_priority_dispatch(pid, cpu, pid == group_pid)" in secondary
+assert "MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK" in PROCESS
+assert "MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK" in PROCESS
+assert "compare_exchange(tid, 0, Ordering::AcqRel" in PROCESS
+assert "yields can outpace timer ticks" in PROCESS
 assert INPUT.count("route_surface_key(") == 5  # helper plus 4 keyboard routes
+for token in (
+    "production_input_watcher",
+    "makos_call4(140, production_input_surface",
+    "event.key != 132",
+    "MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK",
+):
+    assert token in PTHREAD_PROBE, token
+assert "SessionProcessRole::FirefoxProbe" in PROCESS
+assert "SessionProcessRole::FirefoxProbe" in SECURITY
+assert "CAP_SERVICE_PUBLISH" in SECURITY
+assert "const MAX_SURFACES: usize = 7;" in GRAPHICS
+assert "const DESKTOP_SURFACES: usize = 6;" in GRAPHICS
+assert "makos_call4(8, 96, 64, 7, 0)" in PTHREAD_PROBE
+for token in (
+    "WATCHER_BLOCKED_MARKER",
+    'common.send_key(stream, "ctrl-a")',
+    "WATCHER_AP_MARKER",
+    "LEADER_DISPATCH_MARKER",
+    "input_priority=watcher-ap,leader-cpu0",
+):
+    assert token in PRODUCTION_RUNTIME, token
 
 print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_TEST_OK "
     "trigger=queued-key target=firefox-input-watcher blocked,active=retain-hint fallback=process-leader "
-    "ready=next-schedule boost=bounded-window handoff=watcher-dequeue-fallback,futex-refresh "
+    "ready=next-schedule boost=one-shot,stale-deadline handoff=watcher-ap,leader-cpu0,futex-refresh "
     "timer_poll=100hz owner=cpu0 expiry=ticks "
     "fallback=round-robin pointer=unchanged"
 )
