@@ -65,17 +65,19 @@ See `docs/SYSCALLS.md`.
 
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
-normal VFS. Its C subset grammar is one translation unit of the form
-`int name(int parameter) { return expression; }`, where expressions may use
-the parameter, unsigned 16-bit constants, parentheses, multiplication,
-addition, and subtraction. It emits AAPCS64 32-bit `int` code, then a real
+normal VFS. Its C subset accepts one `int` function with one `int` parameter.
+The body may declare up to four initialized register locals, use the parameter,
+locals, unsigned 16-bit constants, parentheses, multiplication, addition and
+subtraction, and contain an equality `if` whose block returns an expression.
+A final unconditional return is required. It emits AAPCS64 32-bit `int` code
+with validated conditional-branch fixups, then a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. The companion assembler supplies `_start`; the bounded linker
 resolves one `R_AARCH64_CALL26` and produces a validated static `ET_EXEC`.
 Unsupported tokens and malformed object metadata fail closed.
 
-This seed has no declarations beyond the single function, locals, loads or
-stores, control flow, multiple C functions, preprocessing, optimization,
+This seed has no pointers, memory loads/stores, loops, assignments after local
+initialization, nested/general blocks, multiple C functions, preprocessing, optimization,
 general symbol resolution, archives, dynamic linking, CLI build driver, or
 debug information. It must not be presented as a general C compiler or a
 self-hosted MakOS build.

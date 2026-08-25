@@ -27,30 +27,33 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG self-host-C milestone:
-  PID 324662, user service `makos-visible-selfhost-c.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG self-host-flow milestone:
+  PID 331488, user service `makos-visible-selfhost-flow.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP`, private boot clone
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP/boot.img`, private data clone
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP/data.img`, private variables
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP/vars.fd`, QMP
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP/qmp.sock`, serial
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP/serial.log`, PID file
-  `build/makos-pi-visible-selfhost-c-ubEkb4qP/qemu.pid`, and QMP framebuffer
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh`, private boot clone
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh/boot.img`, private data clone
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh/data.img`, private variables
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh/vars.fd`, QMP
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh/qmp.sock`, serial
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh/serial.log`, PID file
+  `build/makos-pi-visible-selfhost-flow-Eqae6jLh/qemu.pid`, and QMP framebuffer
   captures `login.ppm`/`login.png`. Its boot
   clone SHA-256 is
-  `4e8ab71f3d797028acbb4c168d1c72693bbda648a5651d3e086a3eef4668ca80`,
+  `d95ff1bfc5115c981b85acaa037c7d4425abd621b9f741b87f82bcec5a182e2c`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `98,99,100`, with no fatal/panic. The 800x600 capture was visually
+  counters `99,101,97`, with no fatal/panic. The 800x600 capture was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 324662/session
+  `build/makos-pi-visible-selfhost-c-ubEkb4qP` was stopped cleanly through QMP
+  before the self-host control-flow runtime; its private files remain.
   Prior PID 314733/session
   `build/makos-pi-visible-firefox-overlap-XO3FP0e3` was stopped cleanly through
   QMP before the self-host compiler runtime; its private files remain.
@@ -270,18 +273,20 @@ Preserve existing files and changes.
   full broad-gate pass.
 - 2026-08-25 the guest-native AArch64 toolchain now includes a source-driven
   bounded C compiler. It reads `generated-answer.c` through MakFS, parses one
-  AAPCS64 `int` function/parameter with constants, parentheses and `*`/`+`/`-`
-  precedence, and emits 28 bytes of 32-bit A64 code in a 592-byte ELF64
+  AAPCS64 `int` function/parameter with four bounded register locals, constants,
+  parentheses, `*`/`+`/`-` precedence and equality `if`/return control flow. The
+  current multi-statement source executes both RX JIT outcomes 20→42 and 0→86,
+  and emits 68 bytes of 32-bit A64 code in a 632-byte ELF64
   `ET_REL`. The assembly startup produces 76 bytes/688-byte `ET_REL`; both
   persist and reopen. The linker resolves `_start`→`answer`, applies
-  `R_AARCH64_CALL26`, emits 104 linked bytes in a 559-byte `ET_EXEC`, and the
-  normal loader executes it twice with status 42. Unsupported C division and a
-  corrupted relocation fail closed. Exact final source passes release artifact
+  `R_AARCH64_CALL26`, emits 144 linked bytes in a 559-byte `ET_EXEC`, and the
+  normal loader executes it twice with status 42. Unsupported C division, a
+  missing all-path return, and a corrupted relocation fail closed. Exact final source passes release artifact
   checks, `make unit check`, structural guard, and focused Pi/QEMU 10.0.11 TCG.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
   Partial: this is not a full C/Rust compiler, general linker/build system/
   debugger, or substantial in-guest MakOS build.
-- At this handoff PID 324662 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 331488 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -370,8 +375,8 @@ Preserve existing files and changes.
    automatic load balancing and repeated migration contention while retaining
    CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
    any focused runtime.
-3. Expand the bounded guest C compiler into locals/control flow/memory and
-   multiple functions, then generalize symbols/relocations and add a real build
+3. Expand the bounded guest C compiler into pointer/memory expressions, loops
+   and multiple functions, then generalize symbols/relocations and add a real build
    driver before a substantial in-guest build. Preserve real implementation
    requirements—no fake/spoofed apps.
 

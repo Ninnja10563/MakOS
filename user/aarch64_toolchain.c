@@ -319,6 +319,13 @@ static size_t assemble(const char *source, size_t source_length,
  * AArch64 integer calling convention and is later wrapped in a genuine
  * ELF64 ET_REL object by emit_object().  Unsupported syntax fails closed.
  */
+enum { MAX_C_LOCALS = 4 };
+
+struct c_local {
+    char name[MAX_LABEL_BYTES];
+    size_t length;
+};
+
 struct c_compiler {
     const char *source;
     size_t source_length;
@@ -328,6 +335,8 @@ struct c_compiler {
     size_t output;
     char parameter[MAX_LABEL_BYTES];
     size_t parameter_length;
+    struct c_local locals[MAX_C_LOCALS];
+    size_t local_count;
 };
 
 static void c_space(struct c_compiler *compiler) {
@@ -408,13 +417,23 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
     compiler->cursor = saved;
     char identifier[MAX_LABEL_BYTES];
     size_t identifier_length;
-    if (!c_identifier(compiler, identifier, &identifier_length) ||
-        !same_name(identifier, identifier_length, compiler->parameter,
-                   compiler->parameter_length))
-        return 0;
-    /* mov wN, w9: the AAPCS64 int parameter is preserved in w9. */
-    return c_emit(compiler, UINT32_C(0x2a0003e0) | (UINT32_C(9) << 16) |
-                            destination);
+    if (!c_identifier(compiler, identifier, &identifier_length)) return 0;
+    uint32_t source_register = 0;
+    if (same_name(identifier, identifier_length, compiler->parameter,
+                  compiler->parameter_length)) {
+        source_register = 9;
+    } else {
+        size_t local = 0;
+        while (local < compiler->local_count &&
+               !same_name(identifier, identifier_length,
+                          compiler->locals[local].name,
+                          compiler->locals[local].length))
+            ++local;
+        if (local == compiler->local_count) return 0;
+        source_register = 10 + (uint32_t)local;
+    }
+    return c_emit(compiler, UINT32_C(0x2a0003e0) |
+                            (source_register << 16) | destination);
 }
 
 static int c_multiplicative(struct c_compiler *compiler,
@@ -451,6 +470,59 @@ static int c_additive(struct c_compiler *compiler, uint32_t destination) {
     }
 }
 
+static int c_equality(struct c_compiler *compiler) {
+    c_space(compiler);
+    if (compiler->cursor + 2 > compiler->source_length ||
+        compiler->source[compiler->cursor] != '=' ||
+        compiler->source[compiler->cursor + 1] != '=')
+        return 0;
+    compiler->cursor += 2;
+    return 1;
+}
+
+static int c_return_statement(struct c_compiler *compiler) {
+    return c_additive(compiler, 0) && c_punct(compiler, ';') &&
+           c_emit(compiler, UINT32_C(0xd65f03c0));
+}
+
+static int c_declaration(struct c_compiler *compiler) {
+    if (compiler->local_count == MAX_C_LOCALS) return 0;
+    struct c_local local = {0};
+    if (!c_identifier(compiler, local.name, &local.length) ||
+        same_name(local.name, local.length, compiler->parameter,
+                  compiler->parameter_length))
+        return 0;
+    for (size_t index = 0; index < compiler->local_count; ++index)
+        if (same_name(local.name, local.length, compiler->locals[index].name,
+                      compiler->locals[index].length))
+            return 0;
+    if (!c_punct(compiler, '=') || !c_additive(compiler, 0) ||
+        !c_punct(compiler, ';'))
+        return 0;
+    uint32_t register_index = 10 + (uint32_t)compiler->local_count;
+    if (!c_emit(compiler, UINT32_C(0x2a0003e0) | register_index)) return 0;
+    compiler->locals[compiler->local_count++] = local;
+    return 1;
+}
+
+static int c_if_return(struct c_compiler *compiler) {
+    if (!c_punct(compiler, '(') || !c_additive(compiler, 0) ||
+        !c_equality(compiler) || !c_additive(compiler, 1) ||
+        !c_punct(compiler, ')') ||
+        !c_emit(compiler, UINT32_C(0x6b00001f) | (UINT32_C(1) << 16)))
+        return 0;
+    size_t branch = compiler->output;
+    if (!c_emit(compiler, UINT32_C(0x54000001)) ||
+        !c_punct(compiler, '{') || !c_keyword(compiler, "return") ||
+        !c_return_statement(compiler) || !c_punct(compiler, '}'))
+        return 0;
+    size_t byte_delta = compiler->output - branch;
+    if (byte_delta % 4 != 0 || byte_delta / 4 > UINT32_C(0x3ffff)) return 0;
+    put32(compiler->code, branch,
+          UINT32_C(0x54000001) | ((uint32_t)(byte_delta / 4) << 5));
+    return 1;
+}
+
 static size_t compile_c(const char *source, size_t source_length,
                         volatile uint8_t *code, size_t capacity,
                         char function[MAX_LABEL_BYTES],
@@ -466,18 +538,33 @@ static size_t compile_c(const char *source, size_t source_length,
         !c_punct(&compiler, '(') || !c_keyword(&compiler, "int") ||
         !c_identifier(&compiler, compiler.parameter,
                       &compiler.parameter_length) ||
-        !c_punct(&compiler, ')') || !c_punct(&compiler, '{') ||
-        !c_keyword(&compiler, "return"))
+        !c_punct(&compiler, ')') || !c_punct(&compiler, '{'))
         return 0;
     /* mov w9, w0 preserves the sole AAPCS64 int parameter. */
-    if (!c_emit(&compiler, UINT32_C(0x2a0003e9)) ||
-        !c_additive(&compiler, 0) || !c_punct(&compiler, ';') ||
-        !c_punct(&compiler, '}'))
+    if (!c_emit(&compiler, UINT32_C(0x2a0003e9))) return 0;
+    int terminal_return = 0;
+    size_t statement_count = 0;
+    for (;;) {
+        c_space(&compiler);
+        if (compiler.cursor == compiler.source_length) return 0;
+        if (compiler.source[compiler.cursor] == '}') break;
+        if (terminal_return) return 0;
+        if (c_keyword(&compiler, "int")) {
+            if (!c_declaration(&compiler)) return 0;
+        } else if (c_keyword(&compiler, "if")) {
+            if (!c_if_return(&compiler)) return 0;
+        } else if (c_keyword(&compiler, "return")) {
+            if (!c_return_statement(&compiler)) return 0;
+            terminal_return = 1;
+        } else {
+            return 0;
+        }
+        ++statement_count;
+    }
+    if (statement_count == 0 || !terminal_return || !c_punct(&compiler, '}'))
         return 0;
     c_space(&compiler);
-    if (compiler.cursor != compiler.source_length ||
-        !c_emit(&compiler, UINT32_C(0xd65f03c0)))
-        return 0;
+    if (compiler.cursor != compiler.source_length) return 0;
     return compiler.output;
 }
 
@@ -849,19 +936,27 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "svc #0\n";
     static const char answer_source[] =
         "int answer(int value) {\n"
-        "    return value * 2 + 2;\n"
+        "    int normalized = (value * 3) - 20;\n"
+        "    if (normalized == 40) {\n"
+        "        return normalized + 2;\n"
+        "    }\n"
+        "    return 86;\n"
         "}\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value / 2; }\n";
+    static const char malformed_control_source[] =
+        "int answer(int value) { if (value == 1) { return 42; } }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
         "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
         "compiler=guest-native assembler=guest-native objects=2 "
         "format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
         "symbols=_start,answer output=/home/user/generated-aarch64.elf "
-        "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 c_parameter=value "
-        "c_operators=mul,add code_bytes=76,28 object_bytes=688,592 "
-        "linked_bytes=104 output_bytes=559 persisted_reopened=1 malformed_c_denied=1 "
+        "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 "
+        "c_features=parameter,local,if,equality,return "
+        "c_operators=mul,sub,add branch_results=42,86 code_bytes=76,68 "
+        "object_bytes=688,632 linked_bytes=144 output_bytes=559 "
+        "persisted_reopened=1 malformed_c_denied=2 "
         "malformed_object_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
 
@@ -870,7 +965,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         !write_file(answer_source_path, sizeof(answer_source_path) - 1,
                     (const uint8_t *)answer_source, sizeof(answer_source) - 1))
         fail(80);
-    uint8_t source_input[512] = {0}, answer_input[128] = {0};
+    uint8_t source_input[512] = {0}, answer_input[256] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
@@ -881,7 +976,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         answer_source_length != sizeof(answer_source) - 1)
         fail(81);
 
-    uint8_t main_code[128] = {0}, answer_code[32] = {0};
+    uint8_t main_code[128] = {0}, answer_code[128] = {0};
     struct relocation relocations[MAX_RELOCATIONS] = {0};
     size_t relocation_count = 0;
     size_t main_code_length = assemble((const char *)source_input, source_length,
@@ -889,18 +984,24 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                        &relocation_count);
     char function[MAX_LABEL_BYTES] = {0};
     size_t function_length = 0;
-    uint8_t malformed_code[32] = {0};
+    uint8_t malformed_code[128] = {0};
     char malformed_function[MAX_LABEL_BYTES] = {0};
     size_t malformed_function_length = 0;
     if (compile_c(malformed_c_source, sizeof(malformed_c_source) - 1,
                   malformed_code, sizeof(malformed_code), malformed_function,
                   &malformed_function_length) != 0)
         fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_control_source,
+                  sizeof(malformed_control_source) - 1, malformed_code,
+                  sizeof(malformed_code), malformed_function,
+                  &malformed_function_length) != 0)
+        fail(82);
     size_t answer_code_length = compile_c((const char *)answer_input,
                                           answer_source_length, answer_code,
                                           sizeof(answer_code), function,
                                           &function_length);
-    if (main_code_length != 76 || answer_code_length != 28 ||
+    if (main_code_length != 76 || answer_code_length != 68 ||
         !same_name(function, function_length, "answer", 6) ||
         relocation_count != 1 || relocations[0].offset != 52)
         fail(82);
@@ -917,6 +1018,19 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     uint64_t jit_result = ((uint64_t (*)(void))(uintptr_t)jit)();
     if (jit_result != 42) fail(84);
 
+    uint8_t *compiled_jit =
+        (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
+    if ((uintptr_t)compiled_jit == UINT64_MAX) fail(84);
+    copy_bytes(compiled_jit, answer_code, answer_code_length);
+    if (syscall4(SYS_VM_PROTECT, (uintptr_t)compiled_jit,
+                 PROT_READ | PROT_WRITE | PROT_EXEC, 0, 0) != 0 ||
+        syscall4(SYS_VM_PROTECT, (uintptr_t)compiled_jit,
+                 PROT_READ | PROT_EXEC, 0, 0) != 1)
+        fail(84);
+    uint64_t (*compiled_answer)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)compiled_jit;
+    if (compiled_answer(20) != 42 || compiled_answer(0) != 86) fail(84);
+
     uint8_t main_object[OBJECT_CAPACITY], answer_object[OBJECT_CAPACITY];
     size_t main_object_length = emit_object(main_object, main_code,
                                             main_code_length, "_start", 6,
@@ -924,7 +1038,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t answer_object_length = emit_object(answer_object, answer_code,
                                               answer_code_length, function,
                                               function_length, 0, 0);
-    if (main_object_length != 688 || answer_object_length != 592 ||
+    if (main_object_length != 688 || answer_object_length != 632 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(answer_object_path, sizeof(answer_object_path) - 1,
@@ -957,7 +1071,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                         answer_object, answer_object_length,
                                         linked_code, sizeof(linked_code),
                                         &entry_offset);
-    if (linked_length != 104 || entry_offset != 0) fail(89);
+    if (linked_length != 144 || entry_offset != 0) fail(89);
 
     volatile uint8_t image[IMAGE_CAPACITY];
     size_t image_length = emit_elf(image, linked_code, linked_length,

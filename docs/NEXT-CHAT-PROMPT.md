@@ -13,8 +13,9 @@ run concurrent QEMU, or claim full completion while audit has Partial/Missing ro
 Current verified milestones: cursor runtime passes seven positions with zero
 scanout pixel changes, virtio-GPU cursor plane, and host cursor hidden. Typed IPC
 passes 12/12 unit tests, structural guard, full unit/check, and isolated full HVF
-runtime. The guest-native AArch64 toolchain now reads a valid C function from
-MakFS, compiles parameterized precedence-correct `int` arithmetic into A64,
+runtime. The guest-native AArch64 toolchain now reads a valid multi-statement C
+function from MakFS, compiles parameterized arithmetic, register locals and
+equality `if` control flow into A64, executes both generated branch outcomes,
 emits/persists/reopens a genuine ELF64 `ET_REL`, links it to an assembled startup
 with `R_AARCH64_CALL26`, rejects malformed C and relocation input, emits
 `ET_EXEC`, and executes it twice with status 42 in focused Pi/QEMU TCG runtime.
@@ -22,10 +23,10 @@ Full unit/check and release artifact checks pass. This remains a bounded compile
 seed, not a general C toolchain or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 324662, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-c-ubEkb4qP`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 331488, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-flow-Eqae6jLh`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-c-ubEkb4qP/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-selfhost-flow-Eqae6jLh/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

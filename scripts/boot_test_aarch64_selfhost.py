@@ -25,9 +25,11 @@ LINKER_MARKER = (
     b"compiler=guest-native assembler=guest-native objects=2 "
     b"format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
     b"symbols=_start,answer output=/home/user/generated-aarch64.elf "
-    b"c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 c_parameter=value "
-    b"c_operators=mul,add code_bytes=76,28 object_bytes=688,592 "
-    b"linked_bytes=104 output_bytes=559 persisted_reopened=1 malformed_c_denied=1 "
+    b"c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 "
+    b"c_features=parameter,local,if,equality,return "
+    b"c_operators=mul,sub,add branch_results=42,86 code_bytes=76,68 "
+    b"object_bytes=688,632 linked_bytes=144 output_bytes=559 "
+    b"persisted_reopened=1 malformed_c_denied=2 "
     b"malformed_object_denied=1"
 )
 EXECUTION_MARKER = (
@@ -36,9 +38,10 @@ EXECUTION_MARKER = (
     b"assembler=guest-native linker=guest-native objects=2 "
     b"object_format=elf64-et-rel relocation=R_AARCH64_CALL26 "
     b"symbols=_start,answer c_source=/home/user/generated-answer.c "
-    b"c_abi=aapcs64-int32 c_parameter=value c_operators=mul,add code_bytes=76,28 "
-    b"object_bytes=688,592 linked_bytes=104 output_bytes=559 persisted_reopened=1 "
-    b"malformed_c_denied=1 malformed_object_denied=1 "
+    b"c_abi=aapcs64-int32 c_features=parameter,local,if,equality,return "
+    b"c_operators=mul,sub,add branch_results=42,86 code_bytes=76,68 "
+    b"object_bytes=688,632 linked_bytes=144 output_bytes=559 persisted_reopened=1 "
+    b"malformed_c_denied=2 malformed_object_denied=1 "
     b"output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 "
     b"argv=3 env=1 malformed_startup_denied=3 executed=2 status=42"
 )
@@ -179,10 +182,11 @@ def main() -> int:
         f"accel={accel} sources=2 languages=aarch64-asm,c-subset-v1 "
         "compiler=guest-native assembler=guest-native objects=2 "
         "format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 "
-        "symbols=2 c_abi=aapcs64-int32 c_parameter=value c_operators=mul,add "
-        "code_bytes=76,28 "
-        "object_bytes=688,592 linked_bytes=104 output_bytes=559 persisted_reopened=1 "
-        "malformed_c_denied=1 malformed_object_denied=1 executed=2 status=42"
+        "symbols=2 c_abi=aapcs64-int32 "
+        "c_features=parameter,local,if,equality,return "
+        "c_operators=mul,sub,add branch_results=42,86 code_bytes=76,68 "
+        "object_bytes=688,632 linked_bytes=144 output_bytes=559 persisted_reopened=1 "
+        "malformed_c_denied=2 malformed_object_denied=1 executed=2 status=42"
     )
     return 0
 

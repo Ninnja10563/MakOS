@@ -138,7 +138,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
   startup and C source from MakFS. A bounded source-driven C compiler emits
-  AAPCS64-int32 expression code and a genuine ELF64 `ET_REL`; the assembler
+  AAPCS64-int32 expressions, register locals, equality control flow and a
+  genuine ELF64 `ET_REL`; both generated branch outcomes execute in EL0. The assembler
   emits the other object. The guest static linker resolves `_start`/`answer`,
   applies `R_AARCH64_CALL26`, rejects malformed C and a corrupted relocation,
   emits `ET_EXEC`, and executes the result twice under Pi/QEMU TCG. Full C/Rust

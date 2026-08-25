@@ -177,20 +177,23 @@ Last updated: 2026-08-25.
 - 2026-08-25 the AArch64 guest-native toolchain now crosses both a genuine
   source/compiler boundary and the existing object/link boundary. It writes an
   assembly startup and valid C source to MakFS and rereads them. The bounded C
-  subset parser accepts one AAPCS64 `int` function/parameter, unsigned 16-bit
-  constants, parentheses, and precedence-correct `*`, `+`, and `-`; it emits
-  32-bit A64 integer instructions and rejects unsupported syntax. The exercised
-  `answer(int value) { return value * 2 + 2; }` becomes 28 code bytes and a
-  592-byte ELF64 `ET_REL`; the assembler produces 76 code bytes and a 688-byte
-  `ET_REL`. Both objects contain real section/symbol/string tables, are
+  subset parser accepts one AAPCS64 `int` function/parameter, up to four
+  register locals, unsigned 16-bit constants, parentheses, precedence-correct
+  `*`/`+`/`-`, and an equality `if` block with a required terminal return. It
+  emits 32-bit A64 instructions plus a patched `B.NE`, and rejects unsupported
+  syntax or a missing all-path return. The exercised multi-statement `answer`
+  computes local `(value * 3) - 20`, returns local+2 when it equals 40, and
+  otherwise returns 86. RX JIT calls prove 20→42 and 0→86. The function becomes
+  68 code bytes and a 632-byte ELF64 `ET_REL`; the assembler produces 76 code
+  bytes and a 688-byte `ET_REL`. Both objects contain real section/symbol/string tables, are
   persisted and reopened, and link through a validated `R_AARCH64_CALL26` into
-  104 code bytes and a 559-byte two-`PT_LOAD` `ET_EXEC`. The runtime rejects a
-  malformed C division expression and copied relocation type 282 before the
+  144 code bytes and a 559-byte two-`PT_LOAD` `ET_EXEC`. The runtime rejects a
+  malformed C division expression, a non-total conditional function, and copied relocation type 282 before the
   valid build. Focused Pi/QEMU 10.0.11 TCG executes/reaps the final ELF twice
   with status 42 through syscalls 56/57. Release artifact validation, focused
   runtime, structural guard, and full `make unit check` pass. This is a real but
   deliberately bounded C compiler/static-linker seed, not a general C/Rust
-  compiler, build system, debugger, or substantial in-guest MakOS build, so
+  compiler or linker, build system, debugger, or substantial in-guest MakOS build, so
   self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
