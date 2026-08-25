@@ -33,6 +33,19 @@ recovery. The gate then closes and APs return to interrupt-masked WFI. General
 desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
 the truthful scope marker.
 
+A third embedded EL0 program proves remote-running group teardown. Its leader
+clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
+worker publishes a release-ordered running flag before spinning in EL0. The
+CPU0 leader invokes process-exit/`exit_group(55)`. Under the scheduler lock the
+kernel publishes the dying group and exact remote-owner mask, excludes every
+group task from new selection, then sends a GICv2 SGI. AP1 atomically detaches
+the worker, switches to the kernel root, rewrites the exception return to its
+private kernel record, and publishes its acknowledgement only after a `DSB`.
+CPU0 waits for that acknowledgement before robust-list cleanup, worker reap,
+and shared-resource handling. Runtime requires target/ack masks `0x2`, absent
+worker state, one status-55 leader zombie, single address-space reap, and exact
+frame recovery.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -58,9 +71,11 @@ safe general process migration.
   also returns to its calling CPU's kernel record when no local successor
   exists. Input no-successor behavior and device-triggered I/O still need
   runtime coverage.
-- Exit/session teardown must distinguish no local successor from no live
-  session. `exit_group` must first stop/ack remote-running siblings; current
-  administrative `terminate` correctly rejects a task owned by another CPU.
+- CPU0-initiated `exit_group` now stops and acknowledges a remote-running EL0
+  sibling before reap. Teardown of a sibling interrupted in an EL1 critical
+  section needs a deferred-return acknowledgement, and simultaneous unrelated
+  group exits still need serialization without deadlock. Administrative
+  `terminate` correctly continues to reject a task owned by another CPU.
 - AP banked virtual-timer PPI enable/programming and CPU0-only global tick/device
   servicing pass the bounded probe. General AP syscalls still require a complete
   device/service ownership audit.

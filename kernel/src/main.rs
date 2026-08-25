@@ -246,6 +246,7 @@ pub extern "C" fn aarch64_kernel_main(boot_ptr: *const BootInfo) -> ! {
     );
     aarch64_process::run_smp_userspace_self_test();
     aarch64_process::run_smp_ipc_self_test();
+    aarch64_process::run_smp_exit_group_self_test();
 
     aarch64_virtio_blk::init();
     fs::mount_and_test(boot_options.recover_makfs);

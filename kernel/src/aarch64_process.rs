@@ -53,6 +53,10 @@ static SMP_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-probe.elf"));
 static SMP_IPC_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-ipc-probe.elf"));
+static SMP_EXIT_GROUP_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-exit-group-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -164,6 +168,11 @@ impl SchedulerState {
         let contexts = &self.contexts;
         self.table.schedule_next_where_on(cpu, |info| {
             let slot = contexts.iter().find(|slot| slot.pid == info.pid);
+            if slot.is_some_and(|slot| {
+                slot.group_pid == REMOTE_GROUP_STOP_PID.load(Ordering::Acquire)
+            }) {
+                return false;
+            }
             if slot.is_some_and(|slot| slot.role == ProcessRole::SmpProbe) {
                 cpu < SMP_PROBE_AFFINITY.len()
                     && SMP_PROBE_AFFINITY[cpu].load(Ordering::Acquire) == info.pid
@@ -216,6 +225,12 @@ static SMP_PROBE_IO_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_IO_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_IPC_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_IPC_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
+static REMOTE_GROUP_STOP_PID: AtomicU64 = AtomicU64::new(0);
+static REMOTE_GROUP_STOP_STATUS: AtomicU64 = AtomicU64::new(0);
+static REMOTE_GROUP_STOP_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
+static REMOTE_GROUP_STOP_ACK_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_GROUP_STOP_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_GROUP_STOP_ACK_MASK: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -692,6 +707,92 @@ pub fn run_smp_ipc_self_test() {
         "MAKOS_AARCH64_SMP_IPC_OK waiter_cpu=1 signaler_cpu=0 event=auto-reset cross-task=1 ipc_idle_mask={:#x} ipc_resume_mask={:#x} child_exit=thread-return parent_exit=44 free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
         idle,
         resumed,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_exit_group_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_GROUP_STOP_TARGET_MASK.store(0, Ordering::Release);
+    SMP_PROBE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let leader = spawn_process(0, SMP_EXIT_GROUP_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP exit-group probe spawn failed"))
+        .0;
+    let expected_child = leader.saturating_add(1);
+    SMP_PROBE_AFFINITY[0].store(leader, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(expected_child, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP exit-group leader absent"));
+        if process.pid != leader {
+            crate::fatal("AArch64 SMP exit-group leader affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == leader)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP exit-group leader context absent"))
+            .context
+    });
+    smp_probe_enter(leader);
+    crate::arch::switch_address_space(context.ttbr0);
+    let returned_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if returned_status != 55 {
+        crate::fatal("AArch64 SMP exit-group caller status invalid");
+    }
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    while SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) != 0 {
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP exit-group AP return timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let child_absent = with_state(|state| state.table.get(expected_child).is_none());
+    let (resource, status) = with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, leader)
+        else {
+            crate::fatal("AArch64 SMP exit-group leader reap failed");
+        };
+        if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == leader) {
+            *slot = ContextSlot::EMPTY;
+        }
+        (resource, exit_status)
+    });
+    cleanup_reaped(leader, resource, status);
+    let targets = SMP_PROBE_GROUP_STOP_TARGET_MASK.load(Ordering::Acquire);
+    let acks = SMP_PROBE_GROUP_STOP_ACK_MASK.load(Ordering::Acquire);
+    if status != 55
+        || !child_absent
+        || targets != 0b0010
+        || acks != targets
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP exit-group userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_EXIT_GROUP_OK caller_cpu=0 stopped_cpu_mask={:#x} ack_mask={:#x} remote_tid={} remote_state=zombie,reaped parent_exit=55 shared_root=single-reap free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
+        targets,
+        acks,
+        expected_child,
     );
     reset_scheduler();
 }
@@ -3421,6 +3522,12 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
 /// Group leader remains a zombie until its real parent waits; worker task
 /// records are reaped immediately because they own no process resources.
 pub(crate) fn exit_group_from_exception(status: u64, frame: &mut crate::arch::ExceptionFrame) {
+    let requested_group = current_pid();
+    if requested_group == 0 {
+        crate::fatal("AArch64 exit_group without process identity");
+    }
+    let smp_probe = current_app_role() == ProcessRole::SmpProbe;
+    let remote_targets = begin_remote_group_stop(requested_group, status);
     robust_lists_on_group_exit();
     let (group_pid, caller_tid, worker_tids, worker_count, next) = with_state(|state| {
         let caller_tid = state
@@ -3433,6 +3540,9 @@ pub(crate) fn exit_group_from_exception(status: u64, frame: &mut crate::arch::Ex
             .find(|slot| slot.pid == caller_tid)
             .map(|slot| slot.group_pid)
             .unwrap_or_else(|| crate::fatal("AArch64 exit_group context absent"));
+        if group_pid != requested_group {
+            crate::fatal("AArch64 exit_group identity changed during remote stop");
+        }
         let group_root = state
             .table
             .get(group_pid)
@@ -3513,13 +3623,21 @@ pub(crate) fn exit_group_from_exception(status: u64, frame: &mut crate::arch::Ex
         }
     }
     let closed_ipc_handles = crate::ipc::close_all(group_pid);
+    let remote_acks = REMOTE_GROUP_STOP_ACK_MASK.load(Ordering::Acquire);
+    if smp_probe {
+        SMP_PROBE_GROUP_STOP_TARGET_MASK.store(remote_targets, Ordering::Release);
+        SMP_PROBE_GROUP_STOP_ACK_MASK.store(remote_acks, Ordering::Release);
+    }
+    finish_remote_group_stop(group_pid);
     crate::serial_println!(
-        "MAKOS_AARCH64_EXIT_GROUP_OK pid={} caller_tid={} status={} workers={} leader=zombie shared_root=retained closed_ipc_handles={}",
+        "MAKOS_AARCH64_EXIT_GROUP_OK pid={} caller_tid={} status={} workers={} leader=zombie shared_root=retained closed_ipc_handles={} remote_stop_target_mask={:#x} remote_stop_ack_mask={:#x}",
         group_pid,
         caller_tid,
         status,
         worker_count,
         closed_ipc_handles,
+        remote_targets,
+        remote_acks,
     );
     if let Some(context) = next {
         context.restore(frame);
@@ -3528,6 +3646,91 @@ pub(crate) fn exit_group_from_exception(status: u64, frame: &mut crate::arch::Ex
         crate::arch::switch_address_space(crate::arch::kernel_root());
         crate::arch::return_to_kernel(frame, status);
     }
+}
+
+fn begin_remote_group_stop(group_pid: u64, status: u64) -> u64 {
+    if REMOTE_GROUP_STOP_PID
+        .compare_exchange(0, group_pid, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        crate::fatal("AArch64 concurrent exit_group remote stop unsupported");
+    }
+    REMOTE_GROUP_STOP_STATUS.store(status, Ordering::Relaxed);
+    REMOTE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    let caller_cpu = scheduler_cpu();
+    let targets = with_state(|state| {
+        let mut targets = 0u64;
+        for slot in &state.contexts {
+            if slot.pid == 0 || slot.group_pid != group_pid {
+                continue;
+            }
+            if let Some(cpu) = state.table.running_cpu(slot.pid)
+                && cpu != caller_cpu
+            {
+                targets |= 1u64 << cpu;
+            }
+        }
+        // Publish the acknowledgement contract while the process lock still
+        // prevents a timer preemption from changing remote ownership.
+        REMOTE_GROUP_STOP_TARGET_MASK.store(targets, Ordering::Release);
+        targets
+    });
+    if targets == 0 {
+        return 0;
+    }
+    crate::arch::send_scheduler_ipi();
+    let deadline = crate::arch::counter_deadline_millis(20_000);
+    while REMOTE_GROUP_STOP_ACK_MASK.load(Ordering::Acquire) & targets != targets {
+        if crate::arch::counter_deadline_expired(deadline) {
+            crate::serial_println!(
+                "MAKOS_AARCH64_REMOTE_GROUP_STOP_DIAGNOSTIC pid={} target_mask={:#x} ack_mask={:#x}",
+                group_pid,
+                targets,
+                REMOTE_GROUP_STOP_ACK_MASK.load(Ordering::Acquire),
+            );
+            crate::fatal("AArch64 remote exit_group acknowledgement timeout");
+        }
+        core::hint::spin_loop();
+    }
+    targets
+}
+
+fn finish_remote_group_stop(group_pid: u64) {
+    if REMOTE_GROUP_STOP_PID.load(Ordering::Acquire) != group_pid {
+        crate::fatal("AArch64 remote exit_group owner mismatch");
+    }
+    REMOTE_GROUP_STOP_TARGET_MASK.store(0, Ordering::Release);
+    REMOTE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    REMOTE_GROUP_STOP_STATUS.store(0, Ordering::Relaxed);
+    REMOTE_GROUP_STOP_PID.store(0, Ordering::Release);
+}
+
+pub(crate) fn stop_remote_group_member_from_irq(
+    frame: &mut crate::arch::ExceptionFrame,
+) -> bool {
+    let cpu = scheduler_cpu();
+    let bit = 1u64 << cpu;
+    if REMOTE_GROUP_STOP_TARGET_MASK.load(Ordering::Acquire) & bit == 0 {
+        return false;
+    }
+    let group_pid = REMOTE_GROUP_STOP_PID.load(Ordering::Acquire);
+    let status = REMOTE_GROUP_STOP_STATUS.load(Ordering::Relaxed);
+    let stopped = with_state(|state| {
+        let tid = state.table.current_pid_on(cpu)?;
+        let slot = state.contexts.iter().find(|slot| slot.pid == tid)?;
+        if slot.group_pid != group_pid {
+            return None;
+        }
+        state.table.exit_current_on(cpu, status).map(|_| tid)
+    });
+    let Some(_tid) = stopped else {
+        return false;
+    };
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    crate::arch::return_to_kernel(frame, status);
+    unsafe { asm!("dsb ish", options(nostack)) };
+    REMOTE_GROUP_STOP_ACK_MASK.fetch_or(bit, Ordering::AcqRel);
+    true
 }
 
 fn exit_thread_from_exception(status: u64, frame: &mut crate::arch::ExceptionFrame) {

@@ -765,6 +765,7 @@ def main() -> int:
                 b"MAKOS_AARCH64_SMP_OK discovered=4 online=4",
                 b"MAKOS_AARCH64_SMP_USER_OK cpus=4",
                 b"MAKOS_AARCH64_SMP_IPC_OK waiter_cpu=1 signaler_cpu=0",
+                b"MAKOS_AARCH64_SMP_EXIT_GROUP_OK caller_cpu=0 stopped_cpu_mask=0x2 ack_mask=0x2",
                 b"aps=3 psci=",
                 b"conduit=hvc cpu_on=64 per_cpu_stacks=1 stack_bytes=65536 per_cpu_vbar=1 coherent_parallel_el1=1",
                 b"userspace_scheduler_cpus=1 aps_after_test=idle scheduler_gate=closed ap_idle=wfi",

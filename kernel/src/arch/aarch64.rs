@@ -1643,13 +1643,17 @@ fn secondary_scheduler_idle() -> ! {
 
 pub(crate) fn enable_smp_probe_scheduler() {
     SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);
+    send_scheduler_ipi();
+}
+
+pub(crate) fn send_scheduler_ipi() {
     let distributor = GIC_DISTRIBUTOR_BASE.load(Ordering::Acquire);
     if distributor == 0 {
-        crate::fatal("AArch64 SMP scheduler enable before GIC");
+        crate::fatal("AArch64 scheduler IPI before GIC");
     }
     unsafe {
         asm!("dsb ish", options(nostack));
-        // Target-list filter 1 sends this SGI to every PE except the BSP.
+        // Target-list filter 1 sends this SGI to every PE except the requester.
         mmio_write32(distributor + GICD_SGIR, (1 << 24) | SMP_SCHEDULER_SGI);
         asm!("dsb ish", "isb", options(nostack));
     }
@@ -5470,6 +5474,9 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
     }
     if first {
         crate::serial_println!("MAKOS_AARCH64_IRQ_TRACE stage=eoi-return");
+    }
+    if kind == 9 && crate::aarch64_process::stop_remote_group_member_from_irq(frame) {
+        return;
     }
     if timer {
         if kind == 9 {

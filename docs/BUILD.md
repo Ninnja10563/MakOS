@@ -125,6 +125,13 @@ thread-return status 0, parent status 44, and balanced frames. The scheduler
 closes AP dispatch again before the desktop; this is not yet general multicore
 userspace.
 
+The boot also runs a remote `exit_group` fixture. A CPU0 leader clones a worker
+fixed to AP1; after the worker proves active EL0 execution, the leader invokes
+syscall 119 with status 55. The kernel must publish the dying group, prevent
+redispatch, send an SGI, detach the AP1 task on AP1, switch that PE to the
+kernel root, and report matching `stopped_cpu_mask=0x2`/`ack_mask=0x2` before
+reaping. The marker also requires one shared-root reap and balanced frames.
+
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
 data memory type for an ELF entry would fault immediately after

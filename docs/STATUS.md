@@ -24,11 +24,16 @@ Last updated: 2026-08-25.
   validated RW/NX stack, signals the event, and returns through thread-only
   exit with no local successor. AP1 resumes and the parent exits 44. Runtime
   reports `ipc_idle_mask=0x2`/`ipc_resume_mask=0x2` with exact frame balance.
+  A third EL0 fixture places a cloned busy worker on AP1 and has its CPU0 leader
+  invoke syscall-119 group exit. The scheduler publishes a dying-group
+  exclusion, sends a GICv2 SGI, detaches the worker on AP1, switches AP1 off
+  the shared TTBR0, and receives acknowledgement mask `0x2` before worker reap;
+  status 55, single-root cleanup, frame balance, and subsequent login pass.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
   desktop/Firefox AP scheduling remains gated pending input/device-triggered
-  idle returns, remote group-exit acknowledgement, device affinity
+  idle returns, in-flight-EL1/concurrent group-exit completion, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
