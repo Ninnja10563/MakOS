@@ -115,9 +115,19 @@ Last updated: 2026-08-25.
   later input-ready phase. Neither reported a guest fatal/panic; thresholds
   were not changed. The earlier same-behavior combined run remains the full
   block/network/input/boot regression evidence.
+  A further bounded scheduler fixture now forces one immutable EL0 TID from
+  AP1 to AP2. Under the process lock it captures the live context, changes the
+  task from Running to Ready/unowned, publishes the new affinity, then kicks
+  idle PEs; AP2 alone may select it. The first runtime exposed only a target-
+  evidence ordering race: the same TID ran on both PEs and exited 71, but AP2
+  resumed before a later counter publication. Publishing the intended target
+  under the scheduler lock fixes that observer race. The unchanged repeat on
+  Pi/QEMU 10.0.11 TCG passes exact source/target masks `0x2`/`0x4`, one
+  migration, exclusive ownership, GPR/SP/TLS/SIMD preservation, status 71 and
+  frame balance. This qualifies forced migration, not general load balancing.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending forced migration and load balancing, so the
+  scheduling remains gated pending load balancing and broader contention, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
@@ -518,14 +528,15 @@ Last updated: 2026-08-25.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
   state are CPU-indexed; multicore userspace still needs general AP run queues,
-  forced migration, and load balancing before the desktop gate can open.
+  load balancing, and broader contention before the desktop gate can open.
   CPU0-only virtio input, virtio-net TX/RX,
   virtio-blk, and virtio-GPU submission now have focused AP runtime evidence
   for keyboard wake, copied UDPv4 DNS send/receive, timer-serviced 4 KiB
   filesystem read/write plus `fsync`/FLUSH, and deferred retained-surface
   transfer/resource-flush completion. A separate TCPv4 gate now proves an AP
   connect/send/blocking-receive/FIN lifecycle with CPU0-owned TX/RX and exact
-  I/O idle/wake/resume.
+  I/O idle/wake/resume. A bounded migration gate also moves the same saved TID
+  from AP1 to AP2 with exclusive ownership and GPR/SP/TLS/SIMD preservation.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID

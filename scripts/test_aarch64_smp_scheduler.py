@@ -24,10 +24,12 @@ GPU_PROBE = (ROOT / "user/aarch64_smp_gpu_probe.S").read_text()
 GPU_OWNER_PROBE = (ROOT / "user/aarch64_smp_gpu_owner_probe.S").read_text()
 TCP_PROBE = (ROOT / "user/aarch64_smp_tcp_probe.S").read_text()
 TCP_OWNER_PROBE = (ROOT / "user/aarch64_smp_tcp_owner_probe.S").read_text()
+MIGRATION_PROBE = (ROOT / "user/aarch64_smp_migration_probe.S").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
 TCP_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_tcp.py").read_text()
+MIGRATION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_migration.py").read_text()
 INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
 TCP_CONFIG = (ROOT / "boot/MAKOS-SMP-TCP.CFG").read_text()
 
@@ -200,6 +202,9 @@ for token in (
     "pub fn run_smp_gpu_self_test()",
     "pub fn run_smp_tcp_tx_self_test()",
     "MAKOS_AARCH64_SMP_TCP_TX_OK",
+    "pub fn run_smp_forced_migration_self_test()",
+    "pub(crate) fn migrate_smp_probe_from_exception(",
+    "MAKOS_AARCH64_SMP_MIGRATION_OK",
     "MAKOS_AARCH64_SMP_GPU_OK",
     "MAKOS_AARCH64_SMP_BLOCK_OK",
     "register_smp_block_probe(waiter)",
@@ -239,6 +244,8 @@ for token in (
     "aarch64-smp-tcp-probe",
     "aarch64_smp_tcp_owner_probe.S",
     "aarch64-smp-tcp-owner-probe",
+    "aarch64_smp_migration_probe.S",
+    "aarch64-smp-migration-probe",
 ):
     assert token in BUILD_RS, token
 for token in (
@@ -246,12 +253,14 @@ for token in (
     "aarch64-smp-gpu-owner-probe.elf",
     "aarch64-smp-tcp-probe.elf",
     "aarch64-smp-tcp-owner-probe.elf",
+    "aarch64-smp-migration-probe.elf",
 ):
     assert token in PROCESS, token
 assert "run_smp_network_rx_self_test();" in MAIN
 assert "run_smp_block_io_self_test();" in MAIN
 assert "run_smp_gpu_self_test();" in MAIN
 assert "run_smp_tcp_tx_self_test();" in MAIN
+assert "run_smp_forced_migration_self_test();" in MAIN
 for token in ("mov x8, #47", "mov x8, #49", "mov x8, #50", "mov x0, #63"):
     assert token in NETWORK_PROBE, token
 for token in (
@@ -287,6 +296,15 @@ for token in (
 for token in ("add x19, x0, #100", "mov x0, #70"):
     assert token in TCP_OWNER_PROBE, token
 for token in (
+    "msr tpidr_el0, x9",
+    "movi v0.16b, #0x5a",
+    "mov x0, #2",
+    "mov x8, #1",
+    "fmov x9, d0",
+    "mov x0, #71",
+):
+    assert token in MIGRATION_PROBE, token
+for token in (
     "pub(crate) fn register_smp_block_probe",
     "capabilities: CAP_FILE_WRITE",
     "pub(crate) fn register_smp_graphics_probe",
@@ -314,6 +332,7 @@ assert "if boot_options.smp_input_probe" in MAIN
 assert "if boot_options.smp_tcp_probe" in MAIN
 assert "test-aarch64-smp-input-runtime: image-aarch64-smp-input" in MAKEFILE
 assert "test-aarch64-smp-tcp-runtime: image-aarch64-smp-tcp" in MAKEFILE
+assert "test-aarch64-smp-migration-runtime: image-aarch64" in MAKEFILE
 assert "test.smp-input=required" in INPUT_CONFIG
 assert "test.smp-tcp=required" in TCP_CONFIG
 for token in (
@@ -353,6 +372,15 @@ for token in (
     "MAKOS_AARCH64_SMP_TCP_RUNTIME_OK",
 ):
     assert token in TCP_RUNTIME, token
+
+for token in (
+    "MAKOS_AARCH64_SMP_MIGRATION_OK tid=",
+    "source_cpu=1 target_cpu=2 source_mask=0x2 target_mask=0x4",
+    "migrations=1 ownership=running,ready-unowned,running",
+    "context=gpr,sp,tls,simd status=71",
+    "MAKOS_AARCH64_SMP_MIGRATION_RUNTIME_OK",
+):
+    assert token in MIGRATION_RUNTIME, token
 
 print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "

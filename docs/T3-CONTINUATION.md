@@ -27,15 +27,16 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for the stateful TCP change:
-  PID 241019, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-tcp-5o5pxp`, private data clone
-  `build/makos-pi-visible-tcp-5o5pxp/data.img`, private variables
-  `build/makos-pi-visible-tcp-5o5pxp/vars.fd`, QMP
-  `build/makos-pi-visible-tcp-5o5pxp/qmp.sock`, serial
-  `build/makos-pi-visible-tcp-5o5pxp/serial.log`, PID file
-  `build/makos-pi-visible-tcp-5o5pxp/qemu.pid`, and QMP framebuffer captures
-  `build/makos-pi-visible-tcp-5o5pxp/login.ppm`/`login.png`. It is the sole QEMU
+- Active visible Pi/QEMU 10.0.11 TCG milestone for forced migration:
+  PID 248288, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-migration-wHSJuT`, private data clone
+  `build/makos-pi-visible-migration-wHSJuT/data.img`, private variables
+  `build/makos-pi-visible-migration-wHSJuT/vars.fd`, QMP
+  `build/makos-pi-visible-migration-wHSJuT/qmp.sock`, serial
+  `build/makos-pi-visible-migration-wHSJuT/serial.log`, PID file
+  `build/makos-pi-visible-migration-wHSJuT/qemu.pid`, and QMP framebuffer
+  captures `login.png` (background-only transition) and `login-2.png` (visible
+  native dialog). It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
@@ -43,7 +44,9 @@ Preserve existing files and changes.
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
-  Prior PID 224308/session `build/makos-pi-visible-TMvEbm` was stopped cleanly
+  Prior PID 241019/session `build/makos-pi-visible-tcp-5o5pxp` was stopped
+  cleanly through QMP before migration runtime; its files remain. Prior PID
+  224308/session `build/makos-pi-visible-TMvEbm` was stopped cleanly
   through QMP before focused testing; its private session files remain.
   Earlier PID 214025/session `build/makos-pi-visible-JZAZKK` was stopped cleanly
   through QMP before this build; its private session files remain.
@@ -101,7 +104,7 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending forced migration and load balancing.
+  remains pending load balancing and broader contention.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -182,9 +185,21 @@ Preserve existing files and changes.
   `MAKOS_AARCH64_SMP_TCP_RUNTIME_OK accel=tcg requester_cpu=1 service_cpu=0 protocol=tcp4 request=exact response=exact close=fin tx_mmio_owner=cpu0 rx_mmio_owner=cpu0 socket_state=locked-publication`.
   The opt-in SmpProbe additionally bypasses the last-runnable WFI shortcut so
   host vCPU ordering cannot evade the required scheduler-idle publication;
-  production last-runnable behavior is unchanged. TCPv6 runtime, migration,
-  load balancing, and general desktop SMP remain open. Full `make unit check`,
+  production last-runnable behavior is unchanged. TCPv6 runtime, load
+  balancing, and general desktop SMP remain open. Full `make unit check`,
   scheduler structural guard, and dedicated 90-second runtime gate pass.
+- A new ordinary-boot fixture forces the same live EL0 TID from AP1 to AP2.
+  Under the process lock the source captures GPR/SP/TLS/SIMD state, changes
+  Running to Ready/unowned, publishes AP2 affinity, and relinquishes ownership;
+  AP2 alone then resumes after the SVC. The first Pi/TCG run exited 71 with the
+  same TID on both PEs but found an observer-ordering issue: AP2 resumed before
+  the source incremented a later target-evidence counter. Publishing the
+  intended target inside the locked transition fixes that proof race. The
+  unchanged repeat passes source/target masks `0x2`/`0x4`, one migration,
+  exclusive ownership, preserved GPR/SP/TLS/SIMD, status 71 and frame balance.
+  Marker: `MAKOS_AARCH64_SMP_MIGRATION_RUNTIME_OK accel=tcg tid=same source_cpu=1 target_cpu=2 ownership=exclusive context=gpr,sp,tls,simd`.
+  Reproducer: `make test-aarch64-smp-migration-runtime`. This closes forced
+  migration only; automatic load balancing/general desktop SMP remain open.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -194,12 +209,12 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 241019 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 248288 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- The stateful TCP owner-service milestone is the current implementation state;
-  CPU0-owned GPU commit `97b695d` and block-service commit `0868b79` remain its
-  device-ownership foundations. Generated
+- The forced-migration milestone is the current implementation state; the
+  stateful TCP owner service and CPU0-owned device services remain its
+  foundations. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -278,8 +293,8 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
-2. Continue the AArch64 userspace SMP row with forced migration and load
-   balancing, retaining CPU0-exclusive device ownership. Stop the visible QEMU
+2. Continue the AArch64 userspace SMP row with automatic load balancing and
+   repeated migration contention, retaining CPU0-exclusive device ownership. Stop the visible QEMU
    through QMP before any focused runtime.
 3. Continue the first genuine self-hosting seed toward a general linker/compiler
    and a substantial in-guest build. Preserve real implementation requirements—

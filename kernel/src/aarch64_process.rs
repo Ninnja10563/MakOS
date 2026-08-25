@@ -97,6 +97,10 @@ static SMP_TCP_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-tcp-owner-probe.elf"
 ));
+static SMP_MIGRATION_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-migration-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -289,6 +293,11 @@ static SMP_PROBE_INPUT_WAIT_TID: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_INPUT_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_INPUT_BLOCKED_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_INPUT_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_MIGRATION_TID: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_MIGRATION_DESTINATION: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_MIGRATION_SOURCE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_MIGRATION_COUNT: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -633,6 +642,101 @@ pub fn run_smp_userspace_self_test() {
     crate::serial_println!(
         "MAKOS_AARCH64_SMP_USER_OK cpus=4 tids={},{},{},{} overlap_mask={:#x} el=0 timer_ppi=per-cpu ap_block_idle=sleep-until wake=timer idle_mask={:#x} resume_mask={:#x} ap_io_idle=poll-timeout wake=timer io_idle_mask={:#x} io_resume_mask={:#x} ap_futex_idle=timeout wake=timer futex_idle_mask={:#x} futex_resume_mask={:#x} statuses=40,41,42,43 scheduler_scope=boot-probe desktop_gate=closed free_balance=1",
         tids[0], tids[1], tids[2], tids[3], peak, idle, resumed, io_idle, io_resumed, futex_idle, futex_resumed,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_forced_migration_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_MIGRATION_SOURCE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_TARGET_MASK.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_COUNT.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_DESTINATION.store(0, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+    for tid in &SMP_PROBE_TIDS {
+        tid.store(0, Ordering::Release);
+    }
+
+    let pid = spawn_process(0, SMP_MIGRATION_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP migration probe spawn failed"))
+        .0;
+    SMP_PROBE_MIGRATION_TID.store(pid, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(pid, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let complete = with_state(|state| {
+            state.table.get(pid).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(deadline) {
+            crate::fatal("AArch64 SMP forced migration timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let (resource, status) = with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, pid)
+        else {
+            crate::fatal("AArch64 SMP migration probe reap failed");
+        };
+        if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) {
+            *slot = ContextSlot::EMPTY;
+        }
+        (resource, exit_status)
+    });
+    cleanup_reaped(pid, resource, status);
+
+    let source = SMP_PROBE_MIGRATION_SOURCE_MASK.load(Ordering::Acquire);
+    let target = SMP_PROBE_MIGRATION_TARGET_MASK.load(Ordering::Acquire);
+    let count = SMP_PROBE_MIGRATION_COUNT.load(Ordering::Acquire);
+    let source_tid = SMP_PROBE_TIDS[1].load(Ordering::Acquire);
+    let target_tid = SMP_PROBE_TIDS[2].load(Ordering::Acquire);
+    let free_balance = crate::mm::free_frames() == free_before;
+    SMP_PROBE_MIGRATION_TID.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_DESTINATION.store(0, Ordering::Release);
+    if status != 71
+        || source != 0b0010
+        || target != 0b0100
+        || count != 1
+        || source_tid != pid
+        || target_tid != pid
+        || !free_balance
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SMP_MIGRATION_DIAGNOSTIC status={} source_mask={:#x} target_mask={:#x} migrations={} source_tid={} target_tid={} expected_tid={} free_balance={}",
+            status,
+            source,
+            target,
+            count,
+            source_tid,
+            target_tid,
+            pid,
+            u8::from(free_balance),
+        );
+        crate::fatal("AArch64 SMP forced migration proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_MIGRATION_OK tid={} source_cpu=1 target_cpu=2 source_mask={:#x} target_mask={:#x} migrations=1 ownership=running,ready-unowned,running context=gpr,sp,tls,simd status=71 free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
+        pid,
+        source,
+        target,
     );
     reset_scheduler();
 }
@@ -3184,6 +3288,11 @@ fn smp_probe_enter(tid: u64) {
         SMP_PROBE_INPUT_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
     }
     SMP_PROBE_TIDS[cpu].store(tid, Ordering::Release);
+    if tid == SMP_PROBE_MIGRATION_TID.load(Ordering::Acquire)
+        && SMP_PROBE_MIGRATION_DESTINATION.load(Ordering::Acquire) == cpu as u64
+    {
+        SMP_PROBE_MIGRATION_TARGET_MASK.fetch_or(bit, Ordering::AcqRel);
+    }
     let active = SMP_PROBE_ACTIVE_MASK.fetch_or(bit, Ordering::AcqRel) | bit;
     let mut peak = SMP_PROBE_PEAK_MASK.load(Ordering::Acquire);
     while active.count_ones() > peak.count_ones() {
@@ -4433,6 +4542,57 @@ pub fn terminate_session_apps() -> usize {
 
 pub(crate) fn yield_from_exception(frame: &mut crate::arch::ExceptionFrame) {
     schedule_from_exception(frame, false);
+}
+
+/// Move the armed immutable qualification task from its current AP to another
+/// AP. The scheduler lock serializes context capture, Running -> Ready/unowned
+/// publication, affinity change, and target selection. No saved context can be
+/// selected on the target until the source CPU has relinquished ownership.
+pub(crate) fn migrate_smp_probe_from_exception(
+    target_cpu: usize,
+    frame: &mut crate::arch::ExceptionFrame,
+) -> bool {
+    let source_cpu = scheduler_cpu();
+    let expected = SMP_PROBE_MIGRATION_TID.load(Ordering::Acquire);
+    if expected == 0 || source_cpu == 0 || target_cpu == 0 || target_cpu >= 4 {
+        return false;
+    }
+    frame.registers[0] = 0;
+    let captured = crate::arch::UserContext::capture(frame);
+    let migrated = with_state(|state| {
+        if state.table.current_pid_on(source_cpu) != Some(expected) {
+            return false;
+        }
+        let slot = state
+            .contexts
+            .iter_mut()
+            .find(|slot| slot.pid == expected)
+            .unwrap_or_else(|| crate::fatal("AArch64 migration context absent"));
+        if slot.role != ProcessRole::SmpProbe
+            || SMP_PROBE_AFFINITY[source_cpu].load(Ordering::Acquire) != expected
+        {
+            crate::fatal("AArch64 migration source ownership invalid");
+        }
+        slot.context = captured;
+        SMP_PROBE_MIGRATION_DESTINATION.store(target_cpu as u64, Ordering::Release);
+        SMP_PROBE_AFFINITY[source_cpu].store(0, Ordering::Release);
+        SMP_PROBE_AFFINITY[target_cpu].store(expected, Ordering::Release);
+        if state.schedule_next_for_cpu(source_cpu).is_some()
+            || state.table.running_cpu(expected).is_some()
+        {
+            crate::fatal("AArch64 migration did not publish Ready/unowned task");
+        }
+        true
+    });
+    if !migrated {
+        return false;
+    }
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    crate::arch::return_to_kernel(frame, 0);
+    SMP_PROBE_MIGRATION_SOURCE_MASK.fetch_or(1u64 << source_cpu, Ordering::AcqRel);
+    SMP_PROBE_MIGRATION_COUNT.fetch_add(1, Ordering::AcqRel);
+    notify_idle_cpus();
+    true
 }
 
 pub(crate) fn service_timer_waiters() {

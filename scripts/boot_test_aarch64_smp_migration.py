@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Prove one EL0 task migrates from AP1 to AP2 without duplicate ownership."""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import platform
+import selectors
+import shutil
+import socket
+import subprocess
+import tempfile
+
+from boot_test_aarch64 import first_file, qmp_command, wait_for_output
+
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+IMAGE = pathlib.Path(
+    os.environ.get("MAKOS_AARCH64_IMAGE", ROOT / "build/makos-aarch64.img")
+)
+
+
+def main() -> int:
+    qemu = os.environ.get("QEMU_SYSTEM_AARCH64", "qemu-system-aarch64")
+    code = first_file(
+        "AAVMF_CODE",
+        (
+            "/opt/homebrew/share/qemu/edk2-aarch64-code.fd",
+            "/usr/local/share/qemu/edk2-aarch64-code.fd",
+            "/usr/share/AAVMF/AAVMF_CODE.fd",
+        ),
+    )
+    variables_template = first_file(
+        "AAVMF_VARS",
+        (
+            "/opt/homebrew/share/qemu/edk2-arm-vars.fd",
+            "/usr/local/share/qemu/edk2-arm-vars.fd",
+            "/usr/share/AAVMF/AAVMF_VARS.fd",
+        ),
+    )
+    accel = os.environ.get(
+        "MAKOS_AARCH64_ACCEL",
+        "hvf"
+        if platform.system() == "Darwin" and platform.machine() == "arm64"
+        else "tcg",
+    )
+    output_dir = ROOT / "build"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    serial_log = output_dir / "makos-smp-migration-focused-serial.log"
+    output = bytearray()
+    process: subprocess.Popen[bytes] | None = None
+    selector: selectors.BaseSelector | None = None
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="makos-smp-migration-", dir=output_dir
+        ) as name:
+            temporary = pathlib.Path(name)
+            boot = temporary / "boot.img"
+            data = temporary / "data.img"
+            variables = temporary / "vars.fd"
+            shutil.copyfile(IMAGE, boot)
+            shutil.copyfile(variables_template, variables)
+            with data.open("wb") as output_file:
+                output_file.truncate(1024 * 1024 * 1024)
+
+            qmp_parent, qmp_child = socket.socketpair()
+            command = [
+                qemu,
+                "-machine",
+                f"virt,accel={accel},highmem=off,gic-version=2",
+                "-cpu",
+                "host" if accel == "hvf" else "max",
+                "-global",
+                "virtio-mmio.force-legacy=false",
+                "-smp",
+                "4",
+                "-m",
+                "1G",
+                "-drive",
+                f"if=pflash,format=raw,readonly=on,file={code}",
+                "-drive",
+                f"if=pflash,format=raw,file={variables}",
+                "-drive",
+                f"id=boot,if=none,format=raw,readonly=on,file={boot}",
+                "-device",
+                "virtio-blk-pci,drive=boot",
+                "-drive",
+                f"id=data,if=none,format=raw,file={data}",
+                "-device",
+                "virtio-blk-device,drive=data",
+                "-device",
+                "virtio-keyboard-device",
+                "-device",
+                "virtio-tablet-device",
+                "-netdev",
+                "user,id=makosnet",
+                "-device",
+                "virtio-net-device,netdev=makosnet,mac=52:54:00:12:34:56",
+                "-device",
+                "virtio-gpu-device,xres=800,yres=600",
+                "-object",
+                "rng-random,id=makosrng,filename=/dev/urandom",
+                "-device",
+                "virtio-rng-device,rng=makosrng",
+                "-display",
+                "none",
+                "-serial",
+                "stdio",
+                "-monitor",
+                "none",
+                "-chardev",
+                f"socket,id=makosqmp,fd={qmp_child.fileno()}",
+                "-qmp",
+                "chardev:makosqmp",
+                "-no-reboot",
+                "-no-shutdown",
+            ]
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                pass_fds=(qmp_child.fileno(),),
+            )
+            qmp_child.close()
+            assert process.stdout is not None
+            selector = selectors.DefaultSelector()
+            selector.register(process.stdout, selectors.EVENT_READ)
+            with qmp_parent:
+                stream = qmp_parent.makefile("rwb", buffering=0)
+                json.loads(stream.readline())
+                if "error" in qmp_command(stream, "qmp_capabilities"):
+                    raise AssertionError("QMP capability negotiation failed")
+                marker = b"free_balance=1 scheduler_scope=boot-probe desktop_gate=closed"
+                wait_for_output(selector, process, output, marker, 90)
+                required = (
+                    b"MAKOS_AARCH64_SMP_USER_OK cpus=4",
+                    b"MAKOS_AARCH64_SMP_MIGRATION_OK tid=",
+                    b"source_cpu=1 target_cpu=2 source_mask=0x2 target_mask=0x4",
+                    b"migrations=1 ownership=running,ready-unowned,running",
+                    b"context=gpr,sp,tls,simd status=71",
+                    marker,
+                )
+                for value in required:
+                    if value not in output:
+                        raise AssertionError(f"missing SMP migration marker {value!r}")
+                if b"MAKOS_FATAL:" in output or b"MAKOS_PANIC:" in output:
+                    raise AssertionError("guest reported fatal/panic")
+                qmp_command(stream, "quit")
+            process.wait(timeout=5)
+    finally:
+        serial_log.write_bytes(output)
+        if selector is not None:
+            selector.close()
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+
+    print(
+        "MAKOS_AARCH64_SMP_MIGRATION_RUNTIME_OK "
+        f"accel={accel} tid=same source_cpu=1 target_cpu=2 "
+        "ownership=exclusive context=gpr,sp,tls,simd"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

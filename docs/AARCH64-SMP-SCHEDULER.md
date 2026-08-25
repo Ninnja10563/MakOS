@@ -85,6 +85,20 @@ per-CPU kernel frame without running duplicate cleanup. Runtime proves
 `cpu_mask=0x3`, one owner bit, the complementary joined bit, first-owner status
 for both callers, one shared-root reap, and exact frame recovery.
 
+A forced-migration fixture then starts one immutable EL0 task on AP1. Its armed
+yield requests AP2. Under the scheduler lock the kernel captures the live
+context, removes AP1 ownership, changes Running to Ready/unowned, publishes AP2
+affinity and only then permits target selection. AP1 returns through its private
+kernel frame; AP2 selects the same TID and resumes after the SVC. The task
+verifies callee-saved GPRs, SP-backed data, `TPIDR_EL0`, and SIMD `v0`, then
+exits 71. The focused Pi/QEMU TCG repeat requires source/target masks
+`0x2`/`0x4`, exactly one migration, the same TID on both PEs, exclusive
+ownership, frame balance, and status 71. An initial run already migrated and
+exited correctly but exposed a target-mask observer race because AP2 could run
+before the source incremented a later counter; publishing the intended target
+inside the locked transition made the evidence race-free. This qualifies one
+forced migration, not load balancing or unrestricted desktop migration.
+
 An opt-in seventh fixture runs only with `test.smp-input=required`, after the
 virtio keyboard/tablet and graphics service are initialized. AP1 enters the
 real EL0 `read_key` syscall while a CPU0-affined Ready sentinel prevents the
@@ -179,6 +193,9 @@ safe general process migration.
 - Initial and exception-time AP selectors now restrict candidates to
   non-leader Firefox workers. Broader affinity/load balancing remains gated
   until device-owning and PID1/UI paths are qualified.
+- One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
+  ownership through a Ready/unowned publication. Repeated contention, policy,
+  fairness and automatic load balancing remain open.
 - `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
   loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit
@@ -202,8 +219,7 @@ safe general process migration.
   half service proof for real AP 4 KiB reads, 4 KiB writes, and `fsync`/FLUSH
   through VFS/MakFS4. Virtio-GPU now has CPU0-only low-level submission and a
   production timer-bottom-half proof for composition requested through the AP
-  native surface ABI. TCPv6 and general migration/load balancing remain to be
-  qualified.
+  native surface ABI. TCPv6 and general load balancing remain to be qualified.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 

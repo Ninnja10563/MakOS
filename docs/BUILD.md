@@ -125,6 +125,21 @@ thread-return status 0, parent status 44, and balanced frames. The scheduler
 closes AP dispatch again before the desktop; this is not yet general multicore
 userspace.
 
+The ordinary image also contains a bounded forced-migration proof, with a
+focused early-exit harness:
+
+```sh
+make test-aarch64-smp-migration-runtime
+```
+
+One immutable TID begins on AP1, enters an armed yield, and resumes on AP2 only
+after the scheduler has captured its context and published it Ready/unowned
+under the process lock. The 90-second gate requires the same TID on both PEs,
+source/target masks `0x2`/`0x4`, exactly one migration, exclusive ownership,
+GPR/SP/TLS/SIMD preservation, status 71, and frame balance. This is Pi/TCG
+functional evidence for forced migration, not automatic load balancing or
+general desktop SMP.
+
 The boot also runs a remote `exit_group` fixture. A CPU0 leader clones a worker
 fixed to AP1; after the worker proves active EL0 execution, the leader invokes
 syscall 119 with status 55. The kernel must publish the dying group, prevent

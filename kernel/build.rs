@@ -35,6 +35,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_smp_gpu_owner_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_tcp_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_tcp_owner_probe.S");
+    println!("cargo:rerun-if-changed=../user/aarch64_smp_migration_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_textedit.c");
     println!("cargo:rerun-if-changed=../user/aarch64_browser.c");
     println!("cargo:rerun-if-changed=../user/aarch64_files.c");
@@ -623,6 +624,11 @@ fn build_aarch64_init() {
             "aarch64_smp_tcp_owner_probe.S",
             "aarch64-smp-tcp-owner-probe",
             "AArch64 SMP TCP owner probe",
+        ),
+        (
+            "aarch64_smp_migration_probe.S",
+            "aarch64-smp-migration-probe",
+            "AArch64 SMP forced migration probe",
         ),
     ] {
         let object = output_dir.join(format!("{stem}.o"));

@@ -3068,6 +3068,12 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             return;
         }
         SYS_YIELD => {
+            if crate::aarch64_process::migrate_smp_probe_from_exception(
+                frame.registers[0] as usize,
+                frame,
+            ) {
+                return;
+            }
             if crate::aarch64_process::hold_smp_exit_group_probe_in_el1(frame.registers[0]) {
                 frame.registers[0] = 0;
                 return;

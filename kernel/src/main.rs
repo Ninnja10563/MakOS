@@ -245,6 +245,7 @@ pub extern "C" fn aarch64_kernel_main(boot_ptr: *const BootInfo) -> ! {
         process.reclaimed_frames,
     );
     aarch64_process::run_smp_userspace_self_test();
+    aarch64_process::run_smp_forced_migration_self_test();
     aarch64_process::run_smp_ipc_self_test();
     aarch64_process::run_smp_exit_group_self_test();
     aarch64_process::run_smp_exit_group_el1_self_test();
