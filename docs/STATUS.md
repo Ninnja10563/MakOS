@@ -4,6 +4,19 @@ Last updated: 2026-08-25.
 
 ## Implemented
 
+- 2026-08-25 AArch64 now has a genuine first guest self-hosting seed. A
+  least-privilege EL0 toolchain process writes and rereads
+  `/home/user/generated.s` from MakFS, parses a bounded A64
+  `mov xN,#imm`/`svc #0`/`ret` grammar, emits native instructions, proves JIT
+  RWX denial plus RW-to-RX execution returning 42, and persists a 428-byte
+  two-segment AArch64 ELF at `/home/user/generated-aarch64.elf`. New AArch64
+  syscall 56 snapshots a readable VFS file, validates ET_EXEC/EM_AARCH64,
+  bounds, nonoverlap, entry, permissions and W^X before allocation, maps an
+  immutable snapshot, supplies default SysV startup and runs it at EL0. Pi/TCG
+  runtime passes assembler, loader, status-42 wait/reap and
+  `MAKOS_AARCH64_SELFHOST_SEED_OK`; structural guard and full unit/check pass.
+  This does not yet constitute a C/Rust compiler, linker, build system, or
+  substantial in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 repository imported and pushed to
   `https://github.com/Ninnja10563/MakOS.git` on `main` at commit `346b0df`.
   Source, docs, scripts, ports, SDK, tests, and manifests are tracked. Generated
@@ -543,7 +556,7 @@ Last updated: 2026-08-25.
 
 - Full desktop apps, GPU acceleration, package repository/solver/key rotation.
 - Stronger sandboxing, transactional recovery boot selection.
-- Broad dynamic-linker semantics, full self-hosting toolchain, broad
+- Broad dynamic-linker semantics, end-to-end self-hosting toolchain, broad
   POSIX/Linux compatibility, broad Win32 compatibility.
 - Real-hardware qualification and full AArch64 service/driver/userspace parity.
 - Full POSIX libc breadth and complete native Firefox window/navigation remain
@@ -559,8 +572,10 @@ Last updated: 2026-08-25.
   four-PE PSCI/SMP, EL0 scheduler/process/VM probes, virtio block/net/rng/GPU/
   input, MakFS4, authenticated login/desktop, typed IPC, upstream musl threads,
   signals, futexes, dynamic linking, and Python execution. The run is not a
-  full gate pass: slow TCG later produced Settings resize `560x360` instead of
-  the required `450x290` marker. Thresholds and expected geometry remain
+  full gate pass. A later unchanged run additionally passed the new guest
+  assembler, persisted-ELF loader/execution/status-42 lifecycle, typed IPC,
+  musl and Python before slow TCG again produced Settings resize `560x360`
+  instead of the required `450x290` marker. Thresholds and expected geometry remain
   unchanged. This is functional Pi evidence only, not Apple-HVF performance
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
   the unprivileged user.

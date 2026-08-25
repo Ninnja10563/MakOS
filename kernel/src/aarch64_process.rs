@@ -42,6 +42,8 @@ static MUSL_DLOPEN_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-musl-dlopen-probe.elf"));
 static MUSL_EXEC_CALLER_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-musl-exec-caller.elf"));
+static TOOLCHAIN_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-toolchain.elf"));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -1973,6 +1975,77 @@ pub fn spawn_musl_probe() -> Option<u64> {
     Some(pid)
 }
 
+pub fn spawn_toolchain() -> Option<u64> {
+    let parent_pid = current_pid();
+    if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
+        return None;
+    }
+    let argv: [&[u8]; 1] = [b"/system/aarch64-toolchain"];
+    let envp: [&[u8]; 1] = [b"MODE=assemble"];
+    let (pid, process) = spawn_process_sysv(
+        parent_pid,
+        TOOLCHAIN_ELF,
+        ProcessRole::Native,
+        &argv,
+        &envp,
+    )?;
+    if !crate::security::register_session_process(
+        pid,
+        crate::security::SessionProcessRole::Toolchain,
+    )
+    {
+        discard_spawned(pid);
+        return None;
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid={} parent={} elf=1 el=0 entry={:#x} ttbr0={:#x} source=guest-file",
+        pid,
+        parent_pid,
+        process.entry,
+        process.root,
+    );
+    Some(pid)
+}
+
+pub fn spawn_path(path: &[u8]) -> Option<u64> {
+    let parent_pid = current_pid();
+    if parent_pid == 0
+        || current_app_role() != ProcessRole::Shell
+        || path.is_empty()
+        || path.len() >= crate::vfs::MAX_PATH_BYTES
+        || path.contains(&0)
+    {
+        return None;
+    }
+    let mut image = [0u8; crate::vfs::MAX_FILE_BYTES];
+    let length = crate::vfs::snapshot(path, &mut image)?;
+    let segments = validate_static_process_image(&image[..length])?;
+    let argv: [&[u8]; 1] = [path];
+    let envp: [&[u8]; 0] = [];
+    let (pid, process) = spawn_process_sysv(
+        parent_pid,
+        &image[..length],
+        ProcessRole::Native,
+        &argv,
+        &envp,
+    )?;
+    if !crate::security::register_session_process(pid, crate::security::SessionProcessRole::Native)
+    {
+        discard_spawned(pid);
+        return None;
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_EXEC_SPAWN pid={} parent={} source=makfs format=elf64 bytes={} segments={} entry={:#x} ttbr0={:#x} startup=sysv-default",
+        pid,
+        parent_pid,
+        length,
+        segments,
+        process.entry,
+        process.root,
+    );
+    Some(pid)
+}
+
 pub fn spawn_musl_crt_probe() -> Option<u64> {
     let parent_pid = current_pid();
     if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
@@ -3159,6 +3232,49 @@ fn load_process(bytes: &[u8]) -> LoadedProcess {
     load_process_image(bytes, ET_EXEC, 0, None)
 }
 
+fn validate_static_process_image(bytes: &[u8]) -> Option<usize> {
+    let elf = Elf64::parse_for_machine(bytes, EM_AARCH64).ok()?;
+    if elf.elf_type() != ET_EXEC {
+        return None;
+    }
+    let entry = elf.entry();
+    let mut load_count = 0usize;
+    let mut executable_entry = false;
+    let mut ranges = [(0u64, 0u64); MAX_LOAD_SEGMENTS];
+    for segment in elf
+        .program_headers()
+        .filter(|header| header.segment_type == PT_LOAD)
+    {
+        let virtual_start = segment.virtual_address;
+        let mapped_start = virtual_start & !(PAGE_SIZE - 1);
+        let end = virtual_start.checked_add(segment.memory_size)?;
+        let mapped_end = end.checked_add(PAGE_SIZE - 1)? & !(PAGE_SIZE - 1);
+        let file_end = segment.offset.checked_add(segment.file_size)?;
+        let alignment = segment.alignment.max(1);
+        if load_count == MAX_LOAD_SEGMENTS
+            || mapped_start < crate::arch::USER_ADDRESS_BASE
+            || segment.memory_size == 0
+            || segment.file_size > segment.memory_size
+            || file_end > bytes.len() as u64
+            || end > crate::arch::USER_IMAGE_LIMIT
+            || segment.flags & 4 == 0
+            || segment.flags & !7 != 0
+            || segment.flags & 3 == 3
+            || !alignment.is_power_of_two()
+            || (segment.virtual_address.wrapping_sub(segment.offset)) & (alignment - 1) != 0
+            || ranges[..load_count]
+                .iter()
+                .any(|(start, prior_end)| mapped_start < *prior_end && *start < mapped_end)
+        {
+            return None;
+        }
+        executable_entry |= segment.flags & 1 != 0 && (virtual_start..end).contains(&entry);
+        ranges[load_count] = (mapped_start, mapped_end);
+        load_count += 1;
+    }
+    (load_count != 0 && executable_entry).then_some(load_count)
+}
+
 fn load_dynamic_process(application: &[u8], loader: &[u8]) -> LoadedProcess {
     let application_elf = Elf64::parse_for_machine(application, EM_AARCH64)
         .unwrap_or_else(|_| crate::fatal("AArch64 dynamic application ELF invalid"));
@@ -3272,6 +3388,10 @@ fn map_image(
             || mapped_start < address_start
             || segment.memory_size == 0
             || segment.file_size > segment.memory_size
+            || segment
+                .offset
+                .checked_add(segment.file_size)
+                .is_none_or(|file_end| file_end > bytes.len() as u64)
             || end > address_limit
             || segment.flags & 4 == 0
             || segment.flags & !7 != 0

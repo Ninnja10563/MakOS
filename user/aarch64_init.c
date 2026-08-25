@@ -30,8 +30,9 @@ enum {
     ((UINT64_C(1) << 0) | (UINT64_C(1) << 1) | (UINT64_C(1) << 2) | \
      (UINT64_C(1) << 3) | (UINT64_C(1) << 4) | (UINT64_C(1) << 5) | \
      (UINT64_C(1) << 6) | (UINT64_C(1) << 7) | (UINT64_C(1) << 8) | \
-     (UINT64_C(1) << 11) | (UINT64_C(1) << 15) | (UINT64_C(1) << 16) | \
-     (UINT64_C(1) << 17) | (UINT64_C(1) << 20) | (UINT64_C(1) << 21))
+     (UINT64_C(1) << 11) | (UINT64_C(1) << 14) | (UINT64_C(1) << 15) | \
+     (UINT64_C(1) << 16) | (UINT64_C(1) << 17) | (UINT64_C(1) << 18) | \
+     (UINT64_C(1) << 20) | (UINT64_C(1) << 21))
 
 int aarch64_context_register_test(uint64_t role);
 
@@ -129,7 +130,7 @@ __attribute__((noreturn)) void _start(uint64_t role) {
     static const char passed[] =
         "MAKOS_AARCH64_USER_OK pid=1 el=0 elf=1 svc=1 write=1 abi=1 clock=1 isolation=ttbr0\n";
     static const char abi_passed[] =
-        "MAKOS_AARCH64_ABI_OK version=1.0 normative_max=57 target_extension_max=147 features=ipc,process,vm,vfs,network,graphics,auth,log,sync,ipv6,sockets,packages,vm-regions,tty-signals,typed-ipc truthful=1\n";
+        "MAKOS_AARCH64_ABI_OK version=1.0 normative_max=57 target_extension_max=147 features=ipc,process,vm,vfs,network,graphics,auth,log,sync,ipv6,selfhost-seed,sockets,packages,vm-regions,exec-path,tty-signals,typed-ipc truthful=1\n";
     static const char child_passed[] =
         "MAKOS_AARCH64_SCHED_CHILD_OK pid=2 register_restore=x0-x30,sp_el0,q0,q8,q16,q31,fpcr,fpsr preemptions=multiple pattern=child exit=42\n";
     static const char scheduler_passed[] =

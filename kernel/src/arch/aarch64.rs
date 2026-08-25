@@ -2104,6 +2104,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const SYS_VM_MAP_RANGE: u64 = 53;
     const SYS_VM_UNMAP_RANGE: u64 = 54;
     const SYS_VM_PROTECT_RANGE: u64 = 55;
+    const SYS_PROCESS_SPAWN_PATH: u64 = 56;
     const SYS_SURFACE_CLOSE: u64 = 58;
     const SYS_SURFACE_TEXT: u64 = 59;
     const SYS_SURFACE_READ_EVENT: u64 = 60;
@@ -2199,9 +2200,11 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const ABI_FEATURE_LOG: u64 = 1 << 7;
     const ABI_FEATURE_SYNC: u64 = 1 << 8;
     const ABI_FEATURE_IPV6: u64 = 1 << 11;
+    const ABI_FEATURE_SELF_HOSTING_SEED: u64 = 1 << 14;
     const ABI_FEATURE_SOCKET_OBJECTS: u64 = 1 << 15;
     const ABI_FEATURE_PACKAGE_TRANSACTIONS: u64 = 1 << 16;
     const ABI_FEATURE_VM_REGIONS: u64 = 1 << 17;
+    const ABI_FEATURE_EXEC_BY_PATH: u64 = 1 << 18;
     const ABI_FEATURE_TTY_SIGNALS: u64 = 1 << 20;
     const ABI_FEATURE_TYPED_IPC: u64 = 1 << 21;
     const ABI_FEATURES: u64 = ABI_FEATURE_IPC
@@ -2214,9 +2217,11 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         | ABI_FEATURE_LOG
         | ABI_FEATURE_SYNC
         | ABI_FEATURE_IPV6
+        | ABI_FEATURE_SELF_HOSTING_SEED
         | ABI_FEATURE_SOCKET_OBJECTS
         | ABI_FEATURE_PACKAGE_TRANSACTIONS
         | ABI_FEATURE_VM_REGIONS
+        | ABI_FEATURE_EXEC_BY_PATH
         | ABI_FEATURE_TTY_SIGNALS
         | ABI_FEATURE_TYPED_IPC;
     const ERROR_INVALID: u64 = u64::MAX;
@@ -3419,7 +3424,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             }
         }
         SYS_PROCESS_SPAWN => match frame.registers[0] {
-            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15)
+            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16)
                 if crate::aarch64_process::process_control_allowed() =>
             {
                 match selector {
@@ -3437,6 +3442,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     13 => crate::aarch64_process::spawn_musl_exec_probe(),
                     14 => crate::aarch64_process::spawn_firefox(),
                     15 => crate::aarch64_process::spawn_stack_protector_probe(),
+                    16 => crate::aarch64_process::spawn_toolchain(),
                     _ => None,
                 }
                 .unwrap_or(ERROR_INVALID)
@@ -4492,6 +4498,20 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             frame.registers[1],
             frame.registers[2],
         )),
+        SYS_PROCESS_SPAWN_PATH => {
+            let address = frame.registers[0];
+            let length = frame.registers[1] as usize;
+            if !crate::security::has_capability(crate::security::CAP_PROCESS)
+                || length == 0
+                || length >= crate::vfs::MAX_PATH_BYTES
+                || !user_range_readable(address, length)
+            {
+                ERROR_INVALID
+            } else {
+                let path = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
+                crate::aarch64_process::spawn_path(path).unwrap_or(ERROR_INVALID)
+            }
+        }
         SYS_SURFACE_CLOSE => {
             if crate::security::has_capability(crate::security::CAP_GRAPHICS) {
                 u64::from(crate::graphics::close(frame.registers[0]))

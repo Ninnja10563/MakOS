@@ -21,6 +21,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_init.c");
     println!("cargo:rerun-if-changed=../user/aarch64_scheduler.S");
     println!("cargo:rerun-if-changed=../user/aarch64_shell.c");
+    println!("cargo:rerun-if-changed=../user/aarch64_toolchain.c");
     println!("cargo:rerun-if-changed=../user/aarch64_textedit.c");
     println!("cargo:rerun-if-changed=../user/aarch64_browser.c");
     println!("cargo:rerun-if-changed=../user/aarch64_files.c");
@@ -173,6 +174,46 @@ fn build_aarch64_init() {
         .status()
         .expect("failed to link AArch64 shell");
     assert!(status.success(), "AArch64 shell link failed");
+
+    let toolchain_object = output_dir.join("aarch64-toolchain.o");
+    let toolchain_output = output_dir.join("aarch64-toolchain.elf");
+    let status = Command::new("clang")
+        .args([
+            "-target",
+            "aarch64-unknown-none-elf",
+            "-std=c17",
+            "-ffreestanding",
+            "-fno-builtin",
+            "-fno-stack-protector",
+            "-fno-pic",
+            "-fno-unwind-tables",
+            "-fno-asynchronous-unwind-tables",
+            "-mgeneral-regs-only",
+            "-Os",
+            "-c",
+        ])
+        .arg(manifest.join("../user/aarch64_toolchain.c"))
+        .arg("-o")
+        .arg(&toolchain_object)
+        .status()
+        .expect("failed to compile AArch64 guest toolchain");
+    assert!(status.success(), "AArch64 guest toolchain compile failed");
+    let status = Command::new(rust_lld())
+        .args([
+            "-flavor",
+            "gnu",
+            "--build-id=none",
+            "-z",
+            "max-page-size=4096",
+            "-T",
+        ])
+        .arg(manifest.join("../user/linker-aarch64.ld"))
+        .arg("-o")
+        .arg(&toolchain_output)
+        .arg(&toolchain_object)
+        .status()
+        .expect("failed to link AArch64 guest toolchain");
+    assert!(status.success(), "AArch64 guest toolchain link failed");
 
     let browser_object = output_dir.join("aarch64-browser.o");
     let browser_output = output_dir.join("aarch64-browser.elf");

@@ -14,6 +14,7 @@ enum {
     SYS_CLOSE = 13,
     SYS_PROCESS_SPAWN = 14,
     SYS_PROCESS_WAIT = 15,
+    SYS_PROCESS_SPAWN_PATH = 56,
     SYS_PACKAGE_INSTALL = 18,
     SYS_PACKAGE_QUERY = 19,
     SYS_PACKAGE_ROLLBACK = 20,
@@ -373,6 +374,35 @@ static void run_musl_probe(void) {
         write_text("musl-probe: runtime failed\n");
 }
 
+static void run_selfhost_probe(void) {
+    static const char output_path[] = "/home/user/generated-aarch64.elf";
+    uint64_t toolchain = syscall4(SYS_PROCESS_SPAWN, 16, 0, 0, 0);
+    if (toolchain == UINT64_MAX) {
+        write_text("selfhost-aarch64: toolchain launch failed\n");
+        return;
+    }
+    uint64_t status;
+    while ((status = syscall4(SYS_PROCESS_WAIT, toolchain, 0, 0, 0)) == UINT64_MAX)
+        syscall4(SYS_YIELD, 0, 0, 0, 0);
+    if (status != 42) {
+        write_text("selfhost-aarch64: assembler failed\n");
+        return;
+    }
+    uint64_t generated = syscall4(SYS_PROCESS_SPAWN_PATH,
+                                  (uintptr_t)output_path,
+                                  sizeof(output_path) - 1, 0, 0);
+    if (generated == UINT64_MAX) {
+        write_text("selfhost-aarch64: generated ELF rejected\n");
+        return;
+    }
+    while ((status = syscall4(SYS_PROCESS_WAIT, generated, 0, 0, 0)) == UINT64_MAX)
+        syscall4(SYS_YIELD, 0, 0, 0, 0);
+    if (status == 42)
+        write_text("MAKOS_AARCH64_SELFHOST_SEED_OK source=guest-makfs assembler=guest-native output=elf64-aarch64 persisted=1 kernel_loader=validated executed=1 status=42\n");
+    else
+        write_text("selfhost-aarch64: generated program failed\n");
+}
+
 static void run_musl_crt_probe(void) {
     uint64_t pid = syscall4(SYS_PROCESS_SPAWN, 7, 0, 0, 0);
     if (pid == UINT64_MAX) {
@@ -584,7 +614,7 @@ static const char *completion(const uint8_t *prefix, size_t prefix_length) {
     static const char *commands[] = {
         "help", "status", "clear", "pwd", "ls", "ls -l", "cat note.txt", "cp ", "mv ", "wc ", "echo ",
         "whoami", "uname -a", "uptime", "mem", "ps", "stat note.txt",
-        "touch ", "write ", "rm ", "edit ", "nano ", "python ", "firefox", "abi-startup", "musl-probe", "musl-crt", "musl-pthread", "musl-dynamic", "musl-shared", "musl-dso", "musl-dlopen", "musl-exec", "pkg-probe-install", "pkg-probe-remove", "pkg-probe-rollback", "pkg-probe-query-v1", "pkg-probe-query-v2", "adduser ", "signout", "exit",
+        "touch ", "write ", "rm ", "edit ", "nano ", "python ", "firefox", "selfhost-aarch64", "abi-startup", "musl-probe", "musl-crt", "musl-pthread", "musl-dynamic", "musl-shared", "musl-dso", "musl-dlopen", "musl-exec", "pkg-probe-install", "pkg-probe-remove", "pkg-probe-rollback", "pkg-probe-query-v1", "pkg-probe-query-v2", "adduser ", "signout", "exit",
     };
     const char *found = 0;
     for (size_t index = 0; index < sizeof(commands) / sizeof(commands[0]); ++index) {
@@ -744,6 +774,8 @@ __attribute__((noreturn)) void _start(void) {
                     add_user(&command[8], command_length - 8, terminal);
                 } else if (exact(command, command_length, "abi-startup")) {
                     run_startup_probe();
+                } else if (exact(command, command_length, "selfhost-aarch64")) {
+                    run_selfhost_probe();
                 } else if (exact(command, command_length, "musl-probe")) {
                     run_musl_probe();
                 } else if (exact(command, command_length, "musl-crt")) {

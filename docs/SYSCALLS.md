@@ -47,10 +47,11 @@ journals fail closed and remain on disk for diagnosis.
 cover authentication, account, session, and package transaction decisions;
 record metadata attributes each event to current PID.
 
-AArch64 currently reports bits 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 15, 16, 17, and
-20. It does not advertise cross-architecture spawn-by-path/startup-vector bits
-18/19 because calls 56/57 are not yet implemented on that target; restricted
-same-process system-package `execve` is a target extension, not false parity.
+AArch64 currently reports bits 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 14, 15, 16, 17,
+18, 20, and 21. It advertises exec-by-path after implementing call 56, but not
+startup-vector bit 19 because call 57 remains unimplemented on that target;
+restricted same-process system-package `execve` is a target extension, not
+false parity.
 
 ## Calls
 
@@ -116,6 +117,14 @@ same-process system-package `execve` is a target extension, not false parity.
 | 57 | `process_spawn_path_args` | path, length, startup descriptor, descriptor length | PID/error |
 
 AArch64 keeps normative calls 0-57 and adds compositor/browser extensions:
+
+AArch64 implements call 56 for a process-capable shell: the kernel snapshots a
+readable VFS file, validates static `ET_EXEC`/`EM_AARCH64` layout, segment file
+bounds, address bounds, nonoverlap, executable entry and W^X before allocating
+an address space, then synthesizes `argc=1`, `argv[0]=path`, and an empty
+environment. Call 57 remains reserved but unimplemented on AArch64; ABI feature
+discovery advertises exec-by-path and the self-hosting seed, but not
+startup-vector parity.
 
 | No. | Name | Arguments | Result |
 |---:|---|---|---|
@@ -285,8 +294,8 @@ TCP buffers, acknowledges segments, and wakes poll/epoll; UDP responses and sock
 writability use same readiness backend. `epoll_pwait` atomically swaps and
 restores caller's task mask across block/retry and handler delivery.
 
-Both path-spawn calls require process capability and read access to path. Current
-loader accepts one to four page-aligned, page-disjoint x86_64 static ELF64
+Both x86_64 path-spawn calls require process capability and read access to path. Current
+x86_64 loader accepts one to four page-aligned, page-disjoint static ELF64
 `PT_LOAD` segments inside `0x100000000..0x100020000`. Each segment must be
 readable; unknown permissions and write+execute are rejected. Entry must lie in
 an executable segment. Loader maps declared write/execute/NX flags plus a zeroed

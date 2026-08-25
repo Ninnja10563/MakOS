@@ -95,6 +95,12 @@ open gates.
 `QEMU_SYSTEM_X86_64=/path/to/qemu-system-x86_64` overrides QEMU discovery.
 `AAVMF_CODE`, `AAVMF_VARS`, and `QEMU_SYSTEM_AARCH64` override AArch64 tools.
 
+After login, `selfhost-aarch64` runs the first guest-native toolchain gate. It
+writes A64 source to MakFS, assembles and persists
+`/home/user/generated-aarch64.elf`, then launches that file through the kernel's
+validated AArch64 syscall-56 path and requires exit status 42. This is a bounded
+assembler seed, not yet a complete compiler/linker or an end-to-end OS build.
+
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.
 

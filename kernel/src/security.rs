@@ -167,6 +167,7 @@ pub enum SessionProcessRole {
     Python,
     Nano,
     Native,
+    Toolchain,
     NativeIpc,
     Firefox,
 }
@@ -401,6 +402,7 @@ pub fn register_session_process(pid: u64, role: SessionProcessRole) -> bool {
             }
             SessionProcessRole::Nano => CAP_FILE_WRITE | CAP_CONSOLE,
             SessionProcessRole::Python | SessionProcessRole::Native => CAP_CONSOLE,
+            SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE,
             SessionProcessRole::NativeIpc => {
                 CAP_CONSOLE
                     | CAP_IPC
