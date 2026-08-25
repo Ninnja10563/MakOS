@@ -483,6 +483,44 @@ fn build_aarch64_init() {
         "AArch64 SMP input-device userspace probe link failed"
     );
 
+    let smp_network_rx_probe_object = output_dir.join("aarch64-smp-network-rx-probe.o");
+    let smp_network_rx_probe_output = output_dir.join("aarch64-smp-network-rx-probe.elf");
+    let status = Command::new("clang")
+        .args([
+            "-target",
+            "aarch64-unknown-none-elf",
+            "-ffreestanding",
+            "-c",
+        ])
+        .arg(manifest.join("../user/aarch64_smp_network_rx_probe.S"))
+        .arg("-o")
+        .arg(&smp_network_rx_probe_object)
+        .status()
+        .expect("failed to compile AArch64 SMP network-RX userspace probe");
+    assert!(
+        status.success(),
+        "AArch64 SMP network-RX userspace probe compile failed"
+    );
+    let status = Command::new(rust_lld())
+        .args([
+            "-flavor",
+            "gnu",
+            "--build-id=none",
+            "-z",
+            "max-page-size=4096",
+            "-T",
+        ])
+        .arg(manifest.join("../user/linker-aarch64.ld"))
+        .arg("-o")
+        .arg(&smp_network_rx_probe_output)
+        .arg(&smp_network_rx_probe_object)
+        .status()
+        .expect("failed to link AArch64 SMP network-RX userspace probe");
+    assert!(
+        status.success(),
+        "AArch64 SMP network-RX userspace probe link failed"
+    );
+
     let browser_object = output_dir.join("aarch64-browser.o");
     let browser_output = output_dir.join("aarch64-browser.elf");
     let status = Command::new("clang")

@@ -99,6 +99,8 @@ static FIREFOX_FONT_IO_TRACES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_MUTATION_TRACES: AtomicU64 = AtomicU64::new(0);
 static INPUT_SERVICE_OWNER_ACTIVITY: AtomicU64 = AtomicU64::new(0);
 static INPUT_SERVICE_NONOWNER_DEFERRALS: AtomicU64 = AtomicU64::new(0);
+static NETWORK_RX_OWNER_FRAMES: AtomicU64 = AtomicU64::new(0);
+static NETWORK_RX_NONOWNER_DEFERRALS: AtomicU64 = AtomicU64::new(0);
 const FIREFOX_FILE_TRACE_LIMIT: u64 = 8;
 const FIREFOX_MUTATION_TRACE_LIMIT: u64 = 16;
 static SMP_ONLINE_MASK: AtomicU64 = AtomicU64::new(1);
@@ -655,6 +657,31 @@ pub(crate) fn input_service_affinity_evidence() -> (u64, u64) {
     )
 }
 
+/// Virtio-net RX queue consumption and socket demultiplexing are CPU0-owned.
+/// AP socket paths may consume already-published socket buffers, but defer RX
+/// ring service so the device and socket locks never contend across CPUs.
+pub(crate) fn service_network_rx_on_owner_cpu() -> usize {
+    if cpu_index() != 0 {
+        NETWORK_RX_NONOWNER_DEFERRALS.fetch_add(1, Ordering::AcqRel);
+        return 0;
+    }
+    let frames = crate::aarch64_socket::pump();
+    NETWORK_RX_OWNER_FRAMES.fetch_add(frames as u64, Ordering::AcqRel);
+    frames
+}
+
+pub(crate) fn reset_network_rx_affinity_evidence() {
+    NETWORK_RX_OWNER_FRAMES.store(0, Ordering::Release);
+    NETWORK_RX_NONOWNER_DEFERRALS.store(0, Ordering::Release);
+}
+
+pub(crate) fn network_rx_affinity_evidence() -> (u64, u64) {
+    (
+        NETWORK_RX_OWNER_FRAMES.load(Ordering::Acquire),
+        NETWORK_RX_NONOWNER_DEFERRALS.load(Ordering::Acquire),
+    )
+}
+
 fn cached_active_root() -> u64 {
     ACTIVE_USER_ROOTS[cpu_index()].load(Ordering::Acquire)
 }
@@ -1033,14 +1060,26 @@ pub fn switch_address_space(root: u64) {
 }
 
 pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
+    const USER_SPSR_ALLOWED: u64 = 0xf000_0000;
     let active_root = cached_active_root();
+    let stack_valid = matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
+        || user_stack_pointer_valid_in(context.ttbr0, context.sp_el0);
     if active_root == 0
         || context.ttbr0 != active_root
         || !(USER_ADDRESS_BASE..USER_IMAGE_LIMIT).contains(&context.elr)
-        || (!matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
-            && !user_stack_pointer_valid_in(context.ttbr0, context.sp_el0))
-        || context.spsr != 0
+        || !stack_valid
+        || context.spsr & !USER_SPSR_ALLOWED != 0
     {
+        crate::serial_println!(
+            "AArch64 EL0 entry rejected cpu={} active_root={:#x} context_root={:#x} elr={:#x} sp={:#x} stack_valid={} spsr={:#x}",
+            cpu_index(),
+            active_root,
+            context.ttbr0,
+            context.elr,
+            context.sp_el0,
+            u8::from(stack_valid),
+            context.spsr,
+        );
         crate::fatal("AArch64 EL0 entry precondition failed");
     }
     start_scheduler_timer();
@@ -2710,6 +2749,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             return;
         }
         SYS_SOCKET_RECEIVE if crate::aarch64_socket::is_owned(frame.registers[0]) => {
+            service_network_rx_on_owner_cpu();
             const MSG_DONTWAIT: u64 = 0x40;
             const MSG_NOSIGNAL: u64 = 0x4000;
             let address = frame.registers[1];
@@ -2741,7 +2781,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     && source_length_writable
                     && unsafe { (source_length_address as *const u32).read_unaligned() as usize }
                         >= source_required);
-            if !crate::security::has_capability(crate::security::CAP_NETWORK)
+            if !crate::aarch64_process::network_control_allowed()
                 || flags & !(MSG_DONTWAIT | MSG_NOSIGNAL) != 0
                 || length == 0
                 || !data_writable
@@ -2789,7 +2829,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_READ if crate::aarch64_socket::is_owned(frame.registers[0]) => {
             let address = frame.registers[1];
             let length = (frame.registers[2] as usize).min(4096);
-            if !crate::security::has_capability(crate::security::CAP_NETWORK) {
+            if !crate::aarch64_process::network_control_allowed() {
                 frame.registers[0] = (-22i64) as u64;
             } else if length == 0 {
                 frame.registers[0] = 0;
@@ -2823,7 +2863,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_FILE_WRITE if crate::aarch64_socket::is_owned(frame.registers[0]) => {
             let address = frame.registers[1];
             let length = (frame.registers[2] as usize).min(4096);
-            frame.registers[0] = if !crate::security::has_capability(crate::security::CAP_NETWORK) {
+            frame.registers[0] = if !crate::aarch64_process::network_control_allowed() {
                 (-22i64) as u64
             } else if length == 0 {
                 0
@@ -4357,7 +4397,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             frame.registers[1],
         )),
         SYS_SOCKET_CREATE => {
-            if crate::security::has_capability(crate::security::CAP_NETWORK) {
+            if crate::aarch64_process::network_control_allowed() {
                 crate::aarch64_socket::create(
                     frame.registers[0],
                     frame.registers[1],
@@ -4371,7 +4411,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_SOCKET_CONNECT => {
             let address = frame.registers[1];
             let length = frame.registers[2] as usize;
-            if !crate::security::has_capability(crate::security::CAP_NETWORK)
+            if !crate::aarch64_process::network_control_allowed()
                 || !user_range_readable(address, length)
             {
                 ERROR_INVALID
@@ -4391,7 +4431,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             let flags = frame.registers[3];
             let destination_address = frame.registers[4];
             let destination_length = frame.registers[5] as usize;
-            if !crate::security::has_capability(crate::security::CAP_NETWORK)
+            if !crate::aarch64_process::network_control_allowed()
                 || flags & !(0x40 | 0x4000) != 0
                 || length == 0
                 || length > 4096
@@ -4446,7 +4486,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     && source_length_writable
                     && unsafe { (source_length_address as *const u32).read_unaligned() as usize }
                         >= source_required);
-            if !crate::security::has_capability(crate::security::CAP_NETWORK)
+            if !crate::aarch64_process::network_control_allowed()
                 || flags & !(0x40 | 0x4000) != 0
                 || length == 0
                 || !data_writable
@@ -4485,7 +4525,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             let address = frame.registers[2];
             let length_address = frame.registers[3];
             let pid = crate::aarch64_process::current_pid();
-            if !crate::security::has_capability(crate::security::CAP_NETWORK)
+            if !crate::aarch64_process::network_control_allowed()
                 || !crate::aarch64_vm::fault_in_range(pid, length_address, 4, true)
                 || !user_range_readable(length_address, 4)
                 || !user_range_writable(length_address, 4)
@@ -4505,7 +4545,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_SOCKET_BIND => {
             let address = frame.registers[1];
             let length = frame.registers[2] as usize;
-            if !crate::security::has_capability(crate::security::CAP_NETWORK) {
+            if !crate::aarch64_process::network_control_allowed() {
                 (-1i64) as u64
             } else {
                 read_socket_endpoint(address, length)
@@ -4517,7 +4557,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             }
         }
         SYS_SOCKET_CLOSE => {
-            if crate::security::has_capability(crate::security::CAP_NETWORK) {
+            if crate::aarch64_process::network_control_allowed() {
                 u64::from(crate::aarch64_socket::close(frame.registers[0]))
             } else {
                 ERROR_INVALID
@@ -4891,7 +4931,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_NET_CONFIG => {
             let address = frame.registers[0];
             let length = frame.registers[1] as usize;
-            if !crate::security::has_capability(crate::security::CAP_NETWORK)
+            if !crate::aarch64_process::network_control_allowed()
                 || !matches!(length, 12 | 56)
                 || !user_range_writable(address, length)
             {
@@ -5518,7 +5558,7 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
             // bottom half when the IRQ interrupted EL0; running it over an
             // in-flight socket syscall could spin forever on its own lock.
             if cpu_index() == 0 {
-                crate::aarch64_socket::pump();
+                service_network_rx_on_owner_cpu();
                 // Input is timer-polled hardware too. Poll before scheduling
                 // so CPU-bound EL0 code cannot delay key/button delivery until
                 // its next unrelated syscall; queued keys can select Firefox's

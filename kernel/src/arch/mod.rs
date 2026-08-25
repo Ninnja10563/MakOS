@@ -8,9 +8,10 @@ pub(crate) use aarch64::{
     ExceptionFrame, UserContext, counter_deadline_expired, counter_deadline_millis, cpu_index,
     disable_smp_probe_scheduler, enable_smp_probe_scheduler, enter_user_context,
     idle_secondary_after_smp_probe, input_service_affinity_evidence,
-    reset_input_service_affinity_evidence, return_to_kernel, send_scheduler_ipi,
-    service_input_on_owner_cpu, smp_probe_scheduler_enabled, user_range_readable,
-    user_range_writable,
+    network_rx_affinity_evidence, reset_input_service_affinity_evidence,
+    reset_network_rx_affinity_evidence, return_to_kernel, send_scheduler_ipi,
+    service_input_on_owner_cpu, service_network_rx_on_owner_cpu, smp_probe_scheduler_enabled,
+    user_range_readable, user_range_writable,
 };
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{

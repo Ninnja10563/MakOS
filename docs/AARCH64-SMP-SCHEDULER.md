@@ -100,6 +100,15 @@ CPU0 ring activity and AP deferrals, matching
 frame balance, and subsequent boot completion. The ordinary boot config never
 arms or waits for external test input.
 
+The same opt-in image first runs an eighth fixture against real virtio-net and
+QEMU slirp DNS. AP1 sends transaction `0x4d4c`, blocks in `recvfrom`, and
+returns to its idle dispatcher. CPU0 exclusively drains and demultiplexes the
+RX ring, wakes the exact network wait source, and sends the scheduler SGI. The
+driver and socket pump fail closed on non-owner RX entry. Runtime requires a
+validated DNS response, nonzero CPU0 frames and AP deferrals,
+`io_idle_mask=0x2`/`io_resume_mask=0x2`, status 63, and exact frame balance.
+AP-originated TX remains explicitly unqualified.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -135,7 +144,8 @@ safe general process migration.
 - AP banked virtual-timer PPI enable/programming and CPU0-only global tick
   servicing pass the bounded probe. Virtio input now has exclusive CPU0 MMIO
   ownership plus measured AP deferral. General AP syscalls still require the
-  equivalent network, block, and GPU service ownership/contention audit.
+  equivalent network TX, block, and GPU service ownership/contention audit;
+  network RX now has exclusive CPU0 ring ownership and a real AP DNS wake.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -171,9 +181,9 @@ a GICv2 SGI only after publishing its enabled state.
    - CPU0 alone advances global monotonic ticks and services deadlines/device
      polling. AP timer IRQs only preempt/select; otherwise four timer streams
      would make wall time advance fourfold.
-   - GICC acknowledge/EOI is per PE. Virtio-input MMIO is explicitly CPU0-owned
-     and guarded against AP entry. Network, block, and GPU bottom halves remain
-     CPU0-owned pending equivalent lock and interrupt-affinity qualification.
+   - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net RX ring
+     service are explicitly CPU0-owned and guarded against AP entry. Network TX,
+     block, and GPU paths remain pending equivalent qualification.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one

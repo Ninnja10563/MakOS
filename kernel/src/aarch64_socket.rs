@@ -554,6 +554,9 @@ pub fn receive_from(handle: u64, output: &mut [u8]) -> Option<(usize, Endpoint)>
 
 /// Bounded timer-bottom-half RX demultiplexing for UDP and TCP sockets.
 pub fn pump() -> usize {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 network RX pump attempted from non-owner CPU");
+    }
     let mut frame = [0u8; crate::aarch64_net_wire::FRAME_CAPACITY];
     let mut progressed = 0usize;
     let mut progressed_handles = [0u64; PUMP_FRAMES];

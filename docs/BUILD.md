@@ -174,6 +174,13 @@ frame balance, and normal boot completion are mandatory. The harness waits for
 the complete readiness line so a partial serial read cannot trigger input
 early. `boot/MAKOS.CFG` does not contain the test option.
 
+Before the keyboard phase, the same focused image runs a real UDP/DNS RX phase.
+AP1 sends transaction `0x4d4c` to QEMU slirp DNS and blocks in receive; CPU0
+alone drains the virtio-net RX ring and wakes AP1 by SGI. The gate requires
+nonzero `owner_frames`/`ap_deferrals`, matching I/O idle/resume masks, validated
+DNS response status 63, and balanced frames. The marker deliberately reports
+`tx_path=ap-syscall-unqualified`; this gate qualifies RX ownership only.
+
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
 data memory type for an ELF entry would fault immediately after

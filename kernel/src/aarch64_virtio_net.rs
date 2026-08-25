@@ -945,6 +945,9 @@ pub fn tcp6_ingest(
 
 /// Consume at most one completed virtio RX descriptor without waiting.
 pub fn poll_frame(output: &mut [u8]) -> Option<usize> {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-net RX poll attempted from non-owner CPU");
+    }
     with_state(|state| {
         if state.ready {
             poll_receive(state, output)

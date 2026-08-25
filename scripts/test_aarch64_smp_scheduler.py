@@ -9,8 +9,12 @@ ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
 PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
 INPUT = (ROOT / "kernel/src/aarch64_virtio_input.rs").read_text()
 TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
-DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
+SOCKET = (ROOT / "kernel/src/aarch64_socket.rs").read_text()
+NET = (ROOT / "kernel/src/aarch64_virtio_net.rs").read_text()
 MAIN = (ROOT / "kernel/src/main.rs").read_text()
+BUILD_RS = (ROOT / "kernel/build.rs").read_text()
+NETWORK_PROBE = (ROOT / "user/aarch64_smp_network_rx_probe.S").read_text()
+DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
 INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
@@ -45,6 +49,7 @@ for token in (
     "user_stack_pointer_valid_in(context.ttbr0, context.sp_el0)",
     "pub(crate) fn send_scheduler_ipi()",
     "pub(crate) fn service_input_on_owner_cpu()",
+    "pub(crate) fn service_network_rx_on_owner_cpu()",
     "stop_remote_group_member_from_irq(frame)",
     "stop_remote_group_member_on_el0_return(frame)",
 ):
@@ -55,6 +60,10 @@ assert ARCH.count("crate::aarch64_virtio_input::poll()") == 1
 assert "crate::aarch64_virtio_input::poll()" not in PROCESS
 assert "crate::aarch64_virtio_input::poll()" not in TTY
 assert "AArch64 virtio-input poll attempted from non-owner CPU" in INPUT
+assert ARCH.count("crate::aarch64_socket::pump()") == 1
+assert "crate::aarch64_socket::pump()" not in PROCESS
+assert "AArch64 network RX pump attempted from non-owner CPU" in SOCKET
+assert "AArch64 virtio-net RX poll attempted from non-owner CPU" in NET
 
 for token in (
     "fn scheduler_cpu() -> usize",
@@ -111,6 +120,9 @@ for token in (
     "reset_input_service_affinity_evidence",
     "input_service_affinity_evidence",
     "pub fn run_smp_input_device_self_test()",
+    "pub fn run_smp_network_rx_self_test()",
+    "MAKOS_AARCH64_SMP_NETWORK_RX_READY",
+    "MAKOS_AARCH64_SMP_NETWORK_RX_OK",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
     "state.table.running_cpu(slot.pid).is_some()",
@@ -126,6 +138,15 @@ for token in (
     'asm!("dsb ish", "sev", options(nostack))',
 ):
     assert token in PROCESS, token
+
+for token in (
+    "aarch64_smp_network_rx_probe.S",
+    "aarch64-smp-network-rx-probe.elf",
+):
+    assert token in BUILD_RS, token
+assert "run_smp_network_rx_self_test();" in MAIN
+for token in ("mov x8, #47", "mov x8, #49", "mov x8, #50", "mov x0, #63"):
+    assert token in NETWORK_PROBE, token
 
 # Any CPU0 compatibility wrapper here would silently mutate CPU0 ownership
 # when same syscall/exception path executes on an AP.
@@ -151,6 +172,8 @@ for token in (
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
     "input_idle_mask=0x2 input_resume_mask=0x2 status=61 free_balance=1",
     "mmio_owner=cpu0 contention=ap-deferred owner_activity=",
+    "rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
+    "tx_path=ap-syscall-unqualified free_balance=1",
 ):
     assert token in INPUT_RUNTIME, token
 

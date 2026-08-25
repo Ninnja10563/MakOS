@@ -73,6 +73,10 @@ static SMP_INPUT_DEVICE_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-input-device-probe.elf"
 ));
+static SMP_NETWORK_RX_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-network-rx-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -1272,6 +1276,128 @@ pub fn run_smp_input_device_self_test() {
     reset_scheduler();
 }
 
+pub fn run_smp_network_rx_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_IO_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_IO_RESUME_MASK.store(0, Ordering::Release);
+    crate::arch::reset_network_rx_affinity_evidence();
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let waiter = spawn_process(0, SMP_NETWORK_RX_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX waiter spawn failed"))
+        .0;
+    let sentinel = spawn_process(
+        0,
+        SMP_CONCURRENT_EXIT_PROBE_ELF,
+        64,
+        ProcessRole::SmpProbe,
+    )
+    .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX sentinel spawn failed"))
+    .0;
+    SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(waiter, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let idle_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let blocked = with_state(|state| {
+            state.table.get(waiter).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Blocked
+            })
+        });
+        if blocked && SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire) & 0b0010 != 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(idle_deadline) {
+            crate::fatal("AArch64 SMP network-RX AP idle timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_NETWORK_RX_READY waiter_cpu=1 poller_cpu=0 device=virtio-net request=dns io_idle_mask={:#x}",
+        SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire),
+    );
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        crate::arch::service_network_rx_on_owner_cpu();
+        let complete = with_state(|state| {
+            state.table.get(waiter).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP network-RX completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let mut reaped = [(0u64, 0u64, 0u64); 2];
+    with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, waiter)
+        else {
+            crate::fatal("AArch64 SMP network-RX waiter reap failed");
+        };
+        reaped[0] = (waiter, resource, exit_status);
+        if state.table.terminate(sentinel, 64).is_none() {
+            crate::fatal("AArch64 SMP network-RX sentinel terminate failed");
+        }
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, sentinel)
+        else {
+            crate::fatal("AArch64 SMP network-RX sentinel reap failed");
+        };
+        reaped[1] = (sentinel, resource, exit_status);
+        for tid in [waiter, sentinel] {
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == tid) {
+                *slot = ContextSlot::EMPTY;
+            }
+        }
+    });
+    for (pid, resource, status) in reaped {
+        cleanup_reaped(pid, resource, status);
+    }
+
+    let idle = SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire);
+    let resumed = SMP_PROBE_IO_RESUME_MASK.load(Ordering::Acquire);
+    let (owner_frames, nonowner_deferrals) = crate::arch::network_rx_affinity_evidence();
+    if reaped[0].2 != 63
+        || reaped[1].2 != 64
+        || idle != 0b0010
+        || resumed != idle
+        || owner_frames == 0
+        || nonowner_deferrals == 0
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP network-RX userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tx_path=ap-syscall-unqualified free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        owner_frames,
+        nonowner_deferrals,
+        idle,
+        resumed,
+    );
+    reset_scheduler();
+}
+
 pub fn run_desktop_shell() -> ! {
     reset_scheduler();
     let (pid, process) = spawn_process(0, SHELL_ELF, 0, ProcessRole::Shell)
@@ -1495,7 +1621,7 @@ pub(crate) fn block_current_for_io_on(
         crate::arch::enable_interrupts();
         unsafe { asm!("wfi", options(nomem, nostack)) };
         crate::arch::disable_interrupts();
-        crate::aarch64_socket::pump();
+        crate::arch::service_network_rx_on_owner_cpu();
         crate::arch::service_input_on_owner_cpu();
         captured.restore(frame);
         return IoBlockResult::Switched;
@@ -1835,7 +1961,7 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             // Virtio input/net currently use timer-polled bottom halves. Keep
             // them live during idle wait, then hand scheduler any task they
             // wake instead of monopolizing EL1 until this task's deadline.
-            crate::aarch64_socket::pump();
+            crate::arch::service_network_rx_on_owner_cpu();
             crate::arch::service_input_on_owner_cpu();
         }
     }
@@ -2513,6 +2639,13 @@ pub fn ipc_control_allowed() -> bool {
     // The only pre-login exception is immutable kernel-embedded boot-fixture
     // code used to exercise this path before PID1 receives session caps.
     crate::security::has_capability(crate::security::CAP_IPC)
+        || current_app_role() == ProcessRole::SmpProbe
+}
+
+pub fn network_control_allowed() -> bool {
+    // Immutable kernel-embedded SMP probes qualify device ownership before a
+    // login session exists; ordinary tasks still require CAP_NETWORK.
+    crate::security::has_capability(crate::security::CAP_NETWORK)
         || current_app_role() == ProcessRole::SmpProbe
 }
 

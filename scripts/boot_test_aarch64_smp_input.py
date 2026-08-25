@@ -148,6 +148,11 @@ def main() -> int:
                     b"MAKOS_CONFIG_OK source=fat",
                     b"smp_input_probe=1",
                     b"MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices=2",
+                    b"MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0",
+                    b"device=virtio-net response=dns ring_activity=real",
+                    b"rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
+                    b"io_idle_mask=0x2 io_resume_mask=0x2 status=63",
+                    b"tx_path=ap-syscall-unqualified free_balance=1",
                     ready,
                 ):
                     if marker not in output:
@@ -190,7 +195,8 @@ def main() -> int:
         "MAKOS_AARCH64_SMP_INPUT_RUNTIME_OK "
         f"accel={accel} waiter_cpu=1 poller_cpu=0 device=virtio-keyboard "
         "event=ctrl-k mmio_owner=cpu0 contention=ap-deferred "
-        "block=ap-idle wake=device-ring,sgi free_balance=1"
+        "block=ap-idle wake=device-ring,sgi network_rx=cpu0-owned,dns-wake "
+        "free_balance=1"
     )
     return 0
 

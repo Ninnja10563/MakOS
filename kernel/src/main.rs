@@ -261,6 +261,7 @@ pub extern "C" fn aarch64_kernel_main(boot_ptr: *const BootInfo) -> ! {
     let framebuffer = aarch64_virtio_gpu::init(800, 600);
     aarch64_desktop::initialize(framebuffer);
     if boot_options.smp_input_probe {
+        aarch64_process::run_smp_network_rx_self_test();
         aarch64_process::run_smp_input_device_self_test();
     }
     aarch64_tty::initialize();

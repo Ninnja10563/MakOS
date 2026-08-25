@@ -60,11 +60,17 @@ Last updated: 2026-08-25.
   `input_idle_mask=0x2`/`input_resume_mask=0x2`, status 61, exact frame balance,
   and subsequent boot completion. The ordinary image never arms the
   external-input wait.
+  The same opt-in image first runs a real virtio-net RX fixture. AP1 sends a
+  UDP query to QEMU slirp DNS, blocks in receive, and returns to idle. CPU0
+  exclusively drains/demultiplexes the RX ring and sends the wake SGI. Two
+  repeated Pi/TCG passes validate the DNS response, nonzero CPU0 frames/AP
+  deferrals, I/O idle/resume masks `0x2`, status 63, and exact frame balance.
+  This qualifies RX only; AP-originated TX remains explicitly pending.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending network, block, and GPU
-  service affinity/contention proof, so the
+  desktop/Firefox AP scheduling remains gated pending network TX, block, and
+  GPU service affinity/contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative

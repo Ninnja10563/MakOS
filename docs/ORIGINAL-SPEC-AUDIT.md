@@ -7,6 +7,13 @@ spec breadth remains; `Missing` means no qualifying implementation.
 Last audit: 2026-08-25. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
+Scheduler-row evidence now also includes an opt-in AP1 UDP/DNS receive fixture:
+CPU0 exclusively drains/demultiplexes the virtio-net RX ring, the AP blocks and
+resumes with mask `0x2`, the response is validated, and frames fully balance.
+The run exposed and fixed rejection of legal saved EL0 NZCV flags. This does
+not close the Partial row: AP network TX, block/GPU ownership, migration, and
+load balancing remain unqualified.
+
 | Requirement group | Status | Current evidence | Missing proof/work |
 |---|---|---|---|
 | Real OS, no host fallback | Implemented | UEFI loader, freestanding kernels, EL0/ring-3 userspace, own drivers; `scripts/boot_test.py`, `scripts/boot_test_aarch64.py` | Real-hardware qualification |
