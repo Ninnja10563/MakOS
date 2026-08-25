@@ -98,6 +98,11 @@ open gates.
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.
 
+The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
+Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
+data memory type for an ELF entry would fault immediately after
+`ExitBootServices`. `scripts/test_uefi_kernel_handoff.py` guards this contract.
+
 ## MakFS4 offline check
 
 Stop every QEMU process using the raw MakFS4 data image before checking it.

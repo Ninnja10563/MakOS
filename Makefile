@@ -166,6 +166,7 @@ test-cpython-aarch64: image-aarch64 package-cpython-aarch64
 	python3 scripts/boot_test_aarch64_cpython.py
 
 unit:
+	python3 scripts/test_uefi_kernel_handoff.py
 	cargo test -p makos-boot-api
 	cargo test -p makos-acpi
 	cargo test -p makos-crypto
@@ -210,6 +211,7 @@ unit:
 	python3 scripts/test_mkgpt.py
 
 check:
+	python3 scripts/test_uefi_kernel_handoff.py
 	cargo check -p makos-kernel --target x86_64-unknown-none
 	cargo check -p makos-loader --target x86_64-unknown-uefi
 	cargo check -p makos-kernel --target aarch64-unknown-none

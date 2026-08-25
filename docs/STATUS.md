@@ -552,6 +552,18 @@ Last updated: 2026-08-25.
 
 ## Tested platform
 
+- Partial 2026-08-25 Raspberry Pi 4 / Debian 13 host proof: user-local QEMU
+  10.0.11 TCG with AAVMF 2025.02 initially trapped at the kernel ELF entry
+  because the loader used execute-never `LOADER_DATA`. The loader now uses
+  executable `LOADER_CODE`; the unchanged AArch64 harness passes UEFI handoff,
+  four-PE PSCI/SMP, EL0 scheduler/process/VM probes, virtio block/net/rng/GPU/
+  input, MakFS4, authenticated login/desktop, typed IPC, upstream musl threads,
+  signals, futexes, dynamic linking, and Python execution. The run is not a
+  full gate pass: slow TCG later produced Settings resize `560x360` instead of
+  the required `450x290` marker. Thresholds and expected geometry remain
+  unchanged. This is functional Pi evidence only, not Apple-HVF performance
+  qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
+  the unprivileged user.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,

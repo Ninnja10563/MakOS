@@ -141,7 +141,10 @@ fn load_kernel(image: &[u8]) -> Result<LoadedKernel, &'static str> {
         .map_err(|_| "kernel too large")?;
     let allocation = boot::allocate_pages(
         AllocateType::Address(allocation_start),
-        MemoryType::LOADER_DATA,
+        // Firmware memory-protection policy may map LOADER_DATA execute-never.
+        // The handoff enters the ELF image directly after ExitBootServices, so
+        // its initial allocation must use the executable loader memory type.
+        MemoryType::LOADER_CODE,
         pages,
     )
     .map_err(|_| "physical kernel allocation failed")?;
