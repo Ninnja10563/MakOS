@@ -137,18 +137,19 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   file into MakFS; VFS exec-by-path validates/maps it in a fresh address space,
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
-  startup and two C sources from MakFS. A bounded source-driven C compiler emits
+  startup and one two-function C source from MakFS. A bounded source-driven C compiler emits
   AAPCS64 integer/pointer expressions, register locals, mutable integer parameter/local
   assignments, equality/inequality control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
   loads and stores, fixed local `int` arrays with checked constant indexing,
   array decay and typed pointer parameters passed in AAPCS64 `x0`, non-leaf
-  frames, cross-object calls that mutate caller-owned array elements, and
+  frames, same-object calls that mutate caller-owned array elements, and
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
   loop/memory outcomes execute in EL0.
   The assembler emits `_start`. The guest static
-  linker resolves `_start`→`answer`→`adjust` across three objects, applies two
-  `R_AARCH64_CALL26` relocations, rejects malformed C, invalid relocation type,
+  linker resolves external `_start`→`answer` and same-object `answer`→`adjust`
+  across two objects, applies two `R_AARCH64_CALL26` relocations, rejects
+  malformed C, invalid relocation type,
   unresolved symbols and duplicate definitions, emits `ET_EXEC`, and executes
   the result twice under Pi/QEMU TCG. Full C/Rust
   compiler semantics, general assembler/linker, build system, debugger, package

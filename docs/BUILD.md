@@ -105,9 +105,9 @@ runtimes when using an extracted, non-system QEMU installation.
 
 After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
 linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
-`/home/user/generated-answer.c` and `/home/user/generated-adjust.c`, then
-rereads all three from MakFS. Each bounded C translation unit accepts one `int`
-function with one `int` or `int *` parameter, 0..65535 constants,
+`/home/user/generated-program.c`, then rereads both from MakFS. A bounded C
+translation unit accepts up to two `int` functions, each with one `int` or
+`int *` parameter, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
 mutable parameter/local assignments, equality and inequality comparisons, one
 equality `if` block containing a return, a bounded `while` body containing one
@@ -128,12 +128,14 @@ then decays `values` into the `adjust` call when element zero equals 40;
 otherwise it returns 86. `adjust` accepts that pointer in AAPCS64 `x0`,
 preserves it in `x23`, increments element zero, then uses
 `while (count != 1)` to store element-zero-plus-one into element one and advance
-the counter. Its return reloads element one. The compiler
-emits 128/132 code bytes in 736/688-byte `generated-answer.o` and
-`generated-adjust.o`; the assembler emits 76 code bytes in the 688-byte
-`generated-main.o`. These genuine ELF64 `ET_REL` files persist/reopen. The
-bounded linker discovers definitions and undefined symbols across all three,
-applies two `R_AARCH64_CALL26` relocations, and emits 336 code bytes in the
+the counter. Its return reloads element one. The compiler emits both 128/132
+code-byte definitions in a single 260-byte `.text` and an 872-byte
+`generated-program.o`; the assembler emits 76 code bytes in the 688-byte
+`generated-main.o`. Both genuine ELF64 `ET_REL` files persist/reopen. The C
+object's symbol table defines `answer` at offset zero and `adjust` at offset
+128. The bounded linker discovers definitions and undefined symbols across
+both, applies the external `_start`→`answer` and same-object
+`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 336 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
 `answer(20)=42`, `answer(0)=86`, `adjust(forty)=42`, and
 `adjust(zero)=2`, with the direct-call arrays also required to become
@@ -143,7 +145,8 @@ are denied, as are unsupported division, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer as an `int`.
-Known local-array out-of-bounds indexing is also denied.
+Known local-array out-of-bounds indexing and duplicate functions in one
+translation unit are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
 both forms, passes 20 to compiled `answer`, and exits with its result 42. Three
@@ -158,7 +161,7 @@ make test-aarch64-selfhost-runtime
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no pointer arithmetic, variable-length/global/multidimensional arrays,
 structs, nested/general
-blocks, multiple functions per translation unit, general object
+blocks, more than two functions per translation unit, general object
 count/relocation repertoire, or build driver. It is not a
 full C/Rust compiler, general linker, build system, debugger, or end-to-end
 in-guest OS build.

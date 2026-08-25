@@ -330,7 +330,18 @@ static size_t assemble(const char *source, size_t source_length,
  * wrapped in a genuine ELF64 ET_REL object by emit_object(). Unsupported syntax
  * fails closed.
  */
-enum { MAX_C_LOCALS = 4, MAX_C_STACK_SLOTS = 4 };
+enum {
+    MAX_C_LOCALS = 4,
+    MAX_C_STACK_SLOTS = 4,
+    MAX_C_FUNCTIONS = 2,
+};
+
+struct c_definition {
+    char name[MAX_LABEL_BYTES];
+    size_t length;
+    size_t offset;
+    size_t size;
+};
 
 struct c_local {
     char name[MAX_LABEL_BYTES];
@@ -872,13 +883,74 @@ static int c_while(struct c_compiler *compiler) {
     return 1;
 }
 
-static size_t compile_c(const char *source, size_t source_length,
-                        volatile uint8_t *code, size_t capacity,
-                        char function[MAX_LABEL_BYTES],
-                        size_t *function_length,
-                        struct relocation relocations[MAX_RELOCATIONS],
-                        size_t *relocation_count) {
-    if (relocation_count) *relocation_count = 0;
+static int c_compile_function(struct c_compiler *compiler,
+                              struct c_definition *definition) {
+    compiler->parameter_length = 0;
+    compiler->parameter_pointer = 0;
+    compiler->local_count = 0;
+    compiler->stack_slot_count = 0;
+    definition->length = 0;
+    definition->offset = compiler->output;
+    definition->size = 0;
+    if (!c_keyword(compiler, "int") ||
+        !c_identifier(compiler, definition->name, &definition->length) ||
+        !c_punct(compiler, '(') || !c_keyword(compiler, "int"))
+        return 0;
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '*') {
+        compiler->parameter_pointer = 1;
+        ++compiler->cursor;
+    }
+    if (!c_identifier(compiler, compiler->parameter,
+                      &compiler->parameter_length) ||
+        !c_punct(compiler, ')') || !c_punct(compiler, '{'))
+        return 0;
+    /* Preserve FP/LR and x19-x23; reserve four 32-bit local stack slots. */
+    if (!c_emit(compiler, UINT32_C(0xa9ba7bfd)) ||
+        !c_emit(compiler, UINT32_C(0x910003fd)) ||
+        !c_emit(compiler, UINT32_C(0xa90153f3)) ||
+        !c_emit(compiler, UINT32_C(0xa9025bf5)) ||
+        !c_emit(compiler, UINT32_C(0xf9001bf7)) ||
+        !c_emit(compiler, compiler->parameter_pointer
+                               ? UINT32_C(0xaa0003f7)
+                               : UINT32_C(0x2a0003f7)))
+        return 0;
+    int terminal_return = 0;
+    size_t statement_count = 0;
+    for (;;) {
+        c_space(compiler);
+        if (compiler->cursor == compiler->source_length) return 0;
+        if (compiler->source[compiler->cursor] == '}') break;
+        if (terminal_return) return 0;
+        if (c_keyword(compiler, "int")) {
+            if (!c_declaration(compiler)) return 0;
+        } else if (c_keyword(compiler, "if")) {
+            if (!c_if_return(compiler)) return 0;
+        } else if (c_keyword(compiler, "while")) {
+            if (!c_while(compiler)) return 0;
+        } else if (c_keyword(compiler, "return")) {
+            if (!c_return_statement(compiler)) return 0;
+            terminal_return = 1;
+        } else {
+            if (!c_assignment(compiler)) return 0;
+        }
+        ++statement_count;
+    }
+    if (statement_count == 0 || !terminal_return || !c_punct(compiler, '}'))
+        return 0;
+    definition->size = compiler->output - definition->offset;
+    return definition->size != 0;
+}
+
+static size_t compile_c_unit(
+    const char *source, size_t source_length, volatile uint8_t *code,
+    size_t capacity, struct c_definition definitions[MAX_C_FUNCTIONS],
+    size_t *definition_count,
+    struct relocation relocations[MAX_RELOCATIONS], size_t *relocation_count) {
+    if (!definition_count || !relocation_count || !relocations) return 0;
+    *definition_count = 0;
+    *relocation_count = 0;
     struct c_compiler compiler = {
         .source = source,
         .source_length = source_length,
@@ -887,56 +959,50 @@ static size_t compile_c(const char *source, size_t source_length,
         .relocations = relocations,
         .relocation_count = relocation_count,
     };
-    if (!function_length || !c_keyword(&compiler, "int") ||
-        !c_identifier(&compiler, function, function_length) ||
-        !c_punct(&compiler, '(') || !c_keyword(&compiler, "int"))
-        return 0;
-    c_space(&compiler);
-    if (compiler.cursor < compiler.source_length &&
-        compiler.source[compiler.cursor] == '*') {
-        compiler.parameter_pointer = 1;
-        ++compiler.cursor;
-    }
-    if (!c_identifier(&compiler, compiler.parameter,
-                      &compiler.parameter_length) ||
-        !c_punct(&compiler, ')') || !c_punct(&compiler, '{'))
-        return 0;
-    /* Preserve FP/LR and x19-x23; reserve four 32-bit local stack slots. */
-    if (!c_emit(&compiler, UINT32_C(0xa9ba7bfd)) ||
-        !c_emit(&compiler, UINT32_C(0x910003fd)) ||
-        !c_emit(&compiler, UINT32_C(0xa90153f3)) ||
-        !c_emit(&compiler, UINT32_C(0xa9025bf5)) ||
-        !c_emit(&compiler, UINT32_C(0xf9001bf7)) ||
-        !c_emit(&compiler, compiler.parameter_pointer
-                               ? UINT32_C(0xaa0003f7)
-                               : UINT32_C(0x2a0003f7)))
-        return 0;
-    int terminal_return = 0;
-    size_t statement_count = 0;
     for (;;) {
         c_space(&compiler);
-        if (compiler.cursor == compiler.source_length) return 0;
-        if (compiler.source[compiler.cursor] == '}') break;
-        if (terminal_return) return 0;
-        if (c_keyword(&compiler, "int")) {
-            if (!c_declaration(&compiler)) return 0;
-        } else if (c_keyword(&compiler, "if")) {
-            if (!c_if_return(&compiler)) return 0;
-        } else if (c_keyword(&compiler, "while")) {
-            if (!c_while(&compiler)) return 0;
-        } else if (c_keyword(&compiler, "return")) {
-            if (!c_return_statement(&compiler)) return 0;
-            terminal_return = 1;
-        } else {
-            if (!c_assignment(&compiler)) return 0;
-        }
-        ++statement_count;
+        if (compiler.cursor == compiler.source_length) break;
+        if (*definition_count == MAX_C_FUNCTIONS ||
+            !c_compile_function(&compiler, &definitions[*definition_count]))
+            return 0;
+        for (size_t previous = 0; previous < *definition_count; ++previous)
+            if (same_name(definitions[previous].name,
+                          definitions[previous].length,
+                          definitions[*definition_count].name,
+                          definitions[*definition_count].length))
+                return 0;
+        ++*definition_count;
     }
-    if (statement_count == 0 || !terminal_return || !c_punct(&compiler, '}'))
-        return 0;
-    c_space(&compiler);
-    if (compiler.cursor != compiler.source_length) return 0;
+    if (*definition_count == 0) return 0;
     return compiler.output;
+}
+
+static size_t compile_c(const char *source, size_t source_length,
+                        volatile uint8_t *code, size_t capacity,
+                        char function[MAX_LABEL_BYTES],
+                        size_t *function_length,
+                        struct relocation relocations[MAX_RELOCATIONS],
+                        size_t *relocation_count) {
+    if (!function_length) return 0;
+    struct c_definition definitions[MAX_C_FUNCTIONS] = {0};
+    size_t definition_count = 0;
+    struct relocation local_relocations[MAX_RELOCATIONS] = {0};
+    size_t local_relocation_count = 0;
+    struct relocation *relocation_output = relocations
+                                               ? relocations
+                                               : local_relocations;
+    size_t *relocation_count_output = relocation_count
+                                          ? relocation_count
+                                          : &local_relocation_count;
+    size_t output = compile_c_unit(source, source_length, code, capacity,
+                                   definitions, &definition_count,
+                                   relocation_output,
+                                   relocation_count_output);
+    if (!output || definition_count != 1) return 0;
+    for (size_t index = 0; index < definitions[0].length; ++index)
+        function[index] = definitions[0].name[index];
+    *function_length = definitions[0].length;
+    return output;
 }
 
 static int write_file(const char *path, size_t path_length, const uint8_t *bytes,
@@ -988,37 +1054,77 @@ static void symbol(volatile uint8_t *object, size_t symbols, size_t index,
     put64(object, entry + 16, size);
 }
 
-static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
-                          const uint8_t *code, size_t code_length,
-                          const char *definition, size_t definition_length,
-                          const struct relocation *relocations,
-                          size_t relocation_count) {
+static size_t emit_object_definitions(
+    volatile uint8_t object[OBJECT_CAPACITY], const uint8_t *code,
+    size_t code_length,
+    const struct c_definition definitions[MAX_C_FUNCTIONS],
+    size_t definition_count, const struct relocation *relocations,
+    size_t relocation_count) {
     static const uint8_t section_strings[] =
         "\0.text\0.rela.text\0.symtab\0.strtab\0.shstrtab\0";
-    if (code_length == 0 || definition_length == 0 ||
-        definition_length > MAX_LABEL_BYTES || relocation_count > MAX_RELOCATIONS ||
+    if (code_length == 0 || definition_count == 0 ||
+        definition_count > MAX_C_FUNCTIONS ||
+        relocation_count > MAX_RELOCATIONS ||
         (relocation_count != 0 && !relocations))
         return 0;
-    for (size_t index = 0; index < definition_length; ++index)
-        if (!name_byte(definition[index], index == 0)) return 0;
+
+    uint32_t definition_name_offsets[MAX_C_FUNCTIONS] = {0};
+    size_t string_length = 1;
+    for (size_t definition = 0; definition < definition_count; ++definition) {
+        if (definitions[definition].length == 0 ||
+            definitions[definition].length > MAX_LABEL_BYTES ||
+            definitions[definition].offset % 4 != 0 ||
+            definitions[definition].size == 0 ||
+            definitions[definition].offset > code_length ||
+            definitions[definition].size >
+                code_length - definitions[definition].offset)
+            return 0;
+        for (size_t byte = 0; byte < definitions[definition].length; ++byte)
+            if (!name_byte(definitions[definition].name[byte], byte == 0))
+                return 0;
+        for (size_t previous = 0; previous < definition; ++previous) {
+            if (same_name(definitions[previous].name,
+                          definitions[previous].length,
+                          definitions[definition].name,
+                          definitions[definition].length))
+                return 0;
+            size_t previous_end = definitions[previous].offset +
+                                  definitions[previous].size;
+            size_t definition_end = definitions[definition].offset +
+                                    definitions[definition].size;
+            if (definitions[previous].offset < definition_end &&
+                definitions[definition].offset < previous_end)
+                return 0;
+        }
+        definition_name_offsets[definition] = (uint32_t)string_length;
+        string_length += definitions[definition].length + 1;
+    }
 
     struct relocation undefined[MAX_RELOCATIONS] = {0};
     size_t undefined_count = 0;
     uint32_t relocation_symbols[MAX_RELOCATIONS] = {0};
     uint32_t undefined_name_offsets[MAX_RELOCATIONS] = {0};
-    size_t string_length = 1 + definition_length + 1;
     for (size_t index = 0; index < relocation_count; ++index) {
         if (relocations[index].length == 0 ||
             relocations[index].length > MAX_LABEL_BYTES ||
             relocations[index].offset % 4 != 0 ||
             relocations[index].offset > code_length ||
             code_length - relocations[index].offset < 4 ||
-            get32(code, relocations[index].offset) != UINT32_C(0x94000000) ||
-            same_name(relocations[index].name, relocations[index].length,
-                      definition, definition_length))
+            get32(code, relocations[index].offset) != UINT32_C(0x94000000))
             return 0;
         for (size_t byte = 0; byte < relocations[index].length; ++byte)
             if (!name_byte(relocations[index].name[byte], byte == 0)) return 0;
+        size_t definition_match = 0;
+        while (definition_match < definition_count &&
+               !same_name(relocations[index].name,
+                          relocations[index].length,
+                          definitions[definition_match].name,
+                          definitions[definition_match].length))
+            ++definition_match;
+        if (definition_match < definition_count) {
+            relocation_symbols[index] = 1 + (uint32_t)definition_match;
+            continue;
+        }
         size_t match = 0;
         while (match < undefined_count &&
                !same_name(relocations[index].name, relocations[index].length,
@@ -1030,14 +1136,15 @@ static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
             string_length += relocations[index].length + 1;
             ++undefined_count;
         }
-        relocation_symbols[index] = 2 + (uint32_t)match;
+        relocation_symbols[index] = 1 + (uint32_t)definition_count +
+                                    (uint32_t)match;
     }
 
     size_t text_offset = ELF_HEADER_SIZE;
     size_t rela_offset = align_up(text_offset + code_length, 8);
     size_t rela_length = relocation_count * RELA_SIZE;
     size_t symbol_offset = align_up(rela_offset + rela_length, 8);
-    size_t symbol_count = 2 + undefined_count;
+    size_t symbol_count = 1 + definition_count + undefined_count;
     size_t string_offset = symbol_offset + symbol_count * SYMBOL_SIZE;
     size_t section_string_offset = string_offset + string_length;
     size_t section_headers = align_up(section_string_offset +
@@ -1064,14 +1171,21 @@ static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
               ((uint64_t)relocation_symbols[index] << 32) | R_AARCH64_CALL26);
         put64(object, entry + 16, 0);
     }
-    symbol(object, symbol_offset, 1, 1, 1, 0, code_length);
+    for (size_t definition = 0; definition < definition_count; ++definition)
+        symbol(object, symbol_offset, 1 + definition,
+               definition_name_offsets[definition], 1,
+               definitions[definition].offset,
+               definitions[definition].size);
     for (size_t index = 0; index < undefined_count; ++index)
-        symbol(object, symbol_offset, 2 + index,
+        symbol(object, symbol_offset, 1 + definition_count + index,
                undefined_name_offsets[index], 0, 0, 0);
     size_t string_cursor = string_offset + 1;
-    copy_bytes(object + string_cursor, (const uint8_t *)definition,
-               definition_length);
-    string_cursor += definition_length + 1;
+    for (size_t definition = 0; definition < definition_count; ++definition) {
+        copy_bytes(object + string_cursor,
+                   (const uint8_t *)definitions[definition].name,
+                   definitions[definition].length);
+        string_cursor += definitions[definition].length + 1;
+    }
     for (size_t index = 0; index < undefined_count; ++index) {
         copy_bytes(object + string_cursor,
                    (const uint8_t *)undefined[index].name,
@@ -1092,6 +1206,25 @@ static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
     section(object, section_headers, 5, 34, 3, 0, section_string_offset,
             sizeof(section_strings) - 1, 0, 0, 1, 0);
     return object_length;
+}
+
+static size_t emit_object(volatile uint8_t object[OBJECT_CAPACITY],
+                          const uint8_t *code, size_t code_length,
+                          const char *definition, size_t definition_length,
+                          const struct relocation *relocations,
+                          size_t relocation_count) {
+    if (!definition || definition_length == 0 ||
+        definition_length > MAX_LABEL_BYTES)
+        return 0;
+    struct c_definition single = {
+        .length = definition_length,
+        .offset = 0,
+        .size = code_length,
+    };
+    for (size_t index = 0; index < definition_length; ++index)
+        single.name[index] = definition[index];
+    return emit_object_definitions(object, code, code_length, &single, 1,
+                                   relocations, relocation_count);
 }
 
 struct object_view {
@@ -1212,7 +1345,7 @@ static int symbol_names_equal(const struct object_view *first,
 
 static int validate_symbols(const struct object_view *object) {
     if (object->rela_count > MAX_RELOCATIONS ||
-        object->symbol_count > MAX_RELOCATIONS + 2)
+        object->symbol_count > 1 + MAX_C_FUNCTIONS + MAX_RELOCATIONS)
         return 0;
     for (size_t byte = 0; byte < SYMBOL_SIZE; ++byte)
         if (object->bytes[object->symbol_offset + byte] != 0) return 0;
@@ -1324,7 +1457,9 @@ static size_t link_objects(const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
                 return 0;
             size_t symbol_entry = objects[object].symbol_offset +
                                   symbol_index * SYMBOL_SIZE;
-            if (get16(objects[object].bytes, symbol_entry + 6) != 0) return 0;
+            uint16_t relocation_section =
+                get16(objects[object].bytes, symbol_entry + 6);
+            if (relocation_section != 0 && relocation_section != 1) return 0;
 
             size_t target_matches = 0;
             int64_t target = 0;
@@ -1414,11 +1549,9 @@ static void fail(uint64_t status) {
 
 __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char main_source_path[] = "/home/user/generated.s";
-    static const char answer_source_path[] = "/home/user/generated-answer.c";
-    static const char adjust_source_path[] = "/home/user/generated-adjust.c";
+    static const char program_source_path[] = "/home/user/generated-program.c";
     static const char main_object_path[] = "/home/user/generated-main.o";
-    static const char answer_object_path[] = "/home/user/generated-answer.o";
-    static const char adjust_object_path[] = "/home/user/generated-adjust.o";
+    static const char program_object_path[] = "/home/user/generated-program.o";
     static const char output_path[] = "/home/user/generated-aarch64.elf";
     static const char main_source[] =
         "_start:\n"
@@ -1443,15 +1576,14 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "mov x0, #86\n"
         "mov x8, #5\n"
         "svc #0\n";
-    static const char answer_source[] =
+    static const char program_source[] =
         "int answer(int value) {\n"
         "    int values[2] = { (value * 3) - 20, 0 };\n"
         "    if (values[0] == 40) {\n"
         "        return adjust(values);\n"
         "    }\n"
         "    return 86;\n"
-        "}\n";
-    static const char adjust_source[] =
+        "}\n"
         "int adjust(int *pointer) {\n"
         "    pointer[0] = pointer[0] + 1;\n"
         "    int count = 0;\n"
@@ -1477,60 +1609,53 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int adjust(int *pointer) { return pointer; }\n";
     static const char malformed_array_index_source[] =
         "int answer(int value) { int values[2] = { value, 0 }; return values[2]; }\n";
+    static const char malformed_duplicate_function_source[] =
+        "int answer(int value) { return value; } int answer(int value) { return value; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
-        "MAKOS_AARCH64_LINKER_OK sources=3 languages=aarch64-asm,c-subset-v1 "
-        "compiler=guest-native assembler=guest-native objects=3 "
+        "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
+        "compiler=guest-native assembler=guest-native objects=2 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:2 "
         "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
-        "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32-pointer64 "
-        "c_features=parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,address-of,address-expression,dereference,if,equality,inequality,while,call,return "
+        "c_source=/home/user/generated-program.c translation_unit_functions=2 "
+        "c_abi=aapcs64-int32-pointer64 "
+        "c_features=multi-function,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,address-of,address-expression,dereference,if,equality,inequality,while,call,return "
         "nonleaf_frame=96 c_operators=mul,sub,add branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,2 array_results=41:42,1:2 code_bytes=76,128,132 "
-        "object_bytes=688,736,688 linked_bytes=336 output_bytes=815 "
-        "persisted_reopened=1 malformed_c_denied=8 "
+        "object_bytes=688,872 intra_object_call=1 linked_bytes=336 output_bytes=815 "
+        "persisted_reopened=1 malformed_c_denied=9 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
 
     if (!write_file(main_source_path, sizeof(main_source_path) - 1,
                     (const uint8_t *)main_source, sizeof(main_source) - 1) ||
-        !write_file(answer_source_path, sizeof(answer_source_path) - 1,
-                    (const uint8_t *)answer_source, sizeof(answer_source) - 1) ||
-        !write_file(adjust_source_path, sizeof(adjust_source_path) - 1,
-                    (const uint8_t *)adjust_source, sizeof(adjust_source) - 1))
+        !write_file(program_source_path, sizeof(program_source_path) - 1,
+                    (const uint8_t *)program_source,
+                    sizeof(program_source) - 1))
         fail(80);
-    uint8_t source_input[512] = {0}, answer_input[256] = {0};
-    uint8_t adjust_input[256] = {0};
+    uint8_t source_input[512] = {0}, program_input[512] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
-    size_t answer_source_length = read_file(answer_source_path,
-                                            sizeof(answer_source_path) - 1,
-                                            answer_input, sizeof(answer_input));
-    size_t adjust_source_length = read_file(adjust_source_path,
-                                            sizeof(adjust_source_path) - 1,
-                                            adjust_input, sizeof(adjust_input));
+    size_t program_source_length = read_file(
+        program_source_path, sizeof(program_source_path) - 1,
+        program_input, sizeof(program_input));
     if (source_length != sizeof(main_source) - 1 ||
-        answer_source_length != sizeof(answer_source) - 1 ||
-        adjust_source_length != sizeof(adjust_source) - 1)
+        program_source_length != sizeof(program_source) - 1)
         fail(81);
 
-    uint8_t main_code[128] = {0}, answer_code[128] = {0}, adjust_code[256] = {0};
+    uint8_t main_code[128] = {0}, program_code[384] = {0};
     struct relocation main_relocations[MAX_RELOCATIONS] = {0};
-    struct relocation answer_relocations[MAX_RELOCATIONS] = {0};
-    struct relocation adjust_relocations[MAX_RELOCATIONS] = {0};
-    size_t main_relocation_count = 0, answer_relocation_count = 0;
-    size_t adjust_relocation_count = 0;
+    struct relocation program_relocations[MAX_RELOCATIONS] = {0};
+    size_t main_relocation_count = 0, program_relocation_count = 0;
     size_t main_code_length = assemble((const char *)source_input, source_length,
                                        main_code, sizeof(main_code),
                                        main_relocations,
                                        &main_relocation_count);
-    char answer_function[MAX_LABEL_BYTES] = {0};
-    size_t answer_function_length = 0;
-    char adjust_function[MAX_LABEL_BYTES] = {0};
-    size_t adjust_function_length = 0;
+    struct c_definition program_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t program_definition_count = 0;
     uint8_t malformed_code[128] = {0};
     char malformed_function[MAX_LABEL_BYTES] = {0};
     size_t malformed_function_length = 0;
@@ -1580,27 +1705,36 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                   malformed_code, sizeof(malformed_code), malformed_function,
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
-    size_t answer_code_length = compile_c((const char *)answer_input,
-                                          answer_source_length, answer_code,
-                                          sizeof(answer_code), answer_function,
-                                          &answer_function_length,
-                                          answer_relocations,
-                                          &answer_relocation_count);
-    size_t adjust_code_length = compile_c((const char *)adjust_input,
-                                          adjust_source_length, adjust_code,
-                                          sizeof(adjust_code), adjust_function,
-                                          &adjust_function_length,
-                                          adjust_relocations,
-                                          &adjust_relocation_count);
-    if (main_code_length != 76 || answer_code_length != 128 ||
-        adjust_code_length != 132 ||
-        !same_name(answer_function, answer_function_length, "answer", 6) ||
-        !same_name(adjust_function, adjust_function_length, "adjust", 6) ||
+    struct c_definition malformed_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t malformed_definition_count = 0;
+    struct relocation malformed_relocations[MAX_RELOCATIONS] = {0};
+    size_t malformed_relocation_count = 0;
+    if (compile_c_unit(malformed_duplicate_function_source,
+                       sizeof(malformed_duplicate_function_source) - 1,
+                       malformed_code, sizeof(malformed_code),
+                       malformed_definitions, &malformed_definition_count,
+                       malformed_relocations,
+                       &malformed_relocation_count) != 0)
+        fail(82);
+    size_t program_code_length = compile_c_unit(
+        (const char *)program_input, program_source_length, program_code,
+        sizeof(program_code), program_definitions, &program_definition_count,
+        program_relocations, &program_relocation_count);
+    if (main_code_length != 76 || program_code_length != 260 ||
+        program_definition_count != 2 ||
+        !same_name(program_definitions[0].name,
+                   program_definitions[0].length, "answer", 6) ||
+        program_definitions[0].offset != 0 ||
+        program_definitions[0].size != 128 ||
+        !same_name(program_definitions[1].name,
+                   program_definitions[1].length, "adjust", 6) ||
+        program_definitions[1].offset != 128 ||
+        program_definitions[1].size != 132 ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
-        answer_relocation_count != 1 || answer_relocations[0].offset != 80 ||
-        !same_name(answer_relocations[0].name,
-                   answer_relocations[0].length, "adjust", 6) ||
-        adjust_relocation_count != 0)
+        program_relocation_count != 1 ||
+        program_relocations[0].offset != 80 ||
+        !same_name(program_relocations[0].name,
+                   program_relocations[0].length, "adjust", 6))
         fail(82);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -1622,47 +1756,31 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                     &invalid_emit, 1) != 0)
         fail(85);
 
-    uint8_t main_object[OBJECT_CAPACITY], answer_object[OBJECT_CAPACITY];
-    uint8_t adjust_object[OBJECT_CAPACITY];
+    uint8_t main_object[OBJECT_CAPACITY], program_object[OBJECT_CAPACITY];
     size_t main_object_length = emit_object(main_object, main_code,
                                             main_code_length, "_start", 6,
                                             main_relocations,
                                             main_relocation_count);
-    size_t answer_object_length = emit_object(answer_object, answer_code,
-                                              answer_code_length,
-                                              answer_function,
-                                              answer_function_length,
-                                              answer_relocations,
-                                              answer_relocation_count);
-    size_t adjust_object_length = emit_object(adjust_object, adjust_code,
-                                              adjust_code_length,
-                                              adjust_function,
-                                              adjust_function_length,
-                                              adjust_relocations,
-                                              adjust_relocation_count);
-    if (main_object_length != 688 || answer_object_length != 736 ||
-        adjust_object_length != 688 ||
+    size_t program_object_length = emit_object_definitions(
+        program_object, program_code, program_code_length,
+        program_definitions, program_definition_count, program_relocations,
+        program_relocation_count);
+    if (main_object_length != 688 || program_object_length != 872 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
-        !write_file(answer_object_path, sizeof(answer_object_path) - 1,
-                    answer_object, answer_object_length) ||
-        !write_file(adjust_object_path, sizeof(adjust_object_path) - 1,
-                    adjust_object, adjust_object_length))
+        !write_file(program_object_path, sizeof(program_object_path) - 1,
+                    program_object, program_object_length))
         fail(85);
 
     memset(main_object, 0, sizeof(main_object));
-    memset(answer_object, 0, sizeof(answer_object));
-    memset(adjust_object, 0, sizeof(adjust_object));
+    memset(program_object, 0, sizeof(program_object));
     main_object_length = read_file(main_object_path,
                                    sizeof(main_object_path) - 1,
                                    main_object, sizeof(main_object));
-    answer_object_length = read_file(answer_object_path,
-                                     sizeof(answer_object_path) - 1,
-                                     answer_object, sizeof(answer_object));
-    adjust_object_length = read_file(adjust_object_path,
-                                     sizeof(adjust_object_path) - 1,
-                                     adjust_object, sizeof(adjust_object));
-    if (!main_object_length || !answer_object_length || !adjust_object_length)
+    program_object_length = read_file(program_object_path,
+                                      sizeof(program_object_path) - 1,
+                                      program_object, sizeof(program_object));
+    if (!main_object_length || !program_object_length)
         fail(86);
 
     struct object_view corrupt_view;
@@ -1673,35 +1791,52 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     uint8_t linked_code[384] = {0};
     size_t entry_offset = 0;
     const uint8_t *objects[MAX_LINK_OBJECTS] = {
-        main_object, answer_object, adjust_object,
+        main_object, program_object,
     };
     size_t object_lengths[MAX_LINK_OBJECTS] = {
-        main_object_length, answer_object_length, adjust_object_length,
+        main_object_length, program_object_length,
     };
-    if (link_objects(objects, object_lengths, 3, linked_code,
+    if (link_objects(objects, object_lengths, 2, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
     main_object[corrupt_info] = saved_type;
     size_t corrupt_addend = corrupt_view.rela_offset + 16;
     if (main_object[corrupt_addend] != 0) fail(88);
     main_object[corrupt_addend] = 1;
-    if (link_objects(objects, object_lengths, 3, linked_code,
-                     sizeof(linked_code), "_start", &entry_offset) != 0)
-        fail(88);
-    main_object[corrupt_addend] = 0;
     if (link_objects(objects, object_lengths, 2, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
+    main_object[corrupt_addend] = 0;
+    struct object_view program_view;
+    if (!parse_object(program_object, program_object_length, &program_view) ||
+        program_view.symbol_count != 3)
+        fail(88);
+    size_t adjust_symbol = program_view.symbol_offset + 2 * SYMBOL_SIZE;
+    if (!string_is(&program_view, get32(program_object, adjust_symbol),
+                   "adjust") ||
+        get16(program_object, adjust_symbol + 6) != 1 ||
+        get64(program_object, adjust_symbol + 8) != 128 ||
+        get64(program_object, adjust_symbol + 16) != 132)
+        fail(88);
+    put16(program_object, adjust_symbol + 6, 0);
+    put64(program_object, adjust_symbol + 8, 0);
+    put64(program_object, adjust_symbol + 16, 0);
+    if (link_objects(objects, object_lengths, 2, linked_code,
+                     sizeof(linked_code), "_start", &entry_offset) != 0)
+        fail(88);
+    put16(program_object, adjust_symbol + 6, 1);
+    put64(program_object, adjust_symbol + 8, 128);
+    put64(program_object, adjust_symbol + 16, 132);
     const uint8_t *duplicate_objects[MAX_LINK_OBJECTS] = {
-        main_object, answer_object, answer_object,
+        main_object, program_object, program_object,
     };
     size_t duplicate_lengths[MAX_LINK_OBJECTS] = {
-        main_object_length, answer_object_length, answer_object_length,
+        main_object_length, program_object_length, program_object_length,
     };
     if (link_objects(duplicate_objects, duplicate_lengths, 3, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
-    size_t linked_length = link_objects(objects, object_lengths, 3, linked_code,
+    size_t linked_length = link_objects(objects, object_lengths, 2, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
     if (linked_length != 336 || entry_offset != 0) fail(89);

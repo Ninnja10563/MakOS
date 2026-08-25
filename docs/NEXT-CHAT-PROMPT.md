@@ -19,9 +19,11 @@ arithmetic, register locals, mutable parameter/local assignments,
 equality/inequality control flow, a backward-branch `while`, a 96-byte non-leaf
 frame, bounded local address-of/dereference memory loads/stores, typed `int *`
 parameters, fixed local `int` arrays, checked constant indexing, array decay,
-and a cross-object call that mutates both caller-owned array elements,
-and emits/persists/reopens three genuine
-ELF64 `ET_REL` objects. Its bounded linker resolves `_start`→`answer`→`adjust`,
+and a same-object call that mutates both caller-owned array elements. It
+compiles `answer` and later-defined `adjust` from one C translation unit into
+one multi-definition object and persists/reopens two genuine ELF64 `ET_REL`
+objects total. Its bounded linker resolves external `_start`→`answer` and
+same-object `answer`→`adjust`,
 applies two `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol and duplicate-definition inputs, emits an 815-byte `ET_EXEC`,
 executes both linked branch paths plus direct loop and exact indexed-array
@@ -32,10 +34,10 @@ Full unit/check and release artifact checks pass. This remains a bounded compile
 seed, not a general C toolchain or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 386723, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-array-RPpobHaU`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 393984, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-multifunction-pur2xwJK`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-array-RPpobHaU/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-selfhost-multifunction-pur2xwJK/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

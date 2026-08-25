@@ -65,8 +65,9 @@ See `docs/SYSCALLS.md`.
 
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
-normal VFS. Its C subset accepts one `int` function with one `int` or `int *`
-parameter. With an `int` parameter, the body may use and assign that parameter.
+normal VFS. Its C subset accepts up to two `int` functions in one translation
+unit, each with one `int` or `int *` parameter. With an `int` parameter, the
+body may use and assign that parameter.
 The body may declare up to four initialized register locals, use integer
 locals, unsigned 16-bit constants, parentheses, multiplication, addition and
 subtraction, assign expressions to declared integer locals, contain
@@ -85,15 +86,17 @@ validated forward conditional and signed backward branch fixups
 and a 96-byte non-leaf FP/LR/x19-x23 frame containing four bounded local slots,
 then a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
-`.shstrtab`. The companion assembler supplies `_start`; the bounded linker
-discovers symbols across up to three objects, resolves two
+`.shstrtab`. Multiple definitions carry distinct `.text` offsets and sizes;
+relocations may reference a same-object definition or an external undefined
+symbol. The companion assembler supplies `_start`; the bounded linker discovers
+symbols across up to three objects, resolves two
 `R_AARCH64_CALL26` relocations, and produces a validated static `ET_EXEC`.
 Unsupported tokens, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
 This seed has no pointer arithmetic, variable-length/global/multidimensional
 arrays, structs,
-nested/general blocks, multiple functions per translation unit,
+nested/general blocks, more than two functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
 archives, dynamic linking, CLI build driver, or
 debug information. It must not be presented as a general C compiler or a

@@ -175,13 +175,14 @@ Last updated: 2026-08-25.
   same overlap/contention from the genuine Firefox process are still open, so
   the scheduler row stays Partial.
 - 2026-08-25 the AArch64 guest-native toolchain now crosses a genuine
-  three-source/three-object build boundary. It writes and rereads an assembly
-  startup plus `answer` and `adjust` C sources through MakFS. Each bounded C
-  translation unit accepts one AAPCS64 `int` function/parameter, up to four
+  two-source/two-object build boundary. It writes and rereads an assembly
+  startup plus one C translation unit containing `answer` and later-defined
+  `adjust` through MakFS. Each bounded C translation unit accepts up to two
+  AAPCS64 `int` functions, each with one parameter and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
   `*`/`+`/`-`, mutable parameter/local assignments, equality/inequality
   comparisons, an equality `if`, a bounded assignment-only `while`, and a
-  one-argument cross-object call. It now also accepts either an `int` or
+  one-argument call within or across objects. It now also accepts either an `int` or
   `int *` parameter, `int *pointer = &local`, address expressions passed across
   the call boundary, dereference loads inside expressions, and
   `*pointer = expression` stores. Fixed local `int` arrays have one to four
@@ -194,24 +195,28 @@ Last updated: 2026-08-25.
   conditional and signed backward unconditional branches are range-checked
   before patching. Emitted non-leaf functions preserve FP/LR and x19-x23 in a
   96-byte frame. Integer arguments use AAPCS64 `w0`; pointer arguments use
-  `x0` and are preserved in `x23`. The compiler produces 128-byte `answer` and
-  132-byte `adjust` code in 736/688-byte ELF64
-  `ET_REL` objects; the assembler produces 76 bytes in a 688-byte object. All
-  three persist and reopen. The bounded general linker concatenates up to three
-  objects, discovers global definitions/undefined symbols, applies two validated
-  `R_AARCH64_CALL26` relocations (`_start`→`answer`→`adjust`), and emits 336 code
+  `x0` and are preserved in `x23`. The compiler concatenates 128-byte `answer`
+  and 132-byte `adjust` into one 260-byte `.text` with two defined symbols in an
+  872-byte ELF64 `ET_REL`; the assembler produces 76 bytes in a 688-byte
+  object. Both persist and reopen. The bounded general linker concatenates up
+  to three objects, discovers global definitions/undefined symbols, resolves
+  relocations against either same-object definitions or external symbols,
+  applies validated `R_AARCH64_CALL26` relocations
+  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 336 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
   and duplicate `answer` definitions. Division syntax
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
-  untyped pointer reassignment, returning a pointer as an `int`, and indexing a
-  known two-element array at index two also fail closed. RX execution of the
+  untyped pointer reassignment, returning a pointer as an `int`, indexing a
+  known two-element array at index two, and duplicate functions in one
+  translation unit also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
   `adjust(forty)=42`, and `adjust(zero)=2`; the latter two also prove the arrays
   change to `41:42` and `1:2`. The linked `answer`→`adjust` call passes the
-  stack-backed `values[2]` array, so its result requires real array decay plus
-  callee indexed loads/stores into both elements of caller-owned memory. Focused
+  stack-backed `values[2]` array, so its same-object call result requires real
+  relocation, array decay, and callee indexed loads/stores into both elements
+  of caller-owned memory. Focused
   Pi/QEMU 10.0.11 TCG then
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
   Release artifact validation, focused runtime, structural guard, and full
@@ -819,7 +824,9 @@ Last updated: 2026-08-25.
   and expected geometry remain unchanged. This is functional Pi evidence only,
   not Apple-HVF performance
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
-  the unprivileged user. The focused four-vCPU TCG SMP input/network image also
+  the unprivileged user. A newer focused run passes the two-function C
+  translation unit, 872-byte multi-definition object, same-object CALL26, exact
+  array mutation, and both final-ELF executions. The focused four-vCPU TCG SMP input/network image also
   passed three runs with CPU0-owned UDP TX, DNS RX wake, and exact frame
   balance (two before and one after the final malformed-length guard). One
   intervening post-guard run completed the network proof but missed the later
