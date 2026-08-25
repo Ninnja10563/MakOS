@@ -21,68 +21,84 @@ IMAGE = pathlib.Path(
     os.environ.get("MAKOS_AARCH64_IMAGE", ROOT / "build/makos-aarch64.img")
 )
 LINKER_MARKER = (
-    b"MAKOS_AARCH64_LINKER_OK sources=3 languages=aarch64-asm,c-subset-v1 "
-    b"compiler=guest-native assembler=guest-native objects=3 "
+    b"MAKOS_AARCH64_LINKER_OK sources=4 languages=aarch64-asm,c-subset-v1 "
+    b"compiler=guest-native assembler=guest-native objects=4 "
     b"format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
-    b"symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
-    b"build_manifest=argv1 build_driver=makbuild-v1 build_inputs=3 "
-    b"cache=makstate-v1 cache_hits=0 cache_misses=3 state_committed=1 "
-    b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
+    b"symbols=_start,answer,adjust,combine,helper output=/home/user/generated-aarch64.elf "
+    b"build_manifest=argv1 build_driver=makbuild-v1 build_inputs=4 "
+    b"cache=makstate-v2 cache_hits=0 cache_misses=4 state_committed=1 "
+    b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c translation_unit_functions=2,1,1 "
     b"c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
     b"max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
     b"loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
     b"pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-    b"code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 "
-    b"linked_bytes=444 output_bytes=815 persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17 "
+    b"code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
+    b"linked_bytes=500 output_bytes=815 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17 "
     b"malformed_relocation_denied=1 unresolved_symbol_denied=1 "
     b"duplicate_definition_denied=1"
 )
 FIXTURE_BUILD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=fixture "
     b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
-    b"seeded=1 cache=makstate-v1 cache_hits=0 cache_misses=3 "
+    b"seeded=1 cache=makstate-v2 build_inputs=4 cache_hits=0 cache_misses=4 "
     b"state_committed=1 status=42"
 )
 WARM_BUILD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
     b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
-    b"seeded=0 cache=makstate-v1 cache_hits=3 cache_misses=0 "
+    b"seeded=0 cache=makstate-v2 build_inputs=4 cache_hits=4 cache_misses=0 "
     b"state_committed=1 status=42"
 )
 SELECTIVE_BUILD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
     b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
-    b"seeded=0 cache=makstate-v1 cache_hits=2 cache_misses=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=4 cache_hits=3 cache_misses=1 "
     b"state_committed=1 status=42"
 )
 INVALIDATED_BUILD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
     b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
-    b"seeded=0 cache=makstate-v1 cache_hits=0 cache_misses=3 "
+    b"seeded=0 cache=makstate-v2 build_inputs=4 cache_hits=0 cache_misses=4 "
+    b"state_committed=1 status=42"
+)
+THREE_INPUT_COLD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-three.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=3 cache_hits=0 cache_misses=3 "
+    b"state_committed=1 status=42"
+)
+THREE_INPUT_WARM_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-three.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=3 cache_hits=3 cache_misses=0 "
     b"state_committed=1 status=42"
 )
 CLI_REAP_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated.build "
     b"source=existing-makfs seeded=0 startup=sysv status=42"
 )
+THREE_CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated-three.build "
+    b"source=existing-makfs seeded=0 startup=sysv status=42"
+)
 EXECUTION_MARKER = (
-    b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=3 "
+    b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=4 "
     b"languages=aarch64-asm,c-subset-v1 compiler=guest-native "
-    b"assembler=guest-native linker=guest-native objects=3 "
+    b"assembler=guest-native linker=guest-native objects=4 "
     b"object_format=elf64-et-rel relocations=R_AARCH64_CALL26:3 "
-    b"symbols=_start,answer,adjust,combine build_manifest=/home/user/generated.build "
-    b"build_driver=makbuild-v1 build_inputs=3 cache=makstate-v1 "
-    b"cache_hits=0 cache_misses=3 state_committed=1 "
+    b"symbols=_start,answer,adjust,combine,helper build_manifest=/home/user/generated.build "
+    b"build_driver=makbuild-v1 build_inputs=4 cache=makstate-v2 "
+    b"cache_hits=0 cache_misses=4 state_committed=1 "
     b"toolchain_startup=sysv manifest_arg=1 "
-    b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c "
-    b"translation_unit_functions=2,1 c_abi=aapcs64-int32-pointer64 "
+    b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c "
+    b"translation_unit_functions=2,1,1 c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
     b"max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
     b"loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
     b"pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-    b"code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 "
-    b"linked_bytes=444 output_bytes=815 persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17 "
+    b"code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
+    b"linked_bytes=500 output_bytes=815 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17 "
     b"malformed_relocation_denied=1 unresolved_symbol_denied=1 "
     b"duplicate_definition_denied=1 "
     b"output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 "
@@ -300,6 +316,24 @@ def main() -> int:
                 common.wait_for_output_count(
                     selector, process, output, CLI_REAP_MARKER, 6, 60
                 )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-three.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, THREE_INPUT_COLD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, THREE_CLI_REAP_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-three.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, THREE_INPUT_WARM_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, THREE_CLI_REAP_MARKER, 2, 60
+                )
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
         finally:
@@ -311,21 +345,21 @@ def main() -> int:
 
     print(
         "MAKOS_AARCH64_SELFHOST_RUNTIME_OK "
-        f"accel={accel} sources=3 languages=aarch64-asm,c-subset-v1 "
-        "compiler=guest-native assembler=guest-native objects=3 "
+        f"accel={accel} sources=4 languages=aarch64-asm,c-subset-v1 "
+        "compiler=guest-native assembler=guest-native objects=4 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
-        "symbols=_start,answer,adjust,combine build_driver=makbuild-v1 build_inputs=3 "
-        "toolchain_startup=sysv manifest_arg=1 cli_builds=6 seeded_modes=fixture,existing "
-        "cache=makstate-v1 invalidations=object,source,state "
-        "cache_results=cold:0/3,warm:3/0,object:2/1,rewarm:3/0,source:2/1,rewarm:3/0,state:0/3 "
-        "translation_unit_functions=2,1 "
+        "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
+        "toolchain_startup=sysv manifest_arg=1 cli_builds=8 seeded_modes=fixture,existing "
+        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3 invalidations=object,source,state "
+        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0 "
+        "translation_unit_functions=2,1,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-        "code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 "
-        "linked_bytes=444 output_bytes=815 persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17 "
+        "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
+        "linked_bytes=500 output_bytes=815 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 executed=2 status=42"
     )

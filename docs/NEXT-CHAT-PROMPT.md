@@ -27,42 +27,47 @@ one-past-end/unproved-variable and pointer-minus-scalar rejection, and a
 same-object `answer`→`adjust(values + 1, 1)` call that mutates caller-owned
 array elements using its second parameter, followed by an external
 `adjust`→`combine` call. It compiles `answer` and `adjust` into a 976-byte
-multi-definition object and `combine` into a separate 616-byte library object,
-then persists/reopens those plus the 688-byte assembly object. It reads a
+multi-definition object, `combine` into a separate 616-byte library object,
+and independent `helper` into a 608-byte object, then persists/reopens those
+plus the 688-byte assembly object. It reads a
 versioned `/home/user/generated.build` whose bounded absolute
-source/object/output paths and entry symbol drive the complete build, and
-rejects four malformed manifests. Authenticated `makbuild <manifest>` passes a
+source/object/output paths and entry symbol drive the complete build. The
+driver accepts two through six inputs (one leading assembly plus C inputs),
+and rejects six malformed manifests. Authenticated `makbuild <manifest>` passes a
 kernel-validated home path through a real child-owned SysV `argv[1]` and
 rebuilds from existing MakFS files without fixture seeding; focused Pi/TCG
-runtime executes/reaps one `MODE=fixture` process and six `MODE=build`
-processes with status 42. Its bounded
+runtime executes/reaps one `MODE=fixture` process and eight `MODE=build`
+processes across four- and three-input graphs with status 42. Its bounded
 linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
 external `adjust`→`combine`,
 applies three `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol, missing-library, and duplicate-definition inputs, rejects duplicate/over-limit
 parameters and over-limit calls, rejects a fourth translation-unit function,
-emits 444 linked bytes in an 815-byte `ET_EXEC`,
+emits 500 linked bytes in an 815-byte `ET_EXEC`, directly executes
+`helper(40)=42`,
 executes both linked branch paths plus direct delta-1/delta-2 loop, exact
 indexed-array outcomes (`41:42:0`, `42:0:44`, and `1:2:0`), all four signed
 ordering relations, a `pointer + -1` load, and pointer differences `3`/`-3`,
 and runs the final
 ELF twice with status 42 in focused Pi/QEMU TCG runtime.
-Build mode now persists a state-last 72-byte `MAKSTATE1` cache containing
-non-cryptographic manifest/source/object fingerprints; a cached object also
-must pass ELF parsing and symbol validation. Focused runtime proves cold `0/3`,
-warm `3/0`, corrupt-object `2/1`, rewarm `3/0`, edited-source `2/1`, rewarm
-`3/0`, and corrupt-state full `0/3` hit/miss results across six authenticated
-CLI builds, each linked, executed, and reaped with status 42.
+Build mode now persists a state-last 120-byte `MAKSTATE2` cache containing the
+actual input count and six slots each of non-cryptographic source/object
+fingerprints plus the manifest fingerprint; a cached object also must pass ELF
+parsing and symbol validation. Focused runtime proves four-input cold `0/4`,
+warm `4/0`, corrupt-object `3/1`, rewarm `4/0`, edited-source `3/1`, rewarm
+`4/0`, corrupt-state full `0/4`, and separate three-input cold `0/3`/warm `3/0`
+results across eight authenticated CLI builds, each linked, executed, and
+reaped with status 42.
 Full unit/check and release artifact checks pass. This remains a bounded compiler
-seed, not a general C toolchain, transitive dependency/variable-graph build
+seed, not a general C toolchain, transitive dependency/arbitrary-graph build
 system, or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 491323, user
-service `makos-visible-makstate-cache-final4.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-makstate-cache-final-KHjut1RP`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 504710, user
+service `makos-visible-makstate2-graph-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-makstate-cache-final-KHjut1RP/qmp4.sock`. Stop it through QMP before
+`build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

@@ -101,18 +101,22 @@ ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. Multiple definitions carry distinct `.text` offsets and sizes;
 relocations may reference a same-object definition or an external undefined
 symbol. The companion assembler supplies `_start`; the bounded linker discovers
-symbols across up to three objects, resolves three
+symbols across two through six objects, resolves three
 `R_AARCH64_CALL26` relocations, and produces a validated static `ET_EXEC`.
-The current graph persists one assembly and two C sources as three objects:
+The primary fixture graph persists one assembly and three C sources as four objects:
 `answer` and `adjust` share the program object, while `combine` is defined in a
-separate library object. Linking without that required library fails closed.
+separate library object. An independent `helper(int value)` translation unit
+emits 56 code bytes in a 608-byte object, is linked into the final image, and is
+also executed directly to prove `helper(40)=42`. Linking without that required
+library fails closed.
 The guest reads `/home/user/generated.build` in the versioned `MAKBUILD1`
-format. Its three input records select language, absolute MakFS source path,
+format. Its input records select language, absolute MakFS source path,
 and distinct absolute object path; the final record selects the absolute ELF
 output and entry symbol. Parsed fields drive every source read, object
 write/reopen, link entry, and final write. The current driver deliberately
-accepts exactly `asm,c,c`; malformed version, relative/colliding paths, a
-fourth input, or missing final link record fail closed.
+accepts two through six inputs, with one `asm` input first and one through five
+`c` inputs after it; malformed version, relative/colliding paths, a seventh
+input, wrong language order, or missing final link record fail closed.
 Authenticated terminal users can run `makbuild generated.build` (or the
 absolute `/home/user/generated.build`). Selector 16 validates the home path,
 copies it into the toolchain's child-owned SysV startup vector, and launches the
@@ -124,18 +128,21 @@ call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
 Build mode derives `<manifest>.state` and therefore accepts manifest paths up
-to 90 bytes. The exact 72-byte `MAKSTATE1` record contains its version magic,
-zero reserved bytes, one manifest fingerprint, three source fingerprints, and
-three object fingerprints. Fingerprints use 64-bit FNV-1a solely for build
+to 90 bytes. The exact 120-byte `MAKSTATE2` record contains its nine-byte
+version magic, actual input count, six reserved zero bytes, one manifest
+fingerprint, six source-fingerprint slots, and six object-fingerprint slots;
+unused slots must be zero. Fingerprints use 64-bit FNV-1a solely for build
 cache change detection; they are non-cryptographic and confer no trust. Cached
 objects are reused only when the state and source/object fingerprints match and
 the object passes the normal ELF parser and symbol validator. A source or
 object change selectively recompiles that input. Missing, malformed, corrupt,
 or manifest-stale state rebuilds all inputs. Linking and final-ELF output happen
 on every invocation, and the state record is written last so an interrupted
-build cannot bless partial output. Focused Pi/QEMU TCG runtime proves hit/miss
-sequences `0/3`, `3/0`, `2/1`, `3/0`, `2/1`, `3/0`, and `0/3` for cold, warm,
-object corruption, rewarm, source edit, rewarm, and state corruption.
+build cannot bless partial output. Focused Pi/QEMU TCG runtime proves four-input
+hit/miss sequences `0/4`, `4/0`, `3/1`, `4/0`, `3/1`, `4/0`, and `0/4` for
+cold, warm, object corruption, rewarm, source edit, rewarm, and state
+corruption, followed by a separate three-input graph's cold `0/3` and warm
+`3/0` results. All eight CLI builds execute and reap with status 42.
 
 Pointer expressions also accept a scalar `int` parameter or non-address-taken
 scalar local as the element offset when the pointer's bound is unknown. AArch64
@@ -150,9 +157,10 @@ element addition and typed pointer difference, no pointer-provenance analysis
 or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
 nested/general blocks, more than three functions per translation unit,
-more than three objects, general relocations, preprocessing, optimization,
+more than six objects, aggregate linked code beyond 512 bytes, general
+relocations, preprocessing, optimization,
 archives, dynamic linking, transitive dependency/header discovery, variable
-input graphs, parallel builds,
+input graphs beyond the documented bound, parallel builds,
 general CLI options, or debug information. It must not be presented as a general C compiler or a
 self-hosted MakOS build.
 

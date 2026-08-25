@@ -174,29 +174,34 @@ Last updated: 2026-08-26.
   records simultaneous distinct TIDs on AP1/AP3. Automatic migration and the
   same overlap/contention from the genuine Firefox process are still open, so
   the scheduler row stays Partial.
-- 2026-08-26 the AArch64 guest-native toolchain now crosses a genuine
-  three-source/three-object build boundary. It writes and rereads an assembly
-  startup, a C translation unit containing `answer` and `adjust`, and a second
-  C translation unit defining `combine` through MakFS. A parsed `MAKBUILD1`
-  manifest supplies all three source/object paths, the final output path, and
+- 2026-08-26 the AArch64 guest-native toolchain now crosses a genuine variable
+  build-graph boundary within an explicit two-to-six-input limit. Its primary
+  fixture writes and rereads an assembly startup, a C translation unit
+  containing `answer` and `adjust`, a second C unit defining `combine`, and an
+  independent C unit defining `helper` through MakFS. A parsed `MAKBUILD1`
+  manifest supplies all four source/object paths, the final output path, and
   `_start` entry symbol; these fields drive source reads, object persistence,
-  linking, and the final write. It accepts only the bounded `asm,c,c` graph,
-  absolute non-colliding paths, and one terminal link record. Bad version,
-  relative path, collision, and missing-link manifests fail closed. The
+  linking, and the final write. It accepts one leading `asm` input plus one
+  through five `c` inputs, absolute non-colliding paths, and one terminal link
+  record. Bad version, relative path, collision, missing-link, wrong-order, and
+  seven-input manifests fail closed. The
   authenticated `makbuild <manifest>` terminal command now validates a
   `/home/user/` path in the kernel, copies it into the EL0 toolchain's real SysV
   `argv[1]`, and uses `MODE=build` to consume existing MakFS inputs without
   seeding or overwriting them. `selfhost-aarch64` explicitly selects the
-  separate deterministic `MODE=fixture` path. Focused Pi/TCG runtime executes
-  fixture mode once and build mode six times, with every toolchain process
-  reaped at status 42. Build mode derives a versioned 72-byte `MAKSTATE1`
+  separate deterministic `MODE=fixture` path. It also seeds a separate
+  three-input manifest. Focused Pi/TCG runtime executes fixture mode once and
+  build mode eight times across the four- and three-input graphs, with every
+  toolchain process reaped at status 42. Build mode derives a versioned
+  120-byte `MAKSTATE2`
   record and commits it only after object writes and an always-relinked final
   ELF. Its 64-bit FNV-1a manifest/source/object fingerprints are
   non-cryptographic cache keys, not a security boundary; a hit also requires
   the persisted object to parse and pass symbol validation. The focused run
-  proves cold `0/3`, warm `3/0`, corrupt-object `2/1`, rewarm `3/0`,
-  edited-source `2/1`, rewarm `3/0`, and corrupt-state full `0/3` hit/miss
-  results. Stale, missing, or malformed state safely forces a full rebuild.
+  proves four-input cold `0/4`, warm `4/0`, corrupt-object `3/1`, rewarm `4/0`,
+  edited-source `3/1`, rewarm `4/0`, and corrupt-state full `0/4` hit/miss
+  results, followed by three-input cold `0/3` and warm `3/0`. Stale, missing,
+  old-version, or malformed state safely forces a full rebuild.
   Each bounded C
   translation unit accepts up to three
   AAPCS64 `int` functions, each with one or two typed parameters and up to four
@@ -232,13 +237,15 @@ Last updated: 2026-08-26.
   and stores through `*(pointer + delta)`. The compiler concatenates a 140-byte
   `answer` and 168-byte `adjust` into one 308-byte `.text` with two definitions
   plus undefined `combine` in a 976-byte ELF64 `ET_REL`; the separate 60-byte
-  `combine` definition occupies a 616-byte library object. The assembler
-  produces 76 bytes in a 688-byte object. All three persist and reopen. The bounded general linker concatenates up
-  to three objects, discovers global definitions/undefined symbols, resolves
+  `combine` definition occupies a 616-byte library object. The independent
+  56-byte `helper` definition occupies a 608-byte object and direct RX
+  execution proves `helper(40)=42`. The assembler produces 76 bytes in a
+  688-byte object. All four persist and reopen. The bounded general linker concatenates two
+  through six objects, discovers global definitions/undefined symbols, resolves
   relocations against either same-object definitions or external symbols,
   applies validated `R_AARCH64_CALL26` relocations
   (`_start`→`answer` and `adjust`→`combine` externally, with
-  `answer`→`adjust` internally), and emits 444 code
+  `answer`→`adjust` internally), includes `helper`, and emits 500 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`, a
   missing `combine` object, and duplicate `answer` definitions. Duplicate parameter names, more than two
@@ -265,14 +272,14 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The visible guest is
-  PID 491323 under `makos-visible-makstate-cache-final4.service`, with private
+  PID 504710 under `makos-visible-makstate2-graph-final.service`, with private
   boot/data/variables and QMP in
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP`; its boot clone exactly
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe`; its boot clone exactly
   matches the current release image SHA-256
-  `5c8436f8f3faf08cbcd217ff4d6313771314f8fdccf01265f4340a773f8c8c1c`.
+  `32d1a301770f34c6687eef09753d5b10eda61f93904e05f50a8ef21fedecb0a6`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
-  variable/parallel build system, debugger, or substantial
+  arbitrary graph beyond six inputs, parallel build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
@@ -901,10 +908,14 @@ Last updated: 2026-08-26.
   The latest focused run first seeds that fixture, then invokes the authenticated
   `makbuild` CLI against the persisted manifest. Kernel-built SysV `argc=2`/
   `argv[1]`, distinct fixture/build modes, and `seeded=0` for CLI processes all
-  pass. The newest focused cache run executes six CLI builds and proves cold,
-  warm, object-corrupt, source-edited, and state-corrupt invalidation outcomes;
-  all toolchain processes reap with status 42 without changing the graph's
-  linked result.
+  pass. The following focused cache run executes six CLI builds and proves
+  cold, warm, object-corrupt, source-edited, and state-corrupt invalidation
+  outcomes on that fixed three-input graph. The newest variable-graph run adds
+  a 56-byte `helper` translation unit in a 608-byte fourth object, emits 500
+  linked bytes, executes `helper(40)=42`, and uses the 120-byte `MAKSTATE2`
+  format. Eight authenticated CLI builds prove four-input `0/4`, `4/0`, `3/1`,
+  `4/0`, `3/1`, `4/0`, `0/4` and a distinct three-input graph's `0/3`, `3/0`;
+  all toolchain processes reap with status 42.
   A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The

@@ -53,13 +53,21 @@ for fragment in (
     '"asm /home/user/generated.s /home/user/generated-main.o\\n"',
     '"c /home/user/generated-program.c /home/user/generated-program.o\\n"',
     '"c /home/user/generated-library.c /home/user/generated-library.o\\n"',
+    '"c /home/user/generated-helper.c /home/user/generated-helper.o\\n"',
     '"link /home/user/generated-aarch64.elf _start\\n"',
-    "MAX_BUILD_INPUTS = 3",
+    '"/home/user/generated-three.build"',
+    '"link /home/user/generated-three.elf _start\\n"',
+    "MIN_BUILD_INPUTS = 2",
+    "MAX_BUILD_INPUTS = 6",
     "MAX_BUILD_PATH_BYTES = 96",
     "malformed_build_header",
     "malformed_build_relative",
     "malformed_build_duplicate",
     "malformed_build_missing_link",
+    "minimal_build_source",
+    "maximum_build_source",
+    "malformed_build_too_many",
+    "malformed_build_wrong_order",
     "uint64_t argc, char **argv, char **envp",
     '"/system/aarch64-toolchain", 25',
     '"MODE=fixture", 12',
@@ -67,10 +75,12 @@ for fragment in (
     "const char *build_manifest_path = argv[1]",
     "if (fixture_mode &&",
     "MAKOS_AARCH64_MAKBUILD_OK mode=",
-    '" cache=makstate-v1 cache_hits="',
+    '" cache=makstate-v2 build_inputs="',
     '" state_committed=1 status=42\\n"',
-    "BUILD_STATE_BYTES = 72",
-    'static const char magic[] = "MAKSTATE1"',
+    "BUILD_STATE_BYTES = 120",
+    'static const char magic[] = "MAKSTATE2"',
+    "state[9] = (uint8_t)input_count",
+    "state[9] != input_count",
     "static uint64_t build_hash(",
     "static int build_state_path(",
     "static int build_state_path_safe(",
@@ -154,7 +164,7 @@ for fragment in (
     "static size_t emit_object_definitions(",
     "static int parse_object(",
     "static size_t link_objects(",
-    "MAX_LINK_OBJECTS = 3",
+    "MAX_LINK_OBJECTS = MAX_BUILD_INPUTS",
     "R_AARCH64_CALL26 = 283",
     "((uint64_t)relocation_symbols[index] << 32) | R_AARCH64_CALL26",
     "main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1)",
@@ -165,18 +175,20 @@ for fragment in (
     "bases[object] > capacity",
     "addend != 0",
     "link_objects(objects, object_lengths, 2",
-    "link_objects(objects, object_lengths, 3",
+    "link_objects(objects, object_lengths, 4",
     "link_objects(duplicate_objects, duplicate_lengths, 3",
     "program_relocations[0].offset != 92",
     "program_definition_count != 2",
     "library_definition_count != 1",
+    "helper_definition_count != 1",
     "program_definitions[0].size != 140",
     "program_definitions[1].offset != 140",
     "program_definitions[1].size != 168",
     "library_definitions[0].offset != 0",
+    "helper_definitions[0].size != 56",
     "library_definitions[0].size != 60",
     "library_relocation_count != 0",
-    "build.inputs[0].source_path",
+    "build.inputs[input].source_path",
     "build.inputs[1].object_path",
     "build.inputs[2].object_path",
     "build.output_path, build.output_path_length",
@@ -191,12 +203,14 @@ for fragment in (
     "compiled_previous(previous_values + 1, UINT32_MAX) != 42",
     "compiled_distance(distance_values + 3, distance_values) != 3",
     "compiled_combine(40, 2) != 42",
+    "compiled_helper(40) != 42",
     "main_object_length != 688 || program_object_length != 976",
     "library_object_length != 616",
-    "linked_length != 444",
+    "helper_object_length != 608",
+    "linked_length != 500",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17",
+    "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -207,9 +221,11 @@ for fragment in (
     "/home/user/generated.build",
     "/home/user/generated-program.c",
     "/home/user/generated-library.c",
+    "/home/user/generated-helper.c",
     "/home/user/generated-main.o",
     "/home/user/generated-program.o",
     "/home/user/generated-library.o",
+    "/home/user/generated-helper.o",
     "/home/user/generated-aarch64.elf",
 ):
     require(TOOLCHAIN, fragment)
@@ -259,24 +275,40 @@ require(SHELL, '"makbuild "')
 require(SHELL, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
 require(SHELL, "source=existing-makfs seeded=0 startup=sysv status=42")
 require(SHELL, "toolchain_startup=sysv manifest_arg=1")
-require(SHELL, "cache=makstate-v1 cache_hits=0 cache_misses=3 state_committed=1")
+require(SHELL, "build_inputs=4 cache=makstate-v2")
+require(SHELL, "cache_hits=0 cache_misses=4 state_committed=1")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
 require(SHELL, "sizeof(startup) - 1")
-require(SHELL, "objects=3 object_format=elf64-et-rel")
+require(SHELL, "linker=guest-native objects=4")
+require(SHELL, "object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
-require(SHELL, "relocations=R_AARCH64_CALL26:3 symbols=_start,answer,adjust,combine")
-require(SHELL, "build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3")
-require(SHELL, "translation_unit_functions=2,1")
+require(SHELL, "object_format=elf64-et-rel relocations=R_AARCH64_CALL26:3")
+require(SHELL, "symbols=_start,answer,adjust,combine,helper")
+require(SHELL, "build_manifest=/home/user/generated.build")
+require(SHELL, "build_driver=makbuild-v1 build_inputs=4")
+require(SHELL, "translation_unit_functions=2,1,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return max_parameters=2 max_call_arguments=2 nonleaf_frame=96")
-require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86")
-require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815")
+require(SHELL, "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
+require(SHELL, "max_parameters=2 max_call_arguments=2 nonleaf_frame=96")
+require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge")
+require(SHELL, "branch_results=42,86 loop_results=42,2 memory_results=42,2")
+require(SHELL, "pointer_call=answer-to-adjust pointee_results=42,44,2")
+require(SHELL, "delta_results=1:42,2:44,1:2")
+require(SHELL, "array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1")
+require(SHELL, "pointer_variable_offset=delta dynamic_pointer_adds=2")
+require(SHELL, "signed_pointer_offset=-1:42 signed_pointer_difference=3:-3")
+require(SHELL, "relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44")
+require(SHELL, "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608")
+require(SHELL, "intra_object_calls=1 cross_object_calls=2 linked_bytes=500")
+require(SHELL, "output_bytes=815 helper_result=42 persisted_reopened=1")
 require(SHELL, "malformed_c_denied=17")
-require(SHELL, "malformed_build_denied=4")
-require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
-require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
+require(SHELL, "manifest_input_bounds=2..6 malformed_build_denied=6")
+require(SHELL, "malformed_relocation_denied=1")
+require(SHELL, "unresolved_symbol_denied=1 duplicate_definition_denied=1")
+require(SHELL, "output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1")
+require(SHELL, "argv=3 env=1 malformed_startup_denied=3 executed=2 status=42")
 require(PROCESS, "SessionProcessRole::Toolchain")
 require(SECURITY, "SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE")
 require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
@@ -292,15 +324,20 @@ require(FOCUSED_RUNTIME, "FIXTURE_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "WARM_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "SELECTIVE_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "INVALIDATED_BUILD_MARKER")
+require(FOCUSED_RUNTIME, "THREE_INPUT_COLD_MARKER")
+require(FOCUSED_RUNTIME, "THREE_INPUT_WARM_MARKER")
 require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
-require(FOCUSED_RUNTIME, "cache_hits=3 cache_misses=0")
-require(FOCUSED_RUNTIME, "cache_hits=2 cache_misses=1")
-require(FOCUSED_RUNTIME, "cache_hits=0 cache_misses=3")
+require(FOCUSED_RUNTIME, "THREE_CLI_REAP_MARKER")
+require(FOCUSED_RUNTIME, "cache_hits=4 cache_misses=0")
+require(FOCUSED_RUNTIME, "cache_hits=3 cache_misses=1")
+require(FOCUSED_RUNTIME, "cache_hits=0 cache_misses=4")
 require(FOCUSED_RUNTIME, "write generated-library.o corrupt")
 require(FOCUSED_RUNTIME, "write generated-library.c")
 require(FOCUSED_RUNTIME, "write generated.build.state corrupt")
+require(FOCUSED_RUNTIME, "makbuild /home/user/generated-three.build")
+require(FOCUSED_RUNTIME, "runtime_graphs=4,3")
 require(FOCUSED_RUNTIME, "malformed_c_denied=17")
-require(FOCUSED_RUNTIME, "malformed_build_denied=4")
+require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

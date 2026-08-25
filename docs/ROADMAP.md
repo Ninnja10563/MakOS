@@ -151,20 +151,25 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   loop/memory outcomes execute in EL0.
   The assembler emits `_start`. The guest static
   linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
-  external `adjust`→`combine` across three persisted objects, applies three
+  external `adjust`→`combine` across the required three persisted objects,
+  also persists/links an independent 56-byte `helper` definition as a fourth
+  object, applies three
   `R_AARCH64_CALL26` relocations, rejects
   malformed C (including unproved variable offsets from known-bounded arrays
   and pointer-minus-scalar), invalid relocation type,
   unresolved symbols and duplicate definitions, emits `ET_EXEC`, and executes
   the result twice under Pi/QEMU TCG. A versioned `MAKBUILD1` manifest now
-  supplies all three source/object paths, the output path, and entry symbol;
-  four malformed forms fail closed. An authenticated `makbuild <manifest>`
+  supplies two through six source/object paths, the output path, and entry
+  symbol; six malformed forms fail closed. An authenticated `makbuild <manifest>`
   command passes the validated home path through the kernel-built SysV startup
   vector and consumes existing MakFS inputs without fixture seeding. A
-  state-last 72-byte `MAKSTATE1` cache validates manifest, source, and object
+  state-last 120-byte `MAKSTATE2` cache records the actual input count and
+  validates manifest, source, and object
   fingerprints plus parsed object/symbol structure. Focused Pi/TCG runtime
-  proves cold `0/3`, warm `3/0`, object/source selective `2/1`, and corrupt-state
-  full `0/3` rebuilds while every output executes with status 42. Full C/Rust
+  proves four-input cold `0/4`, warm `4/0`, object/source selective `3/1`, and
+  corrupt-state full `0/4` rebuilds, plus a distinct three-input graph's cold
+  `0/3` and warm `3/0`, while every output executes with status 42. Full C/Rust
   compiler semantics, general assembler/linker, transitive dependency
-  discovery, variable/parallel build graphs, debugger, package delivery, and an
+  discovery, arbitrary graphs beyond six inputs, parallel builds, debugger,
+  package delivery, and an
   in-OS MakOS rebuild remain.

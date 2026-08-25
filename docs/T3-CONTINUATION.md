@@ -27,32 +27,35 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG `MAKSTATE1` cache milestone:
-  PID 491323, user service `makos-visible-makstate-cache-final4.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG `MAKSTATE2` variable-graph milestone:
+  PID 504710, user service `makos-visible-makstate2-graph-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP`, private boot clone
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/boot.img`, private sparse
-  data image `build/makos-pi-visible-makstate-cache-final-KHjut1RP/data.img`,
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe`, private boot clone
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/boot.img`, private sparse
+  data image `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/data.img`,
   private variables
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/vars.fd`, QMP
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/qmp4.sock`, serial
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/serial.log`, PID file
-  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/qemu4.pid`, and QMP
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/vars.fd`, QMP
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/qmp.sock`, serial
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/serial.log`, PID file
+  `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe/qemu.pid`, and QMP
   framebuffer capture `login.png`. Its boot
   clone SHA-256 is
-  `5c8436f8f3faf08cbcd217ff4d6313771314f8fdccf01265f4340a773f8c8c1c`,
+  `32d1a301770f34c6687eef09753d5b10eda61f93904e05f50a8ef21fedecb0a6`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `99,97,101`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
+  counters `87,129,84`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
   `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`; it was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 491323/session
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP` was stopped cleanly
+  through QMP before the variable-graph runtime; its private files remain.
   Prior PID 480589/session
   `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7` was stopped cleanly
   through QMP before the focused cache runtime; its private files remain. Three
@@ -342,9 +345,10 @@ Preserve existing files and changes.
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
 - 2026-08-26 the guest-native AArch64 toolchain reads a versioned
-  `/home/user/generated.build` plus three source files from MakFS and builds
-  three persisted ELF64 `ET_REL` objects. `MAKBUILD1` supplies the bounded
-  `asm,c,c` languages, three absolute source/object path pairs, absolute final
+  `/home/user/generated.build` plus four source files from MakFS and builds
+  four persisted ELF64 `ET_REL` objects. `MAKBUILD1` accepts two through six
+  inputs: one leading `asm` and one through five `c` records, with absolute
+  source/object path pairs, absolute final
   output, and entry symbol. Parsed values drive every source read, object
   write/reopen, linker entry, and final write. Bad version, relative path,
   path collision, and missing-link manifests fail closed. The authenticated
@@ -352,18 +356,22 @@ Preserve existing files and changes.
   the EL0 toolchain's child-owned SysV `argv[1]`. Its `MODE=build` consumes the
   already-persisted MakFS manifest and sources without seeding or overwriting
   them; `selfhost-aarch64` alone selects `MODE=fixture`. Focused Pi/TCG runtime
-  runs the fixture once and six authenticated CLI builds, reaping every
-  toolchain process with status 42. A derived 72-byte `MAKSTATE1` record is
+  runs the fixture once and eight authenticated CLI builds across distinct
+  four- and three-input manifests, reaping every toolchain process with status
+  42. A derived 120-byte `MAKSTATE2` record is
   committed after object and final-ELF writes. Its non-cryptographic 64-bit
   FNV-1a manifest/source/object fingerprints are cache keys only; reuse also
   requires the object to pass ELF parsing and symbol validation. Runtime proves
-  cold `0/3`, warm `3/0`, corrupt-object `2/1`, rewarm `3/0`, edited-source
-  `2/1`, rewarm `3/0`, and corrupt-state full `0/3` hit/miss results. The
+  four-input cold `0/4`, warm `4/0`, corrupt-object `3/1`, rewarm `4/0`,
+  edited-source `3/1`, rewarm `4/0`, and corrupt-state full `0/4` hit/miss
+  results, plus three-input cold `0/3` and warm `3/0`. The
   assembler emits 76 bytes of
   `_start` code in a 688-byte object. The program C translation unit contains
   the 140-byte `answer` and 168-byte `adjust(int *pointer, int delta)` in a
   308-byte `.text` and 976-byte object. A separate library C translation unit
-  defines the 60-byte `combine(int value, int delta)` in a 616-byte object.
+  defines the 60-byte `combine(int value, int delta)` in a 616-byte object. An
+  independent fourth C unit defines 56-byte `helper(int value)` in a 608-byte
+  object; direct RX execution proves `helper(40)=42`.
   Across the C units, code generation includes a 96-byte
   AAPCS64 non-leaf frame, mutable parameter/local assignments,
   signed equality/inequality and `<`/`<=`/`>`/`>=` comparisons, a signed backward-branch assignment-only
@@ -383,11 +391,13 @@ Preserve existing files and changes.
   real C-object-to-C-object call and relocation. A fourth function fails closed; the bounded
   object buffer is now 2 KiB and the persisted source buffer is 768 bytes.
   The bounded
-  linker discovers definitions/undefined symbols across all three, applies external
+  linker discovers definitions/undefined symbols across all four primary
+  fixture objects, applies external
   `_start`→`answer`, same-object `answer`→`adjust`, and external
   `adjust`→`combine` `R_AARCH64_CALL26`
-  relocations, and
-  emits 444 linked bytes in an 815-byte `ET_EXEC`. The fully linked C graph
+  relocations, includes the independent 56-byte `helper` definition from its
+  608-byte object, and emits 500 linked bytes in an 815-byte `ET_EXEC`. Direct
+  RX execution proves `helper(40)=42`. The fully linked C graph
   executes `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
   `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; direct-call arrays must become
   `41:42:0`/`42:0:44`/`1:2:0`; separate RX functions exercise all four signed
@@ -405,9 +415,10 @@ Preserve existing files and changes.
   Pi/QEMU 10.0.11 TCG runtime.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
   Partial: this is not a full C/Rust compiler/linker, transitive dependency/
-  header engine, variable/parallel build system, debugger, or substantial
+  header engine, an arbitrary graph beyond six inputs, a parallel build
+  system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 491323 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 504710 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -496,14 +507,17 @@ Preserve existing files and changes.
    automatic load balancing and repeated migration contention while retaining
    CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
    any focused runtime.
-3. Expand the bounded guest C compiler beyond its current three-function,
-   two-parameter graph across three objects, with one same-object and two
-   cross-object calls, and beyond signed typed-pointer arithmetic into
+3. Expand the bounded guest C compiler beyond its current three-function per
+   translation-unit and two-parameter limits. The primary runtime graph now
+   spans four objects (with one same-object call, two cross-object calls, and
+   one independent helper) and the build driver accepts two through six
+   inputs. Continue beyond signed typed-pointer arithmetic into
    provenance-aware/broader pointer and lvalue expressions,
    variable-length/global/multidimensional arrays, structs and nested/general
    blocks, then lift the function/parameter bounds, add broader relocation/
-   object support, transitive dependency/header discovery, variable/parallel
-   input graphs, and broader command-line build control before a substantial
+   object support, transitive dependency/header discovery, arbitrary/parallel
+   input graphs beyond the six-input bound, and broader command-line build
+   control before a substantial
    in-guest build. Preserve real implementation
    requirements—no fake/spoofed apps.
 

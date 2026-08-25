@@ -115,8 +115,9 @@ compiler used by MicroPython during the same `make unit check` run.
 After login, `selfhost-aarch64` runs the deterministic guest-native
 compiler/assembler/static-linker gate. Its fixture mode writes an A64 startup to
 `/home/user/generated.s` and valid C to
-`/home/user/generated-program.c` plus `/home/user/generated-library.c`, then
-rereads all three from MakFS. It also writes and rereads the build description
+`/home/user/generated-program.c`, `/home/user/generated-library.c`, and
+`/home/user/generated-helper.c`, then rereads all four from MakFS. It also
+writes and rereads the build description
 `/home/user/generated.build`:
 
 ```text
@@ -124,11 +125,13 @@ MAKBUILD1
 asm /home/user/generated.s /home/user/generated-main.o
 c /home/user/generated-program.c /home/user/generated-program.o
 c /home/user/generated-library.c /home/user/generated-library.o
+c /home/user/generated-helper.c /home/user/generated-helper.o
 link /home/user/generated-aarch64.elf _start
 ```
 
-This bounded guest-native build driver requires exactly one assembly input and
-two C inputs, three distinct absolute source/object paths of at most 96 bytes,
+This bounded guest-native build driver accepts two through six inputs: exactly
+one assembly input first followed by one through five C inputs. Every input has
+a distinct absolute source/object path of at most 96 bytes,
 a distinct absolute output path, and one valid entry symbol. The parsed paths
 drive all source reads, object writes/reopens, entry-symbol emission/selection,
 and the final executable write. Bad version, relative path, colliding paths,
@@ -176,13 +179,16 @@ dynamically derived address and advance the counter. Its return reloads through
 translation unit. The compiler emits 140-byte `answer` and 168-byte `adjust`
 definitions in a 308-byte `.text` and 976-byte `generated-program.o`; it emits
 the 60-byte `combine` in a 616-byte `generated-library.o`. The assembler emits
-76 code bytes in the 688-byte `generated-main.o`. All three genuine ELF64
-`ET_REL` files persist/reopen. The program object's symbol table defines
+76 code bytes in the 688-byte `generated-main.o`. An independent fourth C
+translation unit emits the 56-byte `helper(int value)` definition in the
+608-byte `generated-helper.o`; direct RX execution proves `helper(40)=42`.
+All four genuine ELF64 `ET_REL` files persist/reopen. The program object's symbol table defines
 `answer` at offset zero and `adjust` at offset 140, while `combine` is undefined
 there and defined at offset zero in the library object. The bounded linker
-discovers definitions and undefined symbols across all three, applies external
+discovers definitions and undefined symbols across all four, applies external
 `_start`→`answer`, same-object `answer`→`adjust`, and external
-`adjust`→`combine` `R_AARCH64_CALL26` relocations, and emits 444 code bytes in the
+`adjust`→`combine` `R_AARCH64_CALL26` relocations, includes the independent
+`helper` definition, and emits 500 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
 `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
 `adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the three-element direct-call arrays also
@@ -215,38 +221,44 @@ addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than three functions per translation unit, general object
-count/relocation repertoire, transitive dependency discovery, or variable input
-graphs. The
+count/relocation repertoire, transitive dependency/header discovery, or
+unbounded input graphs. The
 authenticated shell command `makbuild <manifest>` accepts either a name under
 `/home/user/` or an absolute `/home/user/` path. The kernel validates and copies
 that path into the sandboxed toolchain's child-owned SysV `argv[1]`; build mode
 reads the existing MakFS manifest and sources without seeding or overwriting
 them. The deterministic self-host fixture uses a separate `MODE=fixture` startup
-and is the only path that seeds the documented files. The current CLI still
-accepts only the fixed `asm,c,c` graph. It is not a
+and is the only path that seeds the documented files. The fixture also seeds a
+separate three-input manifest, and focused runtime builds both four- and
+three-input graphs. The current CLI remains bounded to one leading assembly
+input plus one through five C inputs. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build.
 
 `makbuild` now persists a bounded incremental cache beside the manifest as
 `<manifest>.state`; consequently the manifest path itself is limited to 90
-bytes so the `.state` suffix remains in the validated path bound. `MAKSTATE1`
-is exactly 72 bytes: a nine-byte magic plus seven reserved zero bytes, followed
-by one manifest fingerprint, three source fingerprints, and three object
-fingerprints. These are 64-bit FNV-1a build fingerprints, not cryptographic
+bytes so the `.state` suffix remains in the validated path bound. `MAKSTATE2`
+is exactly 120 bytes: a nine-byte magic, one-byte actual input count, six
+reserved zero bytes, one manifest fingerprint, six source-fingerprint slots,
+and six object-fingerprint slots. Unused fingerprint slots must be zero. These
+are 64-bit FNV-1a build fingerprints, not cryptographic
 integrity or a security boundary. A cache hit additionally requires the object
 bytes to match their saved fingerprint and pass the existing ELF object parser
 and symbol validator. Every build still links and writes the final ELF; it
 commits state only after every rebuilt object and the final ELF have been
 written. Missing, malformed, stale-manifest, or corrupt state safely rebuilds
-all three inputs. Changed source or corrupt/missing object selectively rebuilds
+all actual inputs. Changed source or corrupt/missing object selectively rebuilds
 only the affected input.
 
-The focused runtime proves cold `0/3`, warm `3/0`, corrupt-object `2/1`, warm
-`3/0`, changed-source `2/1`, warm `3/0`, and corrupt-state `0/3` hit/miss
-sequences. All six authenticated CLI builds link, execute, and reap with status
-42; the state-invalidated build re-establishes a valid cache. This is
-incremental reuse for the fixed three-input graph, not header discovery,
-parallel builds, a general dependency engine, or a trust mechanism.
+The focused runtime proves four-input cold `0/4`, warm `4/0`, corrupt-object
+`3/1`, warm `4/0`, changed-source `3/1`, warm `4/0`, and corrupt-state `0/4`
+hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`
+results. All eight authenticated CLI builds link, execute, and reap with status
+42; the state-invalidated build re-establishes a valid cache. This is bounded
+incremental reuse, not transitive header discovery, parallel builds, an
+arbitrary graph beyond six inputs, a general dependency engine, or a trust
+mechanism. The linker also retains its 512-byte aggregate code bound and fails
+closed when a user-supplied accepted graph exceeds it.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.
