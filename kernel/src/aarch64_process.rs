@@ -1284,6 +1284,7 @@ pub fn run_smp_network_rx_self_test() {
     SMP_PROBE_IO_IDLE_MASK.store(0, Ordering::Release);
     SMP_PROBE_IO_RESUME_MASK.store(0, Ordering::Release);
     crate::arch::reset_network_rx_affinity_evidence();
+    crate::aarch64_virtio_net::reset_tx_affinity_evidence();
     for tid in &SMP_PROBE_AFFINITY {
         tid.store(0, Ordering::Release);
     }
@@ -1306,6 +1307,9 @@ pub fn run_smp_network_rx_self_test() {
 
     let idle_deadline = crate::arch::counter_deadline_millis(20_000);
     loop {
+        // AP1's UDP send is a copied request. CPU0 completes TX without
+        // draining RX so the response cannot bypass the intended block/wake.
+        crate::aarch64_virtio_net::service_tx_requests();
         let blocked = with_state(|state| {
             state.table.get(waiter).is_some_and(|info| {
                 info.state == makos_process_table::ProcessState::Blocked
@@ -1378,20 +1382,25 @@ pub fn run_smp_network_rx_self_test() {
     let idle = SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire);
     let resumed = SMP_PROBE_IO_RESUME_MASK.load(Ordering::Acquire);
     let (owner_frames, nonowner_deferrals) = crate::arch::network_rx_affinity_evidence();
+    let (owner_transmits, ap_tx_requests) = crate::aarch64_virtio_net::tx_affinity_evidence();
     if reaped[0].2 != 63
         || reaped[1].2 != 64
         || idle != 0b0010
         || resumed != idle
         || owner_frames == 0
         || nonowner_deferrals == 0
+        || owner_transmits == 0
+        || ap_tx_requests == 0
         || crate::mm::free_frames() != free_before
     {
         crate::fatal("AArch64 SMP network-RX userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tx_path=ap-syscall-unqualified free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits={} ap_tx_requests={} block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tcp_ap_tx=fail-closed free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
         owner_frames,
         nonowner_deferrals,
+        owner_transmits,
+        ap_tx_requests,
         idle,
         resumed,
     );

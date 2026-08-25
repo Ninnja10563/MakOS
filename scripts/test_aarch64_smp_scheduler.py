@@ -64,6 +64,16 @@ assert ARCH.count("crate::aarch64_socket::pump()") == 1
 assert "crate::aarch64_socket::pump()" not in PROCESS
 assert "AArch64 network RX pump attempted from non-owner CPU" in SOCKET
 assert "AArch64 virtio-net RX poll attempted from non-owner CPU" in NET
+assert "AArch64 virtio-net TX attempted from non-owner CPU" in NET
+for token in (
+    "TX_SERVICE_SLOTS",
+    "fn queue_udp_send(",
+    "pub fn service_tx_requests()",
+    "TX_OWNER_COMPLETIONS",
+    "TX_NONOWNER_REQUESTS",
+    "if length > TX_SERVICE_PAYLOAD",
+):
+    assert token in NET, token
 
 for token in (
     "fn scheduler_cpu() -> usize",
@@ -173,7 +183,8 @@ for token in (
     "input_idle_mask=0x2 input_resume_mask=0x2 status=61 free_balance=1",
     "mmio_owner=cpu0 contention=ap-deferred owner_activity=",
     "rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
-    "tx_path=ap-syscall-unqualified free_balance=1",
+    "tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits=",
+    "tcp_ap_tx=fail-closed free_balance=1",
 ):
     assert token in INPUT_RUNTIME, token
 

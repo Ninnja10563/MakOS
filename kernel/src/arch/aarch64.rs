@@ -665,6 +665,7 @@ pub(crate) fn service_network_rx_on_owner_cpu() -> usize {
         NETWORK_RX_NONOWNER_DEFERRALS.fetch_add(1, Ordering::AcqRel);
         return 0;
     }
+    crate::aarch64_virtio_net::service_tx_requests();
     let frames = crate::aarch64_socket::pump();
     NETWORK_RX_OWNER_FRAMES.fetch_add(frames as u64, Ordering::AcqRel);
     frames

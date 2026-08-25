@@ -60,17 +60,23 @@ Last updated: 2026-08-25.
   `input_idle_mask=0x2`/`input_resume_mask=0x2`, status 61, exact frame balance,
   and subsequent boot completion. The ordinary image never arms the
   external-input wait.
-  The same opt-in image first runs a real virtio-net RX fixture. AP1 sends a
-  UDP query to QEMU slirp DNS, blocks in receive, and returns to idle. CPU0
-  exclusively drains/demultiplexes the RX ring and sends the wake SGI. Two
-  repeated Pi/TCG passes validate the DNS response, nonzero CPU0 frames/AP
-  deferrals, I/O idle/resume masks `0x2`, status 63, and exact frame balance.
-  This qualifies RX only; AP-originated TX remains explicitly pending.
-  The current AArch64 release
-  image/artifact check, full
-  `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending network TX, block, and
-  GPU service affinity/contention proof, so the
+  The same opt-in image first runs a real virtio-net UDP/DNS fixture. AP1 copies
+  its UDPv4 request into a bounded eight-slot service queue; CPU0 alone mutates
+  the transmit ring and completes the request. AP1 then blocks in receive and
+  returns to idle; CPU0 exclusively drains/demultiplexes the RX ring and sends
+  the wake SGI. Two pre-hardening passes and one post-hardening repeat pass on
+  Pi/TCG validate one AP TX request/CPU0 completion, the DNS response, nonzero
+  CPU0 RX frames/AP deferrals, I/O idle/resume masks `0x2`, status 63, and exact
+  frame balance. One intervening run completed the entire network fixture but
+  later missed the independently injected Ctrl-K and hit the unchanged input
+  completion timeout; the immediate unchanged repeat passed. Low-level TX now
+  fails closed off CPU0, copied UDPv4/v6 is qualified, and stateful AP TCP TX
+  remains fail-closed and pending. The AP UDP completion wait is a bounded EL1
+  `WFE` loop, not a scheduler-idle proof.
+  The current AArch64 release image/artifact check, full `make check` and
+  `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
+  scheduling remains gated pending stateful TCP TX, block, and GPU service
+  affinity/contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
@@ -466,8 +472,10 @@ Last updated: 2026-08-25.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
   state are CPU-indexed; multicore userspace still needs AP run queues,
-  production device affinity/contention qualification, forced migration, and
-  load balancing before the desktop gate can open.
+  stateful TCP/block/GPU service qualification, forced migration, and load
+  balancing before the desktop gate can open. CPU0-only virtio input and
+  virtio-net TX/RX ownership now have focused AP runtime evidence for keyboard
+  wake and copied UDPv4 DNS send/receive.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID
@@ -513,10 +521,13 @@ Last updated: 2026-08-25.
   syscall 61 when `/etc/resolv.conf` is absent, requests A+AAAA only for
   genuinely configured families, and closes flagged sockets across exec.
   Offline wire tests and kernel/static/shared-libc builds pass; constrained
-  IPv6 guest proof is pending. AArch64 uses bounded asynchronous TCP RX,
-  timer-bottom-half packet ingestion, and poll/epoll wake; no listen/accept,
-  DAD, IPv6 extension headers/scoped link-local socket API, broad options,
-  routing policy/firewall, or device-IRQ RX mode.
+  IPv6 guest proof is pending. AArch64 confines low-level virtio-net TX/RX to
+  CPU0; AP UDPv4/v6 sends use a bounded copied-request queue, with a real AP1
+  UDPv4 DNS transaction qualified under Pi/TCG. Stateful AP TCP TX is
+  fail-closed pending an owner-service design. AArch64 uses bounded asynchronous
+  TCP RX, timer-bottom-half packet ingestion, and poll/epoll wake; no
+  listen/accept, DAD, IPv6 extension headers/scoped link-local socket API,
+  broad options, routing policy/firewall, or device-IRQ RX mode.
 - Graphics: 95.css-inspired native framebuffer theme, six-slot software
   compositor, Start launcher, app taskbar, drag/close/minimize/reopen, bounded
   resizing, per-surface input events, retained terminal, and architecture-
@@ -651,7 +662,11 @@ Last updated: 2026-08-25.
   instead of the required `450x290` marker. Thresholds and expected geometry remain
   unchanged. This is functional Pi evidence only, not Apple-HVF performance
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
-  the unprivileged user.
+  the unprivileged user. The focused four-vCPU TCG SMP input/network image also
+  passed three runs with CPU0-owned UDP TX, DNS RX wake, and exact frame
+  balance (two before and one after the final malformed-length guard). One
+  intervening post-guard run completed the network proof but missed the later
+  QMP-injected Ctrl-K; its immediate unchanged repeat passed the full gate.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,

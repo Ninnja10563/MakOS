@@ -174,12 +174,16 @@ frame balance, and normal boot completion are mandatory. The harness waits for
 the complete readiness line so a partial serial read cannot trigger input
 early. `boot/MAKOS.CFG` does not contain the test option.
 
-Before the keyboard phase, the same focused image runs a real UDP/DNS RX phase.
-AP1 sends transaction `0x4d4c` to QEMU slirp DNS and blocks in receive; CPU0
-alone drains the virtio-net RX ring and wakes AP1 by SGI. The gate requires
-nonzero `owner_frames`/`ap_deferrals`, matching I/O idle/resume masks, validated
-DNS response status 63, and balanced frames. The marker deliberately reports
-`tx_path=ap-syscall-unqualified`; this gate qualifies RX ownership only.
+Before the keyboard phase, the same focused image runs a real UDP/DNS TX/RX
+phase. AP1 copies transaction `0x4d4c` into a bounded eight-slot service queue;
+CPU0 alone performs the virtio-net transmit, then AP1 blocks in receive. CPU0
+alone drains the RX ring and wakes AP1 by SGI. The gate requires nonzero
+`owner_transmits`/`ap_tx_requests`, `owner_frames`/`ap_deferrals`, matching I/O
+idle/resume masks, validated DNS response status 63, and balanced frames. The
+marker reports `tx_transport=bounded-copy-queue` and
+`tcp_ap_tx=fail-closed`: copied UDPv4/v6 is qualified, while stateful AP TCP TX
+is not. The UDP completion wait is bounded in EL1; the receive phase separately
+proves AP scheduler idle/wake.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

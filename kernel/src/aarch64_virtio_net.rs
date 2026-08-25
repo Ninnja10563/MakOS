@@ -3,7 +3,7 @@
 //! No host proxy or hypercall transport: packets cross virtio RX/TX queues.
 
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering, compiler_fence};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering, compiler_fence};
 
 use crate::aarch64_net_wire::{
     self as wire, FRAME_CAPACITY, TCP_PAYLOAD_MAX, TcpSegment, TcpSegmentV6, UdpPacket,
@@ -59,6 +59,15 @@ const DHCP_TRANSACTION: u32 = 0x4d41_4b42;
 const DNS_CACHE_ENTRIES: usize = 4;
 const DNS_MESSAGE_CAPACITY: usize = 512;
 const TCP_DEFAULT_RECEIVE_WINDOW: u16 = 32_768;
+const TX_SERVICE_SLOTS: usize = 8;
+const TX_SERVICE_PAYLOAD: usize = 1400;
+const TX_SLOT_FREE: u8 = 0;
+const TX_SLOT_WRITING: u8 = 1;
+const TX_SLOT_READY: u8 = 2;
+const TX_SLOT_SERVICING: u8 = 3;
+const TX_SLOT_DONE: u8 = 4;
+const TX_KIND_UDP4: u8 = 1;
+const TX_KIND_UDP6: u8 = 2;
 
 #[derive(Clone, Copy)]
 struct DnsCacheEntry {
@@ -154,6 +163,50 @@ static STATE: LockedState = LockedState {
 };
 static UDP6_SEND_REPORTED: AtomicBool = AtomicBool::new(false);
 static TCP6_CONNECT_REPORTED: AtomicBool = AtomicBool::new(false);
+static TX_NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static TX_OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy)]
+struct TxServiceRequest {
+    kind: u8,
+    remote_ip: [u8; 16],
+    remote_port: u16,
+    local_port: u16,
+    length: u16,
+    payload: [u8; TX_SERVICE_PAYLOAD],
+}
+
+impl TxServiceRequest {
+    const EMPTY: Self = Self {
+        kind: 0,
+        remote_ip: [0; 16],
+        remote_port: 0,
+        local_port: 0,
+        length: 0,
+        payload: [0; TX_SERVICE_PAYLOAD],
+    };
+}
+
+struct TxServiceSlot {
+    state: AtomicU8,
+    request: UnsafeCell<TxServiceRequest>,
+    result: UnsafeCell<usize>,
+}
+
+unsafe impl Sync for TxServiceSlot {}
+
+impl TxServiceSlot {
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(TX_SLOT_FREE),
+            request: UnsafeCell::new(TxServiceRequest::EMPTY),
+            result: UnsafeCell::new(usize::MAX),
+        }
+    }
+}
+
+static TX_SERVICE: [TxServiceSlot; TX_SERVICE_SLOTS] =
+    [const { TxServiceSlot::new() }; TX_SERVICE_SLOTS];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NetConfig {
@@ -355,6 +408,20 @@ pub fn udp_send(
     {
         return None;
     }
+    if crate::arch::cpu_index() != 0 {
+        let mut address = [0u8; 16];
+        address[..4].copy_from_slice(&remote_ip);
+        return queue_udp_send(TX_KIND_UDP4, address, remote_port, local_port, payload);
+    }
+    udp_send_on_owner(remote_ip, remote_port, local_port, payload)
+}
+
+fn udp_send_on_owner(
+    remote_ip: [u8; 4],
+    remote_port: u16,
+    local_port: u16,
+    payload: &[u8],
+) -> Option<usize> {
     with_state(|state| {
         if !state.ready {
             return None;
@@ -393,6 +460,18 @@ pub fn udp6_send(
     {
         return None;
     }
+    if crate::arch::cpu_index() != 0 {
+        return queue_udp_send(TX_KIND_UDP6, remote_ip, remote_port, local_port, payload);
+    }
+    udp6_send_on_owner(remote_ip, remote_port, local_port, payload)
+}
+
+fn udp6_send_on_owner(
+    remote_ip: [u8; 16],
+    remote_port: u16,
+    local_port: u16,
+    payload: &[u8],
+) -> Option<usize> {
     with_state(|state| {
         if !state.ready || !state.ipv6_ready {
             return None;
@@ -417,6 +496,117 @@ pub fn udp6_send(
         }
         Some(payload.len())
     })
+}
+
+fn queue_udp_send(
+    kind: u8,
+    remote_ip: [u8; 16],
+    remote_port: u16,
+    local_port: u16,
+    payload: &[u8],
+) -> Option<usize> {
+    let slot = TX_SERVICE.iter().find(|slot| {
+        slot.state
+            .compare_exchange(
+                TX_SLOT_FREE,
+                TX_SLOT_WRITING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    })?;
+    let mut request = TxServiceRequest::EMPTY;
+    request.kind = kind;
+    request.remote_ip = remote_ip;
+    request.remote_port = remote_port;
+    request.local_port = local_port;
+    request.length = payload.len() as u16;
+    request.payload[..payload.len()].copy_from_slice(payload);
+    unsafe {
+        slot.request.get().write(request);
+        slot.result.get().write(usize::MAX);
+    }
+    TX_NONOWNER_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    slot.state.store(TX_SLOT_READY, Ordering::Release);
+    unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+
+    let deadline = crate::arch::counter_deadline_millis(5_000);
+    while slot.state.load(Ordering::Acquire) != TX_SLOT_DONE {
+        if crate::arch::counter_deadline_expired(deadline) {
+            crate::fatal("AArch64 network TX owner request timeout");
+        }
+        unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+    }
+    let result = unsafe { slot.result.get().read() };
+    slot.state.store(TX_SLOT_FREE, Ordering::Release);
+    (result != usize::MAX).then_some(result)
+}
+
+pub fn service_tx_requests() -> usize {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 network TX service attempted from non-owner CPU");
+    }
+    let mut completed = 0usize;
+    for slot in &TX_SERVICE {
+        if slot
+            .state
+            .compare_exchange(
+                TX_SLOT_READY,
+                TX_SLOT_SERVICING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            continue;
+        }
+        let request = unsafe { slot.request.get().read() };
+        let length = usize::from(request.length);
+        let result = if length > TX_SERVICE_PAYLOAD {
+            None
+        } else {
+            match request.kind {
+                TX_KIND_UDP4 => udp_send_on_owner(
+                    [
+                        request.remote_ip[0],
+                        request.remote_ip[1],
+                        request.remote_ip[2],
+                        request.remote_ip[3],
+                    ],
+                    request.remote_port,
+                    request.local_port,
+                    &request.payload[..length],
+                ),
+                TX_KIND_UDP6 => udp6_send_on_owner(
+                    request.remote_ip,
+                    request.remote_port,
+                    request.local_port,
+                    &request.payload[..length],
+                ),
+                _ => None,
+            }
+        };
+        unsafe { slot.result.get().write(result.unwrap_or(usize::MAX)) };
+        TX_OWNER_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+        slot.state.store(TX_SLOT_DONE, Ordering::Release);
+        completed += 1;
+    }
+    if completed != 0 {
+        unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+    }
+    completed
+}
+
+pub fn reset_tx_affinity_evidence() {
+    TX_NONOWNER_REQUESTS.store(0, Ordering::Release);
+    TX_OWNER_COMPLETIONS.store(0, Ordering::Release);
+}
+
+pub fn tx_affinity_evidence() -> (u64, u64) {
+    (
+        TX_OWNER_COMPLETIONS.load(Ordering::Acquire),
+        TX_NONOWNER_REQUESTS.load(Ordering::Acquire),
+    )
 }
 
 fn dns_cache_lookup(state: &State, query: &[u8], output: &mut [u8]) -> Option<usize> {
@@ -1548,6 +1738,9 @@ fn next_identification(state: &mut State) -> u16 {
 }
 
 fn transmit_frame(state: &mut State, frame: &[u8]) -> Option<()> {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-net TX attempted from non-owner CPU");
+    }
     if frame.is_empty() || frame.len() + VIRTIO_NET_HEADER as usize > BUFFER_BYTES as usize {
         return None;
     }

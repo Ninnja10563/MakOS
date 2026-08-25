@@ -101,13 +101,18 @@ frame balance, and subsequent boot completion. The ordinary boot config never
 arms or waits for external test input.
 
 The same opt-in image first runs an eighth fixture against real virtio-net and
-QEMU slirp DNS. AP1 sends transaction `0x4d4c`, blocks in `recvfrom`, and
-returns to its idle dispatcher. CPU0 exclusively drains and demultiplexes the
-RX ring, wakes the exact network wait source, and sends the scheduler SGI. The
-driver and socket pump fail closed on non-owner RX entry. Runtime requires a
-validated DNS response, nonzero CPU0 frames and AP deferrals,
-`io_idle_mask=0x2`/`io_resume_mask=0x2`, status 63, and exact frame balance.
-AP-originated TX remains explicitly unqualified.
+QEMU slirp DNS. AP1 copies transaction `0x4d4c` into an eight-slot, 1,400-byte
+bounded UDP service queue; CPU0 owns the actual transmit ring, completes the
+request, and wakes the requester. AP1 then blocks in `recvfrom` and returns to
+its idle dispatcher. CPU0 exclusively drains and demultiplexes the RX ring,
+wakes the exact network wait source, and sends the scheduler SGI. Low-level TX,
+RX, and socket-pump entry points fail closed on the wrong CPU. Runtime requires
+a validated DNS response, nonzero CPU0 TX completions, AP TX requests, CPU0 RX
+frames and AP RX deferrals, `io_idle_mask=0x2`/`io_resume_mask=0x2`, status 63,
+and exact frame balance. This qualifies copied UDPv4/v6 TX; stateful AP TCP TX
+remains fail-closed and unqualified. The AP waits for its UDP completion in a
+bounded EL1 `WFE` loop, so only the following receive phase proves scheduler
+block/idle/wake behavior.
 
 The offline scheduler foundation adds:
 
@@ -143,9 +148,10 @@ safe general process migration.
   correctly continues to reject a task owned by another CPU.
 - AP banked virtual-timer PPI enable/programming and CPU0-only global tick
   servicing pass the bounded probe. Virtio input now has exclusive CPU0 MMIO
-  ownership plus measured AP deferral. General AP syscalls still require the
-  equivalent network TX, block, and GPU service ownership/contention audit;
-  network RX now has exclusive CPU0 ring ownership and a real AP DNS wake.
+  ownership plus measured AP deferral. Virtio-net now has CPU0-only low-level
+  TX/RX ownership, copied AP UDPv4/v6 service, and a real AP DNS receive wake.
+  Stateful AP TCP TX, block, and GPU service ownership/contention remain to be
+  qualified.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -181,9 +187,10 @@ a GICv2 SGI only after publishing its enabled state.
    - CPU0 alone advances global monotonic ticks and services deadlines/device
      polling. AP timer IRQs only preempt/select; otherwise four timer streams
      would make wall time advance fourfold.
-   - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net RX ring
-     service are explicitly CPU0-owned and guarded against AP entry. Network TX,
-     block, and GPU paths remain pending equivalent qualification.
+   - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net low-level
+     TX/RX ring service are explicitly CPU0-owned and guarded against AP entry.
+     AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX, block,
+     and GPU paths remain pending equivalent qualification.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one
