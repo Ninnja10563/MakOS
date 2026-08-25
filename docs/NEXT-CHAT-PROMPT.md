@@ -101,15 +101,27 @@ SGI, exact status 63, and frame balance; EL1 entries acknowledge/defer and the
 Firefox-role regression, cursor runtime, AArch64 release/artifact checks, and
 full `make unit check` pass on Pi/TCG. The audit remains Partial.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 668793, user
-service `makos-visible-network-irq-final.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-network-irq-final-D6pbvEPD`, private
+Post-desktop production SMP now also admits ordinary non-leader Native
+application threads to AP1-3 while leaders plus shell, UI, service, and device
+MMIO work remain CPU0-only. A separate exact-role/exact-group upstream-musl
+gate passes `cpu_mask=0xe`, dispatches `11119,10254,11130`, a simultaneous
+AP1/AP3 interval (`overlap_mask=0xa`, TIDs 5/6), kernel affinity migration and
+restoration, exclusive ownership, and status 42. The unchanged Firefox-role
+regression passes dispatches `9857,11153,9945`, `overlap_mask=0xa`, exact
+watcher TID 8/AP2, and status 42. Automatic balancing and additional
+built-in/service roles remain Partial. Use
+`docs/MACOS-HVF-TEST-AGENT-PROMPT.md` to hand this large milestone to the
+macOS testing agent; it preserves every strict Firefox threshold.
+
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 699985, user
+service `makos-visible-native-smp-final3.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-native-smp-final3-54Bfbyox`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-network-irq-final-D6pbvEPD/qmp.sock`. Its
+`build/makos-pi-visible-native-smp-final3-54Bfbyox/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`a4f5d6f697730482d3182bc79abbf049b384cb79ac24fb93c7c9f39245c1d67d`;
+`f194b48ee3be8a8b939d41f312896f5479fff795965f4fd16a6dcbb8101efd70`;
 the inspected 800x600 login PNG is
-`133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
+`ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
 Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 

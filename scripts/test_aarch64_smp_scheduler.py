@@ -37,6 +37,7 @@ INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
 TCP_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_tcp.py").read_text()
 MIGRATION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_migration.py").read_text()
 PRODUCTION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_production_smp.py").read_text()
+NATIVE_RUNTIME = (ROOT / "scripts/boot_test_aarch64_native_smp.py").read_text()
 MUSL_PTHREAD_PROBE = (ROOT / "ports/musl/pthread-probe.c").read_text()
 INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
 TCP_CONFIG = (ROOT / "boot/MAKOS-SMP-TCP.CFG").read_text()
@@ -233,6 +234,7 @@ for token in (
     "PRODUCTION_WORKER_CPU_MASK",
     "PRODUCTION_WORKER_REPORTED_MASK",
     "PRODUCTION_WORKER_GROUP_PID",
+    "PRODUCTION_WORKER_ROLE",
     "PRODUCTION_WORKER_DISPATCHES",
     "PRODUCTION_WORKER_ACTIVE_CPU_MASK",
     "PRODUCTION_WORKER_ACTIVE_TIDS",
@@ -240,13 +242,20 @@ for token in (
     "PRODUCTION_WORKER_OVERLAP_TIDS",
     "fn production_worker_enter(",
     "fn production_worker_leave(",
+    "fn production_ap_worker(slot: &ContextSlot)",
+    "matches!(slot.role, ProcessRole::Firefox | ProcessRole::Native)",
+    "tracked_production_worker(worker.role, worker.group_pid)",
     "AArch64 production worker acquired duplicate CPU ownership",
     "MAKOS_AARCH64_PRODUCTION_SMP_READY",
     "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK",
     "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK",
     "MAKOS_AARCH64_PRODUCTION_SMP_OK",
-    "pid == PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)",
+    "MAKOS_AARCH64_NATIVE_SMP_OVERLAP_OK",
+    "MAKOS_AARCH64_NATIVE_SMP_DISPATCH_OK",
+    "MAKOS_AARCH64_NATIVE_SMP_OK",
+    "tracked_production_worker(role, group_pid)",
     "pub fn spawn_firefox_smp_probe()",
+    "pub fn spawn_native_smp_probe()",
     "fixture=upstream-musl-pthread role=firefox",
     "SMP_PROBE_IO_IDLE_MASK",
     "SMP_PROBE_IO_RESUME_MASK",
@@ -442,7 +451,7 @@ for cpu0_wrapper in (
 ):
     assert cpu0_wrapper not in PROCESS, cpu0_wrapper
 
-assert "The production scheduler scope remains\nbounded" in DESIGN
+assert "scheduler scope remains bounded" in DESIGN
 assert "Firefox first paint/navigation" in DESIGN
 assert '"test.smp-input=required" => smp_input_probe = true' in MAIN
 assert '"test.smp-tcp=required" => smp_tcp_probe = true' in MAIN
@@ -510,6 +519,9 @@ for token in (
     "syscall4(SYS_PROCESS_SPAWN, 17, 0, 0, 0)",
     "MAKOS_AARCH64_FIREFOX_SMP_REAP_OK",
     'exact(command, command_length, "firefox-smp")',
+    "syscall4(SYS_PROCESS_SPAWN, 18, 0, 0, 0)",
+    "MAKOS_AARCH64_NATIVE_SMP_REAP_OK",
+    'exact(command, command_length, "native-smp")',
 ):
     assert token in SHELL, token
 
@@ -517,6 +529,9 @@ for token in (
     "production_smp_overlap_probe",
     'strcmp(argv[1], "production-smp")',
     "MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3",
+    "native_smp_overlap_probe",
+    'strcmp(argv[1], "native-smp")',
+    "MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK workers=3",
     "__atomic_fetch_or(&production_smp_ready",
 ):
     assert token in MUSL_PTHREAD_PROBE, token
@@ -539,10 +554,27 @@ for token in (
 ):
     assert token in PRODUCTION_RUNTIME, token
 
+for token in (
+    "MAKOS_AARCH64_NATIVE_SMP_PROCESS_OK",
+    "MAKOS_AARCH64_NATIVE_SMP_OVERLAP_OK",
+    "MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK",
+    "MAKOS_AARCH64_NATIVE_SMP_OK",
+    "MAKOS_AARCH64_NATIVE_SMP_REAP_OK",
+    "cpu_mask != 0xE",
+    "overlap_mask.bit_count() < 2",
+    "role=native",
+    "leader_cpu=0",
+    "device_mmio_owner=cpu0",
+    "status=42",
+):
+    assert token in NATIVE_RUNTIME, token
+
+assert "test-aarch64-native-smp-runtime: image-aarch64" in MAKEFILE
+
 print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "
     "exception_paths=per-cpu kernel_return=per-cpu ttbr_cache=per-cpu "
     "tlbi=inner-shareable "
-    "runtime=boot-probe,production-firefox-workers,4cpus "
-    "policy=leader-cpu0,firefox-workers-ap-eligible device_mmio_owner=cpu0"
+    "runtime=boot-probe,production-firefox-native-workers,4cpus "
+    "policy=leader-cpu0,application-workers-ap-eligible device_mmio_owner=cpu0"
 )

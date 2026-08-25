@@ -23,7 +23,8 @@ IMAGE = pathlib.Path(
 )
 READY_MARKER = (
     b"MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 "
-    b"policy=leader-cpu0,firefox-workers-shared-ap device_mmio_owner=cpu0 "
+    b"policy=leader-cpu0,application-workers-shared-ap roles=firefox,native "
+    b"device_mmio_owner=cpu0 "
     b"wake=sgi block=ap-idle"
 )
 PROCESS_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK"

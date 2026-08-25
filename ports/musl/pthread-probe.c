@@ -146,10 +146,9 @@ static void *production_input_watcher(void *argument)
 	return 0;
 }
 
-static int production_smp_overlap_probe(void)
+static int production_smp_worker_probe(void)
 {
 	pthread_t workers[3];
-	pthread_t input_watcher;
 	void *result = 0;
 	production_smp_ready = 0;
 	production_smp_release = 0;
@@ -176,6 +175,15 @@ static int production_smp_overlap_probe(void)
 	__atomic_store_n(&production_smp_release, 1, __ATOMIC_RELEASE);
 	for (unsigned index = 0; index < 3; index++)
 		if (pthread_join(workers[index], &result) || result) return 3;
+	return 0;
+}
+
+static int production_smp_overlap_probe(void)
+{
+	pthread_t input_watcher;
+	void *result = 0;
+	int worker_result = production_smp_worker_probe();
+	if (worker_result) return worker_result;
 	production_input_decoy_surface = makos_call4(8, 96, 64, 8, 0);
 	if (production_input_decoy_surface <= 0 ||
 	    makos_call4(10, production_input_decoy_surface, 0, 0, 0) != 1)
@@ -204,6 +212,18 @@ static int production_smp_overlap_probe(void)
 	static const char marker[] =
 		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded affinity=explicit singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned migrations=forced:3\n"
 		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event routing=exact-handle decoy=blocked-until-destroy\n";
+	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
+	return 0;
+}
+
+static int native_smp_overlap_probe(void)
+{
+	int worker_result = production_smp_worker_probe();
+	if (worker_result) return worker_result;
+	static const char marker[] =
+		"MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready "
+		"release=bounded affinity=explicit singleton=0x2,0x4,0x8 "
+		"restored=0xe get=kernel-owned migrations=forced:3\n";
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;
 }
@@ -664,6 +684,9 @@ int main(int argc, char **argv)
 	if (argc == 2 && !strcmp(argv[1], "production-smp") &&
 	    production_smp_overlap_probe())
 		return 255;
+	if (argc == 2 && !strcmp(argv[1], "native-smp") &&
+	    native_smp_overlap_probe())
+		return 253;
 	main_parent_pid = getppid();
 	if (main_parent_pid <= 0 || main_parent_pid == getpid()) return 221;
 	main_tid = syscall(SYS_gettid);

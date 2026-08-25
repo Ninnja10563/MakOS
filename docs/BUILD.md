@@ -26,6 +26,7 @@ make run-x86_64-gpt
 make test-x86_64-install
 make test-aarch64-cursor-runtime
 make test-aarch64-production-smp-runtime
+make test-aarch64-native-smp-runtime
 make test-aarch64-firefox-runtime
 make test-aarch64-ipv6-runtime
 make test-aarch64
@@ -303,9 +304,10 @@ auto-reset event, clones a shared-VM thread, blocks its leader on AP1, signals
 from the child on CPU0, and requires AP1 idle/resume masks `0x2`, child
 thread-return status 0, parent status 44, and balanced frames. The scheduler
 closes AP dispatch between boot fixtures. After driver/login-UI initialization,
-the desktop opens a bounded production policy: leaders and all non-Firefox
-roles remain on CPU0, while non-leader Firefox-role threads are eligible on
-AP1-3. Device MMIO remains CPU0-owned; this is not general multicore userspace.
+the desktop opens a bounded production policy: leaders, shell, UI, and service
+roles remain on CPU0, while non-leader Firefox and ordinary native-application
+threads are eligible on AP1-3. Device MMIO remains CPU0-owned; this is not
+unrestricted multicore userspace.
 
 Run the post-desktop production-role gate with:
 
@@ -341,6 +343,22 @@ scheduler-role fixture, not real Firefox or
 macOS/HVF performance evidence. Real Firefox must still pass the unchanged
 strict Gate 3 on the intended idle host.
 
+Run the ordinary native-application role gate with:
+
+```sh
+make test-aarch64-native-smp-runtime
+```
+
+The shell's `native-smp` command executes the same freshly built upstream-musl
+pthread workload under `ProcessRole::Native`. Its leader must retain mask
+`0x1` on CPU0; three non-leader workers default to the shared AP pool, force
+and read back singleton migrations across AP1-3, restore mask `0xe`, and run
+the remaining pthread/IPC workload to status 42. The host gate requires every
+AP to have a nonzero dispatch count, a live/final matching overlap interval
+with at least two distinct TIDs, exclusive ownership, CPU0-only device MMIO,
+and shell wait/reap. This is production-policy evidence for normal native
+applications, not Firefox or macOS/HVF performance evidence.
+
 The ordinary image also contains a bounded forced-migration proof, with a
 focused early-exit harness:
 
@@ -369,8 +387,8 @@ contention points, exclusive single-CPU ownership at every recorded selection,
 bounded dispatch skew, exact reap/frame balance, and the prior migration proof.
 The 2026-08-25 Raspberry Pi/QEMU 10.0.11 TCG pass records 99 dispatches on each
 AP (297 total). This is functional AP load-sharing evidence; production scope
-remains restricted to Firefox workers and macOS/HVF Firefox qualification is
-still required.
+now includes Firefox and native workers, while automatic balancing, other
+built-in/service roles, and macOS/HVF Firefox qualification are still required.
 
 The boot also runs a remote `exit_group` fixture. A CPU0 leader clones a worker
 fixed to AP1; after the worker proves active EL0 execution, the leader invokes
@@ -478,7 +496,7 @@ Latest Pi/TCG evidence is 22 requests/completions: 13 reads, 6 writes, 3
 flushes, and 22 timer-service completions, with status 65 and balanced frames. Low-level ring
 submission fails closed off CPU0. The AP request wait is bounded EL1 `WFE`, not
 a scheduler idle/wake result. Post-desktop AP scope remains limited to
-Firefox-role workers.
+non-leader Firefox and ordinary Native application workers.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

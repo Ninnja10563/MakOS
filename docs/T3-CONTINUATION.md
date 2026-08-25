@@ -27,22 +27,42 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG network/input-IRQ milestone: PID 668793,
-  user service `makos-visible-network-irq-final.service`, VNC
+- AArch64 post-desktop production SMP now admits non-leader ordinary Native
+  application workers as well as Firefox-role workers to AP1-3. Leaders,
+  shell, UI, service, and device MMIO work remain CPU0-only. Separate
+  exact-group/exact-role upstream-musl pthread gates prevent the Native fixture
+  from satisfying Firefox evidence. Pi/QEMU 10.0.11 TCG Native evidence is
+  `cpu_mask=0xe`, dispatches `11119,10254,11130`, `overlap_mask=0xa`, TIDs
+  5/6, kernel-owned affinity migration/restoration, exclusive ownership, and
+  status 42. The unchanged Firefox production regression passes with
+  dispatches `9857,11153,9945`, `overlap_mask=0xa`, watcher TID 8/AP2, and
+  status 42. Full `make unit check`, release/image artifacts, combined
+  network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
+  replace unchanged real-Firefox qualification on idle macOS/HVF.
+- Active visible Pi/QEMU 10.0.11 TCG Native-SMP milestone: PID 699985,
+  user service `makos-visible-native-smp-final3.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-network-irq-final-D6pbvEPD`, private read-only boot
+  `build/makos-pi-visible-native-smp-final3-54Bfbyox`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
-  `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and capture `login.png`.
+  `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and captures
+  `login.ppm`/`login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `a4f5d6f697730482d3182bc79abbf049b384cb79ac24fb93c7c9f39245c1d67d`.
+  `f194b48ee3be8a8b939d41f312896f5479fff795965f4fd16a6dcbb8101efd70`.
   It is the sole QEMU process and reports four online PEs,
   the GICv2 network route (INTID 76), both input routes (INTIDs 77/78),
   `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
-  `userspace_scheduler_cpus=4`, with no fatal/panic. The visually inspected
+  `userspace_scheduler_cpus=4` with Firefox and Native AP-worker roles, and no
+  fatal/panic. The visually inspected
   800x600 login PNG has SHA-256
-  `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`
+  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 660636 and
+  testing; use QMP `quit` before any later runtime gate. Prior PID 668793 and
+  session `build/makos-pi-visible-network-irq-final-D6pbvEPD` were stopped
+  cleanly through QMP before the Native-SMP runtime; their files remain. Two
+  corrected launch attempts for this visible milestone exited before guest
+  execution because the first used display-backend syntax for VNC and the
+  second omitted QEMU's extracted data directory; no concurrent guest ran and
+  their private files remain. Prior PID 660636 and
   session `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn` were
   stopped cleanly through QMP before the network-IRQ runtime; their files
   remain. Prior PID 659568 and
@@ -219,8 +239,9 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The boot-fixture gate closes before the desktop. The later production gate
-  admits only Firefox workers; general roles, automatic load balancing, and
-  genuine Firefox contention remain pending.
+  admits Firefox and ordinary Native application workers; additional
+  built-in/service roles, automatic load balancing, and genuine Firefox
+  contention remain pending.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -330,11 +351,12 @@ Preserve existing files and changes.
   Reproducer: `make test-aarch64-smp-load-runtime`. Full `make unit check`, the
   structural guard, release image/artifact build, focused runtime, and visible
   login pass. Explicit per-thread affinity and forced migration now pass as
-  described below; automatic load-driven balancing, broader production roles/
-  priorities and real Firefox/desktop contention remain open.
+  described below; automatic load-driven balancing, additional built-in/service
+  roles and priorities, and real Firefox/desktop contention remain open.
 - The desktop now opens a bounded production scheduler policy after driver and
-  login-UI initialization. Leaders, non-Firefox roles, and all device MMIO stay
-  on CPU0; only non-leader Firefox-role threads are AP-eligible. AP sleep, I/O,
+  login-UI initialization. Leaders plus shell, UI, service, and all device MMIO
+  stay on CPU0; non-leader Firefox and ordinary Native application threads are
+  AP-eligible. AP sleep, I/O,
   input, IPC, and futex no-successor cases publish Blocked/unowned state and
   return to WFI. Firefox requests three TaskController workers. A focused
   upstream-musl pthread fixture runs under that exact role. Its production-only
@@ -451,7 +473,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 668793 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 699985 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
@@ -512,6 +534,16 @@ Preserve existing files and changes.
   structural guards, release image and artifact checks pass. This is Pi/TCG
   functional evidence only; it does not replace the unchanged idle-macOS/HVF
   strict Firefox gate.
+- 2026-08-26 Pi/QEMU 10.0.11 TCG production SMP also qualifies ordinary
+  Native application pthreads after desktop startup. A dedicated `native-smp`
+  exact-role process runs all three APs (`cpu_mask=0xe`, dispatches
+  `11119,10254,11130`), forces/reads/restores kernel affinity, records a live
+  simultaneous AP1/AP3 interval (`overlap_mask=0xa`, TIDs 5/6), joins and
+  reaps status 42. Role/group-scoped accounting prevents it from satisfying
+  Firefox evidence. The unchanged Firefox production regression, combined
+  network/input-IRQ runtime, cursor runtime, full `make unit check`, and
+  release/image artifact validation remain green. Automatic balancing and
+  additional built-in/service roles remain Partial.
 - 2026-08-26 the surface input wait class is now exact-handle rather than a
   global surface-watcher wake. Scheduler snapshots carry TID, process-group
   owner PID, and handle; graphics readiness is checked outside the scheduler

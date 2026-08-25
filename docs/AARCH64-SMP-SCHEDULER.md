@@ -31,14 +31,15 @@ closes the handle and exits 44. Runtime requires `ipc_idle_mask=0x2`,
 `ipc_resume_mask=0x2`, status-0 child return, parent reap, and exact frame
 recovery. The gate closes between the qualification fixtures. After driver and
 login-UI initialization, the desktop opens a bounded production gate:
-process leaders, the shell, UI services, and every non-Firefox role remain on
-CPU0, while non-leader Firefox-role threads are AP-eligible on the shared Ready
-queue. Device MMIO remains CPU0-owned. The production scheduler scope remains
-bounded; this is not general desktop SMP scheduling.
+process leaders, the shell, and UI/service roles remain on CPU0, while
+non-leader Firefox and ordinary native-application threads are AP-eligible on
+the shared Ready queue. Device MMIO remains CPU0-owned. The production
+scheduler scope remains bounded; this is not unrestricted desktop SMP
+scheduling.
 
 The production gate now records actual simultaneous execution, not only the
 set of CPUs used over a process lifetime. Each AP publishes the currently
-selected Firefox TID before its active bit; every in-exception yield/block
+selected tracked application TID before its active bit; every in-exception yield/block
 switch refreshes that TID at the scheduler selection point. The first snapshot
 with at least two AP bits validates distinct nonzero owners and is retained
 through process reap. A production-only three-pthread rendezvous qualifies the
@@ -50,6 +51,15 @@ latency and interaction limit. Until that target passes on idle macOS/HVF, the
 fixture is not real-Firefox qualification. Because several PEs can log during
 this interval, PL011 formatted and raw writes use an IRQ-masked cross-PE lock;
 the final repeat emits intact records.
+
+A separate `native-smp` gate runs the same upstream-musl pthread workload as
+an ordinary `Native` process rather than using the Firefox scheduler role.
+Its leader remains fixed to CPU0, three cloned workers default to affinity
+`0xe`, each forces and verifies cross-AP migrations through syscall 148, and
+the kernel records exclusive ownership plus a simultaneous distinct-TID AP
+interval. This proves the production policy is no longer Firefox-only; the
+Firefox evidence counters and markers remain scoped to the launched Firefox
+group and cannot be satisfied by the native fixture.
 
 Surface-key priority follows the same affinity split. A Firefox thread blocked
 in `surface_wait_event` publishes its TID; AP1-3 may select that non-leader
@@ -81,7 +91,7 @@ adapter-reported constant. Native syscall 148 gets or replaces the mask of the
 caller or a same-thread-group TID. Masks must be nonempty subsets of the four
 online CPUs. Firefox and native non-leader threads may choose those CPUs;
 process leaders retain mask `0x1` because desktop and device service remains
-CPU0-owned. Clone gives Firefox workers the production default `0xe`, while
+CPU0-owned. Clone gives Firefox and native workers the production default `0xe`, while
 forked/new process leaders begin at `0x1`. Every normal scheduler selection,
 including surface priority, consults the stored mask. If a caller removes its
 current CPU, the exception path captures its complete context, publishes it
@@ -262,19 +272,21 @@ The offline scheduler foundation adds:
   inner-shareable page invalidation (`TLBI VAE1IS`) for shared process roots.
 
 These changes preserve existing CPU0 wrappers. The boot probe is genuine
-parallel EL0 evidence, but it is not evidence of real Firefox overlap. A
-separate production-role fixture uses the
-upstream musl pthread ELF under the exact Firefox scheduler role to exercise
-clone, futex, pipe, signal, AP block/wake, join, exit, wait, and reap after the
-desktop has initialized. It is explicitly not a substitute for real Firefox.
+parallel EL0 evidence, but it is not evidence of real Firefox overlap.
+Separate production-role fixtures use the upstream musl pthread ELF under the
+exact Firefox and ordinary native scheduler roles to exercise clone, futex,
+pipe, signal, AP block/wake, join, exit, wait, and reap after the desktop has
+initialized. The Firefox-role fixture is explicitly not a substitute for real
+Firefox.
 
 ## Next enablement blockers
 
 - Initial and exception-time AP selectors restrict candidates to non-leader
-  Firefox workers after desktop startup. Leaders and all other roles remain on
-  CPU0. Eligible threads may select kernel-owned masks through syscall 148;
-  broader production roles and automatic load balancing remain gated until
-  device-owning and PID1/UI paths are qualified.
+  Firefox and ordinary native-application workers after desktop startup.
+  Leaders, PID1, shell, UI, and service roles remain on CPU0. Eligible threads
+  may select kernel-owned masks through syscall 148; automatic load balancing
+  and additional built-in/service roles remain gated until their ownership
+  paths are qualified.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
   ownership through a Ready/unowned publication. Six load tasks also contend
   through 288 yields on the shared Ready queue and receive 99 dispatches on
@@ -314,7 +326,7 @@ desktop has initialized. It is explicitly not a substitute for real Firefox.
 
 Before desktop startup and between bounded boot fixtures, APs remain in
 closed-gate WFI at EL1. After desktop startup, they stay available for eligible
-Firefox workers and return to WFI when the shared queue has no eligible task.
+Firefox/native workers and return to WFI when the shared queue has no eligible task.
 Routine BSP `SEV` traffic cannot open the gate. Enablement and Ready publication
 issue a GICv2 SGI after their Release stores.
 
@@ -333,8 +345,9 @@ issue a GICv2 SGI after their Release stores.
 
 2. AP dispatch
    - After desktop/session startup enables SMP scheduling, AP WFI dispatchers
-     select Ready Firefox worker threads. They do not run PID1/UI threads until
-     process and device paths are qualified for parallel use.
+     select Ready Firefox and ordinary Native application worker threads. They
+     do not run PID1, shell, UI, service, or device-owner threads until those
+     paths are qualified for parallel use.
    - Clone/wake/spawn publishes the context with Release ordering then sends an
      SGI/SEV to idle dispatchers. Selection consumes it with Acquire ordering.
    - A BSP-only boot option/fallback remains available until full regression
@@ -396,4 +409,5 @@ issue a GICv2 SGI after their Release stores.
 The post-desktop marker reports `userspace_scheduler_cpus=4` only for this
 bounded policy. The original audit remains Partial until genuine Firefox
 threads overlap on multiple guest CPUs under the unchanged idle-macOS/HVF
-runtime gate and broader production roles are safely scheduled.
+runtime gate and automatic balancing plus additional built-in/service roles
+are safely scheduled.

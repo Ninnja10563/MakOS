@@ -4,6 +4,21 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 post-desktop production SMP is no longer restricted to
+  Firefox-role workers. Non-leader ordinary `Native` application threads now
+  share AP1-3 while leaders plus shell, UI, service, and all device MMIO work
+  remain on CPU0. A separate exact-role upstream-musl pthread gate prevents
+  Native evidence from satisfying Firefox markers. The Pi/QEMU 10.0.11 TCG
+  Native run passed all three APs with `cpu_mask=0xe`, dispatches
+  `11119,10254,11130`, simultaneous AP1/AP3 TIDs 5/6 (`overlap_mask=0xa`),
+  kernel-owned affinity migration/restoration, exclusive ownership, AP
+  block/wake/join, and status-42 reap. The unchanged Firefox regression also
+  passed with dispatches `9857,11153,9945`, `overlap_mask=0xa`, exact surface
+  watcher TID 8 on AP2, and status 42. Full `make unit check`, release/image
+  artifact validation, combined network/input-IRQ runtime, and cursor runtime
+  pass. This remains functional Pi/TCG evidence: automatic load balancing and
+  additional built-in/service roles remain Partial, and real Firefox still
+  needs the unchanged strict gate on an idle macOS/HVF host.
 - 2026-08-26 AArch64 virtio-net receive now uses a genuine QEMU `virt`
   GICv2 interrupt in the normal path. Network slot 28 maps to SPI INTID 76,
   configured Group 1/edge-rising and targeted exclusively at CPU0. A lower-EL
@@ -88,10 +103,10 @@ Last updated: 2026-08-26.
   and full `make unit check` pass. This is Pi/TCG functional evidence only:
   unchanged strict Firefox Gate 3 still requires an idle macOS/HVF rerun, and
   the scheduler/graphics audit rows remain Partial.
-- 2026-08-25 AArch64 now opens a bounded production scheduler gate after
-  driver and login-UI initialization. Process leaders, shell/UI tasks,
-  and every non-Firefox role remain on CPU0; non-leader Firefox-role threads
-  are eligible on the shared AP1-3 Ready queue. All device MMIO remains
+- 2026-08-25 AArch64 opened a bounded production scheduler gate after
+  driver and login-UI initialization. At that milestone process leaders,
+  shell/UI tasks, and every non-Firefox role remained on CPU0; non-leader
+  Firefox-role threads were eligible on the shared AP1-3 Ready queue. All device MMIO remains
   CPU0-owned, Ready publication sends a scheduler SGI, and an AP with no local
   successor publishes Blocked/unowned state and returns to its WFI dispatcher
   for sleep, I/O, input, IPC, and futex waits. Firefox's TaskController request
@@ -263,11 +278,12 @@ Last updated: 2026-08-26.
   armed while waiting for AP sleep deadlines.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. The later desktop gate now
-  admits only non-leader Firefox-role threads to AP1-3; all leaders, non-Firefox
-  roles, and device MMIO remain on CPU0. A controlled exact-role pthread fixture
-  records simultaneous distinct TIDs on AP1/AP3. Automatic migration and the
-  same overlap/contention from the genuine Firefox process are still open, so
-  the scheduler row stays Partial.
+  admits non-leader Firefox and ordinary Native application threads to AP1-3;
+  leaders plus shell, UI, service, and device MMIO work remain on CPU0.
+  Separate exact-role/group pthread fixtures record simultaneous distinct TIDs
+  without cross-crediting their evidence. Automatic load balancing, additional
+  built-in/service roles, and the same overlap/contention from the genuine
+  Firefox process are still open, so the scheduler row stays Partial.
 - 2026-08-26 the AArch64 guest-native toolchain now crosses a genuine variable
   build-graph boundary within an explicit two-to-six-input limit. Its primary
   fixture writes and rereads an assembly startup, a C translation unit
@@ -378,12 +394,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  network/input-IRQ milestone is PID 668793 under the user service
-  `makos-visible-network-irq-final.service`, with
+  Native-SMP milestone is PID 699985 under the user service
+  `makos-visible-native-smp-final3.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-network-irq-final-D6pbvEPD`; its boot clone
+  `build/makos-pi-visible-native-smp-final3-54Bfbyox`; its boot clone
   exactly matches the current release image SHA-256
-  `a4f5d6f697730482d3182bc79abbf049b384cb79ac24fb93c7c9f39245c1d67d`.
+  `f194b48ee3be8a8b939d41f312896f5479fff795965f4fd16a6dcbb8101efd70`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial
@@ -788,10 +804,12 @@ Last updated: 2026-08-26.
   kernel-return, and active-TTBR state are CPU-indexed. A bounded shared Ready
   queue balances six EL0 load tasks over AP1-3 through 288 yields with even
   `99,99,99` dispatch counts and
-  exclusive ownership. After desktop startup, Firefox workers are AP-eligible
-  while leaders and all other roles stay on CPU0. Syscall 148 now provides
+  exclusive ownership. After desktop startup, Firefox and ordinary Native
+  application workers are AP-eligible while leaders plus shell, UI, service,
+  and device-owner roles stay on CPU0. Syscall 148 now provides
   explicit per-thread masks and forced migration for eligible workers;
-  automatic load-driven balancing, broader production roles/priorities, and
+  automatic load-driven balancing, additional built-in/service roles and
+  priorities, and
   real Firefox/desktop contention remain open.
   CPU0-only virtio input, virtio-net TX/RX,
   virtio-blk, and virtio-GPU submission now have focused AP runtime evidence

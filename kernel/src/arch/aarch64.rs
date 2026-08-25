@@ -3710,7 +3710,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             }
         }
         SYS_PROCESS_SPAWN => match frame.registers[0] {
-            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17)
+            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 17 | 18)
                 if crate::aarch64_process::process_control_allowed() =>
             {
                 match selector {
@@ -3729,6 +3729,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     14 => crate::aarch64_process::spawn_firefox(),
                     15 => crate::aarch64_process::spawn_stack_protector_probe(),
                     17 => crate::aarch64_process::spawn_firefox_smp_probe(),
+                    18 => crate::aarch64_process::spawn_native_smp_probe(),
                     _ => None,
                 }
                 .unwrap_or(ERROR_INVALID)
