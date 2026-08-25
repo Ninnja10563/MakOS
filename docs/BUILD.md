@@ -424,13 +424,18 @@ early. `boot/MAKOS.CFG` does not contain the test option.
 Before the keyboard phase, the same focused image runs a real UDP/DNS TX/RX
 phase. AP1 copies transaction `0x4d4c` into a bounded eight-slot service queue;
 CPU0 alone performs the virtio-net transmit, then AP1 blocks in receive. CPU0
-alone drains the RX ring and wakes AP1 by SGI. The gate requires nonzero
-`owner_transmits`/`ap_tx_requests`, `owner_frames`/`ap_deferrals`, matching I/O
-idle/resume masks, validated DNS response status 63, and balanced frames. The
-marker reports `tx_transport=bounded-copy-queue` and
+enters an ordinary syscall-free EL0 counter loop while the response arrives.
+QEMU `virt` network slot 28 maps to GICv2 SPI INTID 76; its lower-EL handler
+drains the CPU0-owned RX ring before EOI and wakes AP1 by SGI. An EL1 entry only
+acknowledges transport status, and the 100 Hz owner pump remains a recovery
+path. The gate requires nonzero `owner_transmits`/`ap_tx_requests`,
+`owner_frames`/`ap_deferrals`, and `irq_frames`, exact
+`entry=lower-el dispatch=direct`, matching I/O idle/resume masks, validated DNS
+response status 63, and balanced frames. The marker reports
+`delivery=gicv2-spi intid=76`, `tx_transport=bounded-copy-queue`, and
 `tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe`: copied UDPv4/v6 is
-qualified here. The UDP completion wait is bounded in EL1; the receive phase
-separately proves AP scheduler idle/wake.
+qualified here. The receive phase separately proves device-IRQ RX plus AP
+scheduler idle/wake.
 
 Stateful AP TCPv4 has its own focused image and host fixture:
 

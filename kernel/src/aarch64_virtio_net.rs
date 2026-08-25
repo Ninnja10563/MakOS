@@ -3,7 +3,9 @@
 //! No host proxy or hypercall transport: packets cross virtio RX/TX queues.
 
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering, compiler_fence};
+use core::sync::atomic::{
+    AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering, compiler_fence,
+};
 
 use crate::aarch64_net_wire::{
     self as wire, FRAME_CAPACITY, TCP_PAYLOAD_MAX, TcpSegment, TcpSegmentV6, UdpPacket,
@@ -12,6 +14,7 @@ use crate::aarch64_net_wire::{
 const MMIO_BASE: u64 = 0x0a00_0000;
 const MMIO_STRIDE: u64 = 0x200;
 const MMIO_SLOTS: usize = 32;
+const MMIO_GIC_INTID_BASE: u32 = 48;
 const MAGIC: u32 = 0x7472_6976;
 const VERSION_MODERN: u32 = 2;
 const DEVICE_NETWORK: u32 = 1;
@@ -175,6 +178,8 @@ static TCP_TX_CONNECT_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 static TCP_TX_DATA_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 static TCP_TX_ACK_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 static TCP_TX_FIN_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static NETWORK_MMIO_BASE: AtomicU64 = AtomicU64::new(0);
+static NETWORK_INTERRUPT_ID: AtomicU32 = AtomicU32::new(u32::MAX);
 
 #[derive(Clone, Copy)]
 struct TxServiceRequest {
@@ -328,8 +333,17 @@ pub fn init() {
     let ipv6_gateway = state.ipv6_gateway;
     let ipv6_ready = state.ipv6_ready;
     with_state(|current| *current = state);
+    let interrupt_id = MMIO_GIC_INTID_BASE + slot as u32;
+    NETWORK_MMIO_BASE.store(base, Ordering::Release);
+    NETWORK_INTERRUPT_ID.store(interrupt_id, Ordering::Release);
+    acknowledge_transport_interrupt(base);
+    crate::arch::enable_virtio_mmio_interrupt(interrupt_id);
     crate::serial_println!(
-        "MAKOS_AARCH64_NET_OK transport=virtio-net-mmio slot={} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} ipv4={}.{}.{}.{} gateway={}.{}.{}.{} dns={}.{}.{}.{} ethernet=1 dhcp=1 arp=1 ipv4_stack=1 udp=1 tcp=1 host_proxy=0",
+        "MAKOS_AARCH64_NETWORK_IRQ_ROUTE_OK intid={} target_cpu=0 trigger=edge-rising transport=virtio-mmio",
+        interrupt_id,
+    );
+    crate::serial_println!(
+        "MAKOS_AARCH64_NET_OK transport=virtio-net-mmio slot={} mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} ipv4={}.{}.{}.{} gateway={}.{}.{}.{} dns={}.{}.{}.{} ethernet=1 dhcp=1 arp=1 ipv4_stack=1 udp=1 tcp=1 host_proxy=0 delivery=gicv2-spi timer_fallback=100hz",
         slot,
         mac[0],
         mac[1],
@@ -361,6 +375,24 @@ pub fn init() {
             "MAKOS_AARCH64_IPV6_UNAVAILABLE reason=no-valid-router-advertisement af_inet6=socket-only fake_mapping=0"
         );
     }
+}
+
+pub(crate) fn owns_interrupt(interrupt_id: u32) -> bool {
+    NETWORK_INTERRUPT_ID.load(Ordering::Acquire) == interrupt_id
+}
+
+pub(crate) fn acknowledge_interrupt(interrupt_id: u32) {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-net IRQ reached non-owner CPU");
+    }
+    if !owns_interrupt(interrupt_id) {
+        crate::fatal("AArch64 virtio-net IRQ has no registered device");
+    }
+    let base = NETWORK_MMIO_BASE.load(Ordering::Acquire);
+    if base == 0 {
+        crate::fatal("AArch64 virtio-net IRQ missing MMIO base");
+    }
+    acknowledge_transport_interrupt(base);
 }
 
 pub fn config() -> Option<NetConfig> {
@@ -2101,7 +2133,7 @@ fn transmit_frame(state: &mut State, frame: &[u8]) -> Option<()> {
                 return None;
             }
             queue.used = expected;
-            acknowledge_interrupt(state.base);
+            acknowledge_transport_interrupt(state.base);
             return Some(());
         }
         core::hint::spin_loop();
@@ -2114,7 +2146,7 @@ fn poll_receive(state: &mut State, output: &mut [u8]) -> Option<usize> {
     memory_barrier();
     let device_used = read16_memory(queue.ring + USED_OFFSET + 2);
     if queue.used == device_used {
-        acknowledge_interrupt(state.base);
+        acknowledge_transport_interrupt(state.base);
         return None;
     }
     let used_slot = u64::from(queue.used % QUEUE_SIZE);
@@ -2139,11 +2171,11 @@ fn poll_receive(state: &mut State, output: &mut [u8]) -> Option<usize> {
     queue.used = queue.used.wrapping_add(1);
     memory_barrier();
     write32(state.base + REG_QUEUE_NOTIFY, RECEIVE_QUEUE);
-    acknowledge_interrupt(state.base);
+    acknowledge_transport_interrupt(state.base);
     (frame_length <= output.len()).then_some(copied)
 }
 
-fn acknowledge_interrupt(base: u64) {
+fn acknowledge_transport_interrupt(base: u64) {
     let status = read32(base + REG_INTERRUPT_STATUS);
     if status != 0 {
         write32(base + REG_INTERRUPT_ACK, status);

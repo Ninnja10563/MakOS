@@ -93,13 +93,21 @@ with TIDs 5/6, and status 42. Focused cursor regression also passes seven
 positions with zero changed scanout pixels. This is functional Pi/TCG evidence
 only; strict Firefox timing still needs the unchanged idle macOS/HVF gate.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 660636, user
-service `makos-visible-firefox-input-irq-final2.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn`, private
+Virtio-net receive now also has a real device-interrupt path. QEMU `virt` slot
+28 maps to CPU0-only GICv2 SPI INTID 76. A focused AP1 DNS waiter plus a
+syscall-free CPU0 EL0 loop proves lower-EL direct RX (`frames=1`), AP wake by
+SGI, exact status 63, and frame balance; EL1 entries acknowledge/defer and the
+100 Hz pump is recovery-only. The combined network/input runtime, production
+Firefox-role regression, cursor runtime, AArch64 release/artifact checks, and
+full `make unit check` pass on Pi/TCG. The audit remains Partial.
+
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 668793, user
+service `makos-visible-network-irq-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-network-irq-final-D6pbvEPD`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn/qmp.sock`. Its
+`build/makos-pi-visible-network-irq-final-D6pbvEPD/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`c3475a56970c86fddf191d8050a6bdb0f6b7e7868d728aa1b190c2770c567635`;
+`a4f5d6f697730482d3182bc79abbf049b384cb79ac24fb93c7c9f39245c1d67d`;
 the inspected 800x600 login PNG is
 `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
 Stop it through QMP before

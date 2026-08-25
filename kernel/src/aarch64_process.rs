@@ -77,6 +77,10 @@ static SMP_NETWORK_RX_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-network-rx-probe.elf"
 ));
+static SMP_NETWORK_IRQ_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-network-irq-owner-probe.elf"
+));
 static SMP_BLOCK_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-block-probe.elf"
@@ -1686,6 +1690,7 @@ pub fn run_smp_network_rx_self_test() {
     SMP_PROBE_IO_IDLE_MASK.store(0, Ordering::Release);
     SMP_PROBE_IO_RESUME_MASK.store(0, Ordering::Release);
     crate::arch::reset_network_rx_affinity_evidence();
+    crate::arch::reset_network_irq_evidence();
     crate::aarch64_virtio_net::reset_tx_affinity_evidence();
     for tid in &SMP_PROBE_AFFINITY {
         tid.store(0, Ordering::Release);
@@ -1694,14 +1699,9 @@ pub fn run_smp_network_rx_self_test() {
     let waiter = spawn_process(0, SMP_NETWORK_RX_PROBE_ELF, 0, ProcessRole::SmpProbe)
         .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX waiter spawn failed"))
         .0;
-    let sentinel = spawn_process(
-        0,
-        SMP_CONCURRENT_EXIT_PROBE_ELF,
-        64,
-        ProcessRole::SmpProbe,
-    )
-    .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX sentinel spawn failed"))
-    .0;
+    let sentinel = spawn_process(0, SMP_NETWORK_IRQ_OWNER_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX sentinel spawn failed"))
+        .0;
     SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
     SMP_PROBE_AFFINITY[1].store(waiter, Ordering::Release);
     crate::arch::enable_smp_probe_scheduler();
@@ -1729,6 +1729,33 @@ pub fn run_smp_network_rx_self_test() {
         "MAKOS_AARCH64_SMP_NETWORK_RX_READY waiter_cpu=1 poller_cpu=0 device=virtio-net request=dns io_idle_mask={:#x}",
         SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire),
     );
+
+    // Keep CPU0 in an ordinary syscall-free EL0 loop while the already-sent
+    // DNS response becomes ready. INTID 76 must run the lower-EL network
+    // bottom half and wake AP1; the timer recovery path cannot set IRQ proof.
+    crate::arch::reset_network_irq_evidence();
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX CPU0 sentinel absent"));
+        if process.pid != sentinel {
+            crate::fatal("AArch64 SMP network-RX CPU0 affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == sentinel)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP network-RX CPU0 context absent"))
+            .context
+    });
+    smp_probe_enter(sentinel);
+    crate::arch::switch_address_space(context.ttbr0);
+    let sentinel_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if sentinel_status != 64 {
+        crate::fatal("AArch64 SMP network-RX CPU0 sentinel status invalid");
+    }
 
     let completion_deadline = crate::arch::counter_deadline_millis(20_000);
     loop {
@@ -1759,9 +1786,6 @@ pub fn run_smp_network_rx_self_test() {
             crate::fatal("AArch64 SMP network-RX waiter reap failed");
         };
         reaped[0] = (waiter, resource, exit_status);
-        if state.table.terminate(sentinel, 64).is_none() {
-            crate::fatal("AArch64 SMP network-RX sentinel terminate failed");
-        }
         let WaitResult::Reaped {
             resource,
             exit_status,
@@ -1784,12 +1808,14 @@ pub fn run_smp_network_rx_self_test() {
     let idle = SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire);
     let resumed = SMP_PROBE_IO_RESUME_MASK.load(Ordering::Acquire);
     let (owner_frames, nonowner_deferrals) = crate::arch::network_rx_affinity_evidence();
+    let (irq_frames, irq_el1_deferrals) = crate::arch::network_irq_evidence();
     let (owner_transmits, ap_tx_requests) = crate::aarch64_virtio_net::tx_affinity_evidence();
     if reaped[0].2 != 63
         || reaped[1].2 != 64
         || idle != 0b0010
         || resumed != idle
         || owner_frames == 0
+        || irq_frames == 0
         || nonowner_deferrals == 0
         || owner_transmits == 0
         || ap_tx_requests == 0
@@ -1798,9 +1824,11 @@ pub fn run_smp_network_rx_self_test() {
         crate::fatal("AArch64 SMP network-RX userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits={} ap_tx_requests={} block=ap-idle wake=cpu0-rx-pump,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        "MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0 device=virtio-net response=dns ring_activity=real rx_mmio_owner=cpu0 contention=ap-deferred owner_frames={} ap_deferrals={} irq_frames={} irq_el1_deferrals={} delivery=gicv2-spi intid=76 entry=lower-el dispatch=direct timer_fallback=100hz tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits={} ap_tx_requests={} block=ap-idle wake=cpu0-rx-irq,sgi io_idle_mask={:#x} io_resume_mask={:#x} status=63 tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
         owner_frames,
         nonowner_deferrals,
+        irq_frames,
+        irq_el1_deferrals,
         owner_transmits,
         ap_tx_requests,
         idle,

@@ -29,6 +29,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_smp_concurrent_exit_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_same_group_exit_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_input_device_probe.S");
+    println!("cargo:rerun-if-changed=../user/aarch64_smp_network_irq_owner_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_block_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_block_owner_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_gpu_probe.S");
@@ -606,6 +607,11 @@ fn build_aarch64_init() {
     );
 
     for (source, stem, description) in [
+        (
+            "aarch64_smp_network_irq_owner_probe.S",
+            "aarch64-smp-network-irq-owner-probe",
+            "AArch64 SMP network IRQ owner probe",
+        ),
         (
             "aarch64_smp_gpu_probe.S",
             "aarch64-smp-gpu-probe",

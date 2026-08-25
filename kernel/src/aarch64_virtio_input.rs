@@ -222,7 +222,7 @@ pub fn init() {
         // descriptors are already published, so every subsequent edge can be
         // drained without racing partial device construction.
         acknowledge_device_interrupt(device);
-        crate::arch::enable_virtio_input_interrupt(device.interrupt_id);
+        crate::arch::enable_virtio_mmio_interrupt(device.interrupt_id);
         crate::serial_println!(
             "MAKOS_AARCH64_INPUT_IRQ_ROUTE_OK intid={} target_cpu=0 trigger=edge-rising transport=virtio-mmio",
             device.interrupt_id,

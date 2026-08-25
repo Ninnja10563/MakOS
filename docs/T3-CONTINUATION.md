@@ -27,22 +27,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG interrupt-driven Firefox-input milestone:
-  PID 660636, user service `makos-visible-firefox-input-irq-final2.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG network/input-IRQ milestone: PID 668793,
+  user service `makos-visible-network-irq-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn`, private read-only boot
+  `build/makos-pi-visible-network-irq-final-D6pbvEPD`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
   `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and capture `login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `c3475a56970c86fddf191d8050a6bdb0f6b7e7868d728aa1b190c2770c567635`.
+  `a4f5d6f697730482d3182bc79abbf049b384cb79ac24fb93c7c9f39245c1d67d`.
   It is the sole QEMU process and reports four online PEs,
-  both GICv2 input routes (INTIDs 77/78), `MAKOS_LOGIN_UI_OK`,
-  `MAKOS_AARCH64_BOOT_OK`, and post-desktop `userspace_scheduler_cpus=4`, with
-  no fatal/panic. The visually inspected
+  the GICv2 network route (INTID 76), both input routes (INTIDs 77/78),
+  `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
+  `userspace_scheduler_cpus=4`, with no fatal/panic. The visually inspected
   800x600 login PNG has SHA-256
   `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 659568 and
+  testing; use QMP `quit` before any later runtime gate. Prior PID 660636 and
+  session `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn` were
+  stopped cleanly through QMP before the network-IRQ runtime; their files
+  remain. Prior PID 659568 and
   session `build/makos-pi-visible-firefox-input-irq-final-kecJty1A` were
   stopped cleanly through QMP before the focused cursor regression; their
   files remain. Prior PID 651079 and
@@ -448,7 +451,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 660636 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 668793 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
@@ -538,6 +541,23 @@ Preserve existing files and changes.
   The release image/artifact check, structural guards, and full
   `make unit check` pass. This is Pi/TCG functional evidence, not a substitute
   for the unchanged idle-macOS/HVF strict Firefox gate.
+- 2026-08-26 AArch64 virtio-net RX is now genuinely interrupt-driven on QEMU
+  `virt`. Slot 28 derives GICv2 SPI INTID 76 and shares the CPU0-only Group 1,
+  edge-rising registration used by input. Lower-EL entry runs the bounded
+  network bottom half directly; EL1 entry acknowledges/defer safely because
+  socket locks are non-recursive, and the 100 Hz CPU0 pump remains recovery.
+  The focused Pi/QEMU 10.0.11 TCG gate sends a real AP1 DNS request, blocks AP1
+  in receive, keeps CPU0 in a syscall-free EL0 loop, and records
+  `MAKOS_AARCH64_NETWORK_IRQ_OK intid=76 cpu=0 entry=lower-el dispatch=direct source=virtio-mmio frames=1 timer_fallback=100hz`.
+  Its final network marker has `owner_frames=1`, `ap_deferrals=2`,
+  `irq_frames=1`, `irq_el1_deferrals=0`, exact idle/resume mask `0x2`, status
+  63, and frame balance; the subsequent real Ctrl-K input and boot gates pass.
+  The production Firefox-role regression passes with dispatches
+  `10538,9670,9665`, simultaneous AP1/AP3 TIDs 5/6, watcher TID 8 on AP1, and
+  status 42. Cursor runtime again passes seven positions and zero changed
+  scanout pixels. Full `make unit check`, AArch64 compile/release/artifact, and
+  structural guards pass. The strict integrated Firefox image remains absent
+  on this Pi; this result does not qualify macOS/HVF timing.
 - The Raspberry Pi was idle when the unchanged Firefox Make target was retried,
   but preflight stopped before QEMU launch: this host does not contain exact
   `build/makos-integrated-a9c604254f094de2.img` or the staged Firefox package,

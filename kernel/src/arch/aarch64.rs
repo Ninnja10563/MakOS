@@ -43,6 +43,7 @@ const GICD_ICFGR: u64 = 0xc00;
 const GICD_ICFGR1: u64 = 0xc04;
 const GICD_SGIR: u64 = 0xf00;
 const SMP_SCHEDULER_SGI: u32 = 1;
+const VIRTIO_MMIO_IRQ_PRIORITY: u32 = 0x70;
 const GICC_CTLR: u64 = 0x000;
 const GICC_PMR: u64 = 0x004;
 const GICC_BPR: u64 = 0x008;
@@ -106,6 +107,9 @@ static INPUT_IRQ_EL1_DEFERRALS: AtomicU64 = AtomicU64::new(0);
 static INPUT_IRQ_REPORTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_RX_OWNER_FRAMES: AtomicU64 = AtomicU64::new(0);
 static NETWORK_RX_NONOWNER_DEFERRALS: AtomicU64 = AtomicU64::new(0);
+static NETWORK_IRQ_DIRECT_FRAMES: AtomicU64 = AtomicU64::new(0);
+static NETWORK_IRQ_EL1_DEFERRALS: AtomicU64 = AtomicU64::new(0);
+static NETWORK_IRQ_REPORTED: AtomicBool = AtomicBool::new(false);
 const FIREFOX_FILE_TRACE_LIMIT: u64 = 8;
 const FIREFOX_MUTATION_TRACE_LIMIT: u64 = 16;
 static SMP_ONLINE_MASK: AtomicU64 = AtomicU64::new(1);
@@ -665,15 +669,15 @@ pub(crate) fn input_service_affinity_evidence() -> (u64, u64) {
 
 /// Configure one QEMU-virt virtio-mmio SPI as Group 1, edge-rising, and route
 /// it exclusively to CPU0, the owner of the input rings and compositor state.
-pub(crate) fn enable_virtio_input_interrupt(interrupt_id: u32) {
+pub(crate) fn enable_virtio_mmio_interrupt(interrupt_id: u32) {
     let distributor = GIC_DISTRIBUTOR_BASE.load(Ordering::Acquire);
     if distributor == 0 || interrupt_id < 32 {
-        crate::fatal("AArch64 virtio-input IRQ registration before GIC");
+        crate::fatal("AArch64 virtio-mmio IRQ registration before GIC");
     }
     let interrupt_count =
         ((unsafe { mmio_read32(distributor + GICD_TYPER) } & 0x1f) + 1) * 32;
     if interrupt_id >= interrupt_count {
-        crate::fatal("AArch64 virtio-input INTID exceeds GIC capacity");
+        crate::fatal("AArch64 virtio-mmio INTID exceeds GIC capacity");
     }
     let bank_offset = u64::from(interrupt_id / 32) * 4;
     let bit = 1u32 << (interrupt_id % 32);
@@ -688,7 +692,7 @@ pub(crate) fn enable_virtio_input_interrupt(interrupt_id: u32) {
         let group_register = distributor + GICD_IGROUPR0 + bank_offset;
         mmio_write32(group_register, mmio_read32(group_register) | bit);
         let priority = (mmio_read32(priority_register) & !(0xff << byte_shift))
-            | (0x80 << byte_shift);
+            | (VIRTIO_MMIO_IRQ_PRIORITY << byte_shift);
         mmio_write32(priority_register, priority);
         let target = (mmio_read32(target_register) & !(0xff << byte_shift))
             | (1 << byte_shift);
@@ -746,11 +750,39 @@ pub(crate) fn reset_network_rx_affinity_evidence() {
     NETWORK_RX_NONOWNER_DEFERRALS.store(0, Ordering::Release);
 }
 
+pub(crate) fn reset_network_irq_evidence() {
+    NETWORK_IRQ_DIRECT_FRAMES.store(0, Ordering::Release);
+    NETWORK_IRQ_EL1_DEFERRALS.store(0, Ordering::Release);
+    NETWORK_IRQ_REPORTED.store(false, Ordering::Release);
+}
+
 pub(crate) fn network_rx_affinity_evidence() -> (u64, u64) {
     (
         NETWORK_RX_OWNER_FRAMES.load(Ordering::Acquire),
         NETWORK_RX_NONOWNER_DEFERRALS.load(Ordering::Acquire),
     )
+}
+
+pub(crate) fn network_irq_evidence() -> (u64, u64) {
+    (
+        NETWORK_IRQ_DIRECT_FRAMES.load(Ordering::Acquire),
+        NETWORK_IRQ_EL1_DEFERRALS.load(Ordering::Acquire),
+    )
+}
+
+fn record_network_irq(interrupt_id: u32, direct: bool, frames: usize) {
+    if direct {
+        NETWORK_IRQ_DIRECT_FRAMES.fetch_add(frames as u64, Ordering::AcqRel);
+        if frames != 0 && !NETWORK_IRQ_REPORTED.swap(true, Ordering::AcqRel) {
+            crate::serial_println!(
+                "MAKOS_AARCH64_NETWORK_IRQ_OK intid={} cpu=0 entry=lower-el dispatch=direct source=virtio-mmio frames={} timer_fallback=100hz",
+                interrupt_id,
+                frames,
+            );
+        }
+    } else {
+        NETWORK_IRQ_EL1_DEFERRALS.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 fn cached_active_root() -> u64 {
@@ -5669,6 +5701,7 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
     let timer = intid == TIMER_INTID.load(Ordering::Acquire);
     let scheduler_sgi = intid == SMP_SCHEDULER_SGI;
     let input = crate::aarch64_virtio_input::owns_interrupt(intid);
+    let network = crate::aarch64_virtio_net::owns_interrupt(intid);
     if timer {
         let interval = TIMER_INTERVAL.load(Ordering::Acquire);
         program_virtual_timer(read_virtual_counter().saturating_add(interval));
@@ -5692,6 +5725,21 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
             false
         };
         record_input_irq(intid, direct, activity);
+    } else if network {
+        if cpu_index() != 0 {
+            crate::fatal("AArch64 virtio-net SPI routed away from CPU0");
+        }
+        // Network/socket locks are non-recursive. As with input, only an IRQ
+        // taken from EL0 may enter the full bottom half; EL1 acknowledges the
+        // edge and leaves queue draining to the retained timer recovery path.
+        let direct = kind == 9;
+        let frames = if direct {
+            service_network_rx_on_owner_cpu()
+        } else {
+            crate::aarch64_virtio_net::acknowledge_interrupt(intid);
+            0
+        };
+        record_network_irq(intid, direct, frames);
     } else if intid < 1020 && !scheduler_sgi {
         UNEXPECTED_IRQS.fetch_add(1, Ordering::AcqRel);
     }

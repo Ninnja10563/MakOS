@@ -19,6 +19,9 @@ SECURITY = (ROOT / "kernel/src/security.rs").read_text()
 MAIN = (ROOT / "kernel/src/main.rs").read_text()
 BUILD_RS = (ROOT / "kernel/build.rs").read_text()
 NETWORK_PROBE = (ROOT / "user/aarch64_smp_network_rx_probe.S").read_text()
+NETWORK_IRQ_OWNER_PROBE = (
+    ROOT / "user/aarch64_smp_network_irq_owner_probe.S"
+).read_text()
 BLOCK_PROBE = (ROOT / "user/aarch64_smp_block_probe.S").read_text()
 BLOCK_OWNER_PROBE = (ROOT / "user/aarch64_smp_block_owner_probe.S").read_text()
 GPU_PROBE = (ROOT / "user/aarch64_smp_gpu_probe.S").read_text()
@@ -98,14 +101,14 @@ for token in (
     "interrupt_id: MMIO_GIC_INTID_BASE + slot as u32",
     "pub(crate) fn owns_interrupt(interrupt_id: u32)",
     "pub(crate) fn acknowledge_interrupt(interrupt_id: u32)",
-    "crate::arch::enable_virtio_input_interrupt(device.interrupt_id);",
+    "crate::arch::enable_virtio_mmio_interrupt(device.interrupt_id);",
     "delivery=gicv2-spi timer_fallback=100hz",
 ):
     assert token in INPUT, token
 for token in (
     "const GICD_ITARGETSR: u64 = 0x800;",
     "const GICD_ICFGR: u64 = 0xc00;",
-    "pub(crate) fn enable_virtio_input_interrupt(interrupt_id: u32)",
+    "pub(crate) fn enable_virtio_mmio_interrupt(interrupt_id: u32)",
     "GICD_IGROUPR0 + bank_offset",
     "GICD_ISENABLER0 + bank_offset",
     "0b10 << config_shift",
@@ -113,6 +116,24 @@ for token in (
     "let direct = kind == 9;",
     "crate::aarch64_virtio_input::acknowledge_interrupt(intid);",
     "MAKOS_AARCH64_INPUT_IRQ_OK",
+):
+    assert token in ARCH, token
+for token in (
+    "const MMIO_GIC_INTID_BASE: u32 = 48;",
+    "NETWORK_INTERRUPT_ID: AtomicU32",
+    "crate::arch::enable_virtio_mmio_interrupt(interrupt_id);",
+    "pub(crate) fn owns_interrupt(interrupt_id: u32)",
+    "pub(crate) fn acknowledge_interrupt(interrupt_id: u32)",
+    "MAKOS_AARCH64_NETWORK_IRQ_ROUTE_OK",
+    "delivery=gicv2-spi timer_fallback=100hz",
+):
+    assert token in NET, token
+for token in (
+    "let network = crate::aarch64_virtio_net::owns_interrupt(intid);",
+    "AArch64 virtio-net SPI routed away from CPU0",
+    "crate::aarch64_virtio_net::acknowledge_interrupt(intid);",
+    "MAKOS_AARCH64_NETWORK_IRQ_OK",
+    "pub(crate) fn network_irq_evidence()",
 ):
     assert token in ARCH, token
 for token in (
@@ -280,6 +301,10 @@ for token in (
     "service_point=cpu0-timer-bottom-half",
     "MAKOS_AARCH64_SMP_NETWORK_RX_READY",
     "MAKOS_AARCH64_SMP_NETWORK_RX_OK",
+    "SMP_NETWORK_IRQ_OWNER_PROBE_ELF",
+    "reset_network_irq_evidence",
+    "network_irq_evidence",
+    "wake=cpu0-rx-irq,sgi",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
     "makos_process_table::ProcessState::Blocked",
@@ -300,6 +325,8 @@ for token in (
 for token in (
     "aarch64_smp_network_rx_probe.S",
     "aarch64-smp-network-rx-probe.elf",
+    "aarch64_smp_network_irq_owner_probe.S",
+    "aarch64-smp-network-irq-owner-probe",
     "aarch64_smp_block_probe.S",
     "aarch64-smp-block-probe.elf",
     "aarch64_smp_block_owner_probe.S",
@@ -328,6 +355,18 @@ for token in (
 ):
     assert token in PROCESS, token
 assert "run_smp_network_rx_self_test();" in MAIN
+for token in (
+    "mrs x19, cntvct_el0",
+    "mrs x20, cntfrq_el0",
+    "mov x0, #64",
+):
+    assert token in NETWORK_IRQ_OWNER_PROBE, token
+for token in (
+    "MAKOS_AARCH64_NETWORK_IRQ_OK intid=76",
+    "delivery=gicv2-spi intid=76 entry=lower-el dispatch=direct",
+    "network=cpu0-owned-udp-tx,dns-rx-irq-wake,intid76,direct-lower-el",
+):
+    assert token in INPUT_RUNTIME, token
 assert "run_smp_block_io_self_test();" in MAIN
 assert "run_smp_gpu_self_test();" in MAIN
 assert "run_smp_tcp_tx_self_test();" in MAIN

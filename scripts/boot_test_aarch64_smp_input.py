@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove a real virtio-keyboard event wakes an AP input waiter."""
+"""Prove real virtio-net and keyboard IRQs wake blocked AP waiters."""
 
 from __future__ import annotations
 
@@ -146,6 +146,8 @@ def main() -> int:
                     b"MAKOS_CONFIG_OK source=fat",
                     b"smp_input_probe=1",
                     b"MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices=2",
+                    b"MAKOS_AARCH64_NETWORK_IRQ_ROUTE_OK intid=76 target_cpu=0 trigger=edge-rising transport=virtio-mmio",
+                    b"MAKOS_AARCH64_NETWORK_IRQ_OK intid=76 cpu=0 entry=lower-el dispatch=direct source=virtio-mmio frames=",
                     b"MAKOS_M7_OK graphics_abi=1 surface=96x64 compositor=1 present=1 scanout=0 windows=1 z_order=1 clipping=1 deferred=1",
                     b"MAKOS_AARCH64_SMP_GPU_OK presenter_cpu=1 service_cpu=0",
                     b"device=virtio-gpu request=surface-create,fill,present ring_activity=real",
@@ -171,8 +173,11 @@ def main() -> int:
                     b"MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0",
                     b"device=virtio-net response=dns ring_activity=real",
                     b"rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
+                    b"irq_frames=",
+                    b"delivery=gicv2-spi intid=76 entry=lower-el dispatch=direct timer_fallback=100hz",
                     b"tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits=",
                     b"ap_tx_requests=",
+                    b"block=ap-idle wake=cpu0-rx-irq,sgi",
                     b"io_idle_mask=0x2 io_resume_mask=0x2 status=63",
                     b"tcp_ap_tx=cpu0-service-ready runtime=separate-tcp4-probe",
                     ready,
@@ -220,7 +225,7 @@ def main() -> int:
         "gpu=cpu0-owned-transfer-flush,timer-serviced,ap-deferred "
         "block=cpu0-owned-read4k-write4k-fsync,timer-serviced,ap-idle-input "
         "wake=device-ring,sgi "
-        "network=cpu0-owned-udp-tx,dns-rx-wake "
+        "network=cpu0-owned-udp-tx,dns-rx-irq-wake,intid76,direct-lower-el "
         "free_balance=1"
     )
     return 0

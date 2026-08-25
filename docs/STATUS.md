@@ -4,6 +4,23 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 virtio-net receive now uses a genuine QEMU `virt`
+  GICv2 interrupt in the normal path. Network slot 28 maps to SPI INTID 76,
+  configured Group 1/edge-rising and targeted exclusively at CPU0. A lower-EL
+  entry runs the bounded CPU0 network bottom half before EOI; an EL1 entry only
+  acknowledges transport status to avoid recursively taking socket locks, and
+  the unchanged 100 Hz owner pump remains recovery-only. The focused 4-PE
+  Pi/QEMU 10.0.11 TCG gate sends a real AP1 UDP DNS request, blocks AP1 in
+  receive, keeps CPU0 in a syscall-free EL0 counter loop, then proves INTID 76
+  drained one RX frame and woke AP1 by SGI (`irq_frames=1`,
+  `irq_el1_deferrals=0`, status 63, exact frame balance). The later real QMP
+  Ctrl-K input phase and final boot also pass. The Firefox-role production gate
+  continues to pass with three AP workers, a simultaneous AP1/AP3 interval,
+  exact Ctrl-A watcher wake on AP1, and status 42; the cursor gate passes seven
+  positions with zero changed scanout pixels. AArch64 release/artifact checks,
+  structural guards, and full `make unit check` pass. This is functional
+  Raspberry Pi/TCG evidence only; strict Firefox timings remain unchanged and
+  still require the missing integrated image on idle macOS/HVF.
 - 2026-08-26 AArch64 virtio keyboard/tablet input now uses genuine QEMU `virt`
   GICv2 interrupts in the normal path. Device slot `n` derives INTID `48+n`;
   discovered slots 29/30 configure shared Group 1, edge-rising SPIs 77/78 and
@@ -361,12 +378,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  interrupt-driven Firefox-input milestone is PID 660636 under the user service
-  `makos-visible-firefox-input-irq-final2.service`, with
+  network/input-IRQ milestone is PID 668793 under the user service
+  `makos-visible-network-irq-final.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn`; its boot clone
+  `build/makos-pi-visible-network-irq-final-D6pbvEPD`; its boot clone
   exactly matches the current release image SHA-256
-  `c3475a56970c86fddf191d8050a6bdb0f6b7e7868d728aa1b190c2770c567635`.
+  `a4f5d6f697730482d3182bc79abbf049b384cb79ac24fb93c7c9f39245c1d67d`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial
@@ -565,10 +582,12 @@ Last updated: 2026-08-26.
   Upstream musl runtime covers pipe transition wakeups plus connected UDP DNS
   socket readiness over real virtio-net. Core readiness table has eight host
   tests and passes no_std AArch64 check.
-- AArch64 timer-bottom-half network RX drains at most 16 virtio frames/tick,
-  routes TCP segments into pooled per-socket 32 KiB buffers, advances sequence/FIN state,
-  emits ACKs, and wakes poll/epoll. HVF runtime resolves `example.com`, sends a
-  real HTTP request, blocks in epoll, wakes from async RX, then validates HTTP/1.x.
+- AArch64 network RX drains at most 16 virtio frames per bounded bottom-half
+  invocation, routes TCP segments into pooled per-socket 32 KiB buffers,
+  advances sequence/FIN state, emits ACKs, and wakes poll/epoll. On QEMU `virt`,
+  lower-EL GICv2 INTID 76 is the normal receive trigger; the timer invocation is
+  retained for recovery. HVF runtime resolves `example.com`, sends a real HTTP
+  request, blocks in epoll, wakes from async RX, then validates HTTP/1.x.
 - AArch64 now shares x86's bounded 32-record structured log ring and syscalls
   28/29. Parent EL0 appends a severity-5 record, reads payload plus monotonic
   timestamp/PID/severity metadata, and emits `MAKOS_AARCH64_LOG_OK`. ABI feature
@@ -833,10 +852,10 @@ Last updated: 2026-08-26.
   segment send, ACK/window update, receive, and FIN now use copied owner-service
   requests and pass an exact AP1/CPU0-host exchange under Pi/TCG. TCPv6 has the
   same copied service structure but still lacks guest runtime qualification.
-  AArch64 uses bounded asynchronous
-  TCP RX, timer-bottom-half packet ingestion, and poll/epoll wake; no
+  AArch64 uses bounded interrupt-driven TCP RX with timer recovery and
+  poll/epoll wake; no
   listen/accept, DAD, IPv6 extension headers/scoped link-local socket API,
-  broad options, routing policy/firewall, or device-IRQ RX mode.
+  broad options, routing policy/firewall, or physical-device IRQ qualification.
 - Graphics: 95.css-inspired native framebuffer theme, six-slot software
   compositor, Start launcher, app taskbar, drag/close/minimize/reopen, bounded
   resizing, per-surface input events, retained terminal, and architecture-
