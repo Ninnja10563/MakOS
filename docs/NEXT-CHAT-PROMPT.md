@@ -16,21 +16,23 @@ passes 12/12 unit tests, structural guard, full unit/check, and isolated full HV
 runtime. The guest-native AArch64 toolchain now reads a valid multi-statement C
 assembly startup and two C functions from MakFS, compiles parameterized
 arithmetic, register locals, mutable parameter/local assignments,
-equality/inequality control flow, a backward-branch `while`, a 64-byte non-leaf
-frame, and a cross-object call into A64, and emits/persists/reopens three genuine
+equality/inequality control flow, a backward-branch `while`, a 96-byte non-leaf
+frame, bounded local address-of/dereference memory loads/stores, and a
+cross-object call into A64, and emits/persists/reopens three genuine
 ELF64 `ET_REL` objects. Its bounded linker resolves `_start`→`answer`→`adjust`,
 applies two `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol and duplicate-definition inputs, emits an 815-byte `ET_EXEC`,
-executes both linked branch paths and direct loop outcomes, and runs the final
+executes both linked branch paths plus direct loop and pointer-memory outcomes,
+and runs the final
 ELF twice with status 42 in focused Pi/QEMU TCG runtime.
 Full unit/check and release artifact checks pass. This remains a bounded compiler
 seed, not a general C toolchain or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 358340, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-loop-Zlx4NpuL`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 365270, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-pointer-VRJSOOUV`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-loop-Zlx4NpuL/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-selfhost-pointer-VRJSOOUV/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

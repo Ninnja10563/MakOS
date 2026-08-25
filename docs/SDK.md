@@ -71,9 +71,13 @@ locals, unsigned 16-bit constants, parentheses, multiplication, addition and
 subtraction, assign expressions to the parameter or declared locals, contain
 an equality/inequality condition in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
-one argument. A final unconditional return is required. It emits AAPCS64 32-bit
+one argument. A pointer local may be initialized as `int *pointer = &local`;
+`*pointer` performs a 32-bit load and `*pointer = expression` a 32-bit store to
+the address-taken local's stack slot. A final unconditional return is required.
+It emits AAPCS64 32-bit
 `int` code with validated forward conditional and signed backward branch fixups
-and a 64-byte non-leaf FP/LR/x19-x23 save frame, then a real
+and a 96-byte non-leaf FP/LR/x19-x23 frame containing four bounded local slots,
+then a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. The companion assembler supplies `_start`; the bounded linker
 discovers symbols across up to three objects, resolves two
@@ -81,8 +85,8 @@ discovers symbols across up to three objects, resolves two
 Unsupported tokens, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
-This seed has no pointers, memory loads/stores, nested/general blocks,
-multiple functions per translation unit,
+This seed has no pointer arithmetic or parameters, arrays, structs,
+nested/general blocks, multiple functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
 archives, dynamic linking, CLI build driver, or
 debug information. It must not be presented as a general C compiler or a

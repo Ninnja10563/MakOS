@@ -314,22 +314,27 @@ static size_t assemble(const char *source, size_t source_length,
  *
  *   int identifier(int identifier) {
  *       int identifier = expression;
+ *       int *identifier = &identifier;
+ *       *identifier = expression;
  *       if (expression == expression) { return expression; }
  *       while (expression != expression) { identifier = expression; }
  *       return expression;
  *   }
  *
  * Expressions contain the parameter, unsigned 16-bit constants,
- * parentheses, left-associative *, +, and -, and a bounded one-argument
- * external call.  The output follows AAPCS64, including a non-leaf save
- * frame, and is wrapped in a genuine ELF64 ET_REL object by emit_object().
- * Unsupported syntax fails closed.
+ * parentheses, left-associative *, +, and -, address-of and dereference of
+ * bounded local pointers, and a bounded one-argument external call.  The
+ * output follows AAPCS64, including a non-leaf save frame, and is wrapped in a
+ * genuine ELF64 ET_REL object by emit_object(). Unsupported syntax fails
+ * closed.
  */
 enum { MAX_C_LOCALS = 4 };
 
 struct c_local {
     char name[MAX_LABEL_BYTES];
     size_t length;
+    int pointer;
+    int address_taken;
 };
 
 struct c_compiler {
@@ -394,21 +399,59 @@ static int c_keyword(struct c_compiler *compiler, const char *keyword) {
     return 1;
 }
 
-static int c_variable_register(struct c_compiler *compiler, const char *name,
-                               size_t name_length, uint32_t *register_out) {
-    if (same_name(name, name_length, compiler->parameter,
-                  compiler->parameter_length)) {
-        *register_out = 23;
-        return 1;
-    }
+static struct c_local *c_find_local(struct c_compiler *compiler,
+                                    const char *name, size_t name_length,
+                                    size_t *index_out) {
     size_t local = 0;
     while (local < compiler->local_count &&
            !same_name(name, name_length, compiler->locals[local].name,
                       compiler->locals[local].length))
         ++local;
     if (local == compiler->local_count) return 0;
-    *register_out = 19 + (uint32_t)local;
+    if (index_out) *index_out = local;
+    return &compiler->locals[local];
+}
+
+static int c_variable_register(struct c_compiler *compiler, const char *name,
+                               size_t name_length, uint32_t *register_out,
+                               struct c_local **local_out,
+                               size_t *local_index_out) {
+    if (same_name(name, name_length, compiler->parameter,
+                  compiler->parameter_length)) {
+        *register_out = 23;
+        if (local_out) *local_out = 0;
+        return 1;
+    }
+    size_t local_index = 0;
+    struct c_local *local = c_find_local(compiler, name, name_length,
+                                         &local_index);
+    if (!local) return 0;
+    *register_out = 19 + (uint32_t)local_index;
+    if (local_out) *local_out = local;
+    if (local_index_out) *local_index_out = local_index;
     return 1;
+}
+
+static int c_emit(struct c_compiler *compiler, uint32_t instruction);
+
+static uint32_t c_local_stack_offset(size_t local_index) {
+    return 64 + (uint32_t)local_index * 4;
+}
+
+static int c_store_stack_local(struct c_compiler *compiler,
+                               size_t local_index, uint32_t source) {
+    uint32_t offset = c_local_stack_offset(local_index);
+    return c_emit(compiler, UINT32_C(0xb9000000) |
+                            ((offset / 4) << 10) |
+                            (UINT32_C(31) << 5) | source);
+}
+
+static int c_load_stack_local(struct c_compiler *compiler,
+                              size_t local_index, uint32_t destination) {
+    uint32_t offset = c_local_stack_offset(local_index);
+    return c_emit(compiler, UINT32_C(0xb9400000) |
+                            ((offset / 4) << 10) |
+                            (UINT32_C(31) << 5) | destination);
 }
 
 static int c_emit(struct c_compiler *compiler, uint32_t instruction) {
@@ -429,6 +472,20 @@ static int c_additive(struct c_compiler *compiler, uint32_t destination);
 static int c_primary(struct c_compiler *compiler, uint32_t destination) {
     if (destination > 7) return 0;
     c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '*') {
+        ++compiler->cursor;
+        char pointer_name[MAX_LABEL_BYTES] = {0};
+        size_t pointer_name_length = 0, pointer_index = 0;
+        if (!c_identifier(compiler, pointer_name, &pointer_name_length))
+            return 0;
+        struct c_local *pointer = c_find_local(
+            compiler, pointer_name, pointer_name_length, &pointer_index);
+        if (!pointer || !pointer->pointer) return 0;
+        uint32_t pointer_register = 19 + (uint32_t)pointer_index;
+        return c_emit(compiler, UINT32_C(0xb9400000) |
+                                (pointer_register << 5) | destination);
+    }
     if (compiler->cursor < compiler->source_length &&
         compiler->source[compiler->cursor] == '(') {
         ++compiler->cursor;
@@ -462,9 +519,14 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         return c_emit(compiler, UINT32_C(0x94000000));
     }
     uint32_t source_register = 0;
+    struct c_local *local = 0;
+    size_t local_index = 0;
     if (!c_variable_register(compiler, identifier, identifier_length,
-                             &source_register))
+                             &source_register, &local, &local_index) ||
+        (local && local->pointer))
         return 0;
+    if (local && local->address_taken)
+        return c_load_stack_local(compiler, local_index, destination);
     return c_emit(compiler, UINT32_C(0x2a0003e0) |
                             (source_register << 16) | destination);
 }
@@ -552,7 +614,7 @@ static int c_epilogue(struct c_compiler *compiler) {
     return c_emit(compiler, UINT32_C(0xf9401bf7)) &&
            c_emit(compiler, UINT32_C(0xa9425bf5)) &&
            c_emit(compiler, UINT32_C(0xa94153f3)) &&
-           c_emit(compiler, UINT32_C(0xa8c47bfd)) &&
+           c_emit(compiler, UINT32_C(0xa8c67bfd)) &&
            c_emit(compiler, UINT32_C(0xd65f03c0));
 }
 
@@ -564,6 +626,12 @@ static int c_return_statement(struct c_compiler *compiler) {
 static int c_declaration(struct c_compiler *compiler) {
     if (compiler->local_count == MAX_C_LOCALS) return 0;
     struct c_local local = {0};
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '*') {
+        local.pointer = 1;
+        ++compiler->cursor;
+    }
     if (!c_identifier(compiler, local.name, &local.length) ||
         same_name(local.name, local.length, compiler->parameter,
                   compiler->parameter_length))
@@ -572,26 +640,64 @@ static int c_declaration(struct c_compiler *compiler) {
         if (same_name(local.name, local.length, compiler->locals[index].name,
                       compiler->locals[index].length))
             return 0;
-    if (!c_punct(compiler, '=') || !c_additive(compiler, 0) ||
-        !c_punct(compiler, ';'))
-        return 0;
     uint32_t register_index = 19 + (uint32_t)compiler->local_count;
-    if (!c_emit(compiler, UINT32_C(0x2a0003e0) | register_index)) return 0;
+    if (!c_punct(compiler, '=')) return 0;
+    if (local.pointer) {
+        if (!c_punct(compiler, '&')) return 0;
+        char target_name[MAX_LABEL_BYTES] = {0};
+        size_t target_name_length = 0, target_index = 0;
+        if (!c_identifier(compiler, target_name, &target_name_length))
+            return 0;
+        struct c_local *target = c_find_local(
+            compiler, target_name, target_name_length, &target_index);
+        if (!target || target->pointer || !c_punct(compiler, ';')) return 0;
+        target->address_taken = 1;
+        uint32_t offset = c_local_stack_offset(target_index);
+        if (!c_emit(compiler, UINT32_C(0x910003e0) | (offset << 10)) ||
+            !c_emit(compiler, UINT32_C(0xaa0003e0) | register_index))
+            return 0;
+    } else {
+        if (!c_additive(compiler, 0) || !c_punct(compiler, ';') ||
+            !c_emit(compiler, UINT32_C(0x2a0003e0) | register_index) ||
+            !c_store_stack_local(compiler, compiler->local_count, 0))
+            return 0;
+    }
     compiler->locals[compiler->local_count++] = local;
     return 1;
 }
 
 static int c_assignment(struct c_compiler *compiler) {
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '*') {
+        ++compiler->cursor;
+        char pointer_name[MAX_LABEL_BYTES] = {0};
+        size_t pointer_name_length = 0, pointer_index = 0;
+        if (!c_identifier(compiler, pointer_name, &pointer_name_length))
+            return 0;
+        struct c_local *pointer = c_find_local(
+            compiler, pointer_name, pointer_name_length, &pointer_index);
+        if (!pointer || !pointer->pointer || !c_punct(compiler, '=') ||
+            !c_additive(compiler, 0) || !c_punct(compiler, ';'))
+            return 0;
+        uint32_t pointer_register = 19 + (uint32_t)pointer_index;
+        return c_emit(compiler, UINT32_C(0xb9000000) |
+                                (pointer_register << 5));
+    }
     char identifier[MAX_LABEL_BYTES] = {0};
     size_t identifier_length = 0;
     uint32_t destination = 0;
+    struct c_local *local = 0;
+    size_t local_index = 0;
     if (!c_identifier(compiler, identifier, &identifier_length) ||
         !c_variable_register(compiler, identifier, identifier_length,
-                             &destination) ||
+                             &destination, &local, &local_index) ||
+        (local && local->pointer) ||
         !c_punct(compiler, '=') || !c_additive(compiler, 0) ||
         !c_punct(compiler, ';'))
         return 0;
-    return c_emit(compiler, UINT32_C(0x2a0003e0) | destination);
+    if (!c_emit(compiler, UINT32_C(0x2a0003e0) | destination)) return 0;
+    return !local || c_store_stack_local(compiler, local_index, 0);
 }
 
 static int c_if_return(struct c_compiler *compiler) {
@@ -654,8 +760,8 @@ static size_t compile_c(const char *source, size_t source_length,
                       &compiler.parameter_length) ||
         !c_punct(&compiler, ')') || !c_punct(&compiler, '{'))
         return 0;
-    /* Preserve FP/LR and w19-w23 so emitted functions may call other objects. */
-    if (!c_emit(&compiler, UINT32_C(0xa9bc7bfd)) ||
+    /* Preserve FP/LR and x19-x23; reserve four 32-bit local stack slots. */
+    if (!c_emit(&compiler, UINT32_C(0xa9ba7bfd)) ||
         !c_emit(&compiler, UINT32_C(0x910003fd)) ||
         !c_emit(&compiler, UINT32_C(0xa90153f3)) ||
         !c_emit(&compiler, UINT32_C(0xa9025bf5)) ||
@@ -1204,12 +1310,15 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "}\n";
     static const char adjust_source[] =
         "int adjust(int value) {\n"
+        "    int scratch = value;\n"
+        "    int *pointer = &scratch;\n"
+        "    *pointer = *pointer + 1;\n"
         "    int count = 0;\n"
-        "    while (count != 2) {\n"
-        "        value = value + 1;\n"
+        "    while (count != 1) {\n"
+        "        *pointer = *pointer + 1;\n"
         "        count = count + 1;\n"
         "    }\n"
-        "    return value;\n"
+        "    return scratch;\n"
         "}\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value / 2; }\n";
@@ -1219,6 +1328,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int adjust(int value) { while (value != 0) { value = value - 1; } }\n";
     static const char malformed_assignment_source[] =
         "int adjust(int value) { missing = value; return value; }\n";
+    static const char malformed_address_source[] =
+        "int adjust(int value) { int *pointer = &missing; return value; }\n";
+    static const char malformed_pointer_assignment_source[] =
+        "int adjust(int value) { int scratch = value; int *pointer = &scratch; pointer = value; return scratch; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
         "MAKOS_AARCH64_LINKER_OK sources=3 languages=aarch64-asm,c-subset-v1 "
@@ -1226,10 +1339,11 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:2 "
         "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
         "c_source=/home/user/generated-answer.c c_abi=aapcs64-int32 "
-        "c_features=parameter,local,assignment,if,equality,inequality,while,call,return "
-        "nonleaf_frame=64 c_operators=mul,sub,add branch_results=42,86 "
-        "loop_results=42,2 code_bytes=76,116,108 object_bytes=688,728,664 "
-        "linked_bytes=300 output_bytes=815 persisted_reopened=1 malformed_c_denied=4 "
+        "c_features=parameter,local,assignment,pointer,address-of,dereference,if,equality,inequality,while,call,return "
+        "nonleaf_frame=96 c_operators=mul,sub,add branch_results=42,86 "
+        "loop_results=42,2 memory_results=42,2 code_bytes=76,120,152 "
+        "object_bytes=688,728,704 linked_bytes=348 output_bytes=815 "
+        "persisted_reopened=1 malformed_c_denied=6 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -1257,7 +1371,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         adjust_source_length != sizeof(adjust_source) - 1)
         fail(81);
 
-    uint8_t main_code[128] = {0}, answer_code[128] = {0}, adjust_code[128] = {0};
+    uint8_t main_code[128] = {0}, answer_code[128] = {0}, adjust_code[256] = {0};
     struct relocation main_relocations[MAX_RELOCATIONS] = {0};
     struct relocation answer_relocations[MAX_RELOCATIONS] = {0};
     struct relocation adjust_relocations[MAX_RELOCATIONS] = {0};
@@ -1296,6 +1410,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                   sizeof(malformed_code), malformed_function,
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_address_source,
+                  sizeof(malformed_address_source) - 1, malformed_code,
+                  sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_pointer_assignment_source,
+                  sizeof(malformed_pointer_assignment_source) - 1,
+                  malformed_code, sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
     size_t answer_code_length = compile_c((const char *)answer_input,
                                           answer_source_length, answer_code,
                                           sizeof(answer_code), answer_function,
@@ -1308,12 +1434,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                           &adjust_function_length,
                                           adjust_relocations,
                                           &adjust_relocation_count);
-    if (main_code_length != 76 || answer_code_length != 116 ||
-        adjust_code_length != 108 ||
+    if (main_code_length != 76 || answer_code_length != 120 ||
+        adjust_code_length != 152 ||
         !same_name(answer_function, answer_function_length, "answer", 6) ||
         !same_name(adjust_function, adjust_function_length, "adjust", 6) ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
-        answer_relocation_count != 1 || answer_relocations[0].offset != 68 ||
+        answer_relocation_count != 1 || answer_relocations[0].offset != 72 ||
         !same_name(answer_relocations[0].name,
                    answer_relocations[0].length, "adjust", 6) ||
         adjust_relocation_count != 0)
@@ -1357,7 +1483,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                                               adjust_relocations,
                                               adjust_relocation_count);
     if (main_object_length != 688 || answer_object_length != 728 ||
-        adjust_object_length != 664 ||
+        adjust_object_length != 704 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(answer_object_path, sizeof(answer_object_path) - 1,
@@ -1420,7 +1546,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t linked_length = link_objects(objects, object_lengths, 3, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
-    if (linked_length != 300 || entry_offset != 0) fail(89);
+    if (linked_length != 348 || entry_offset != 0) fail(89);
 
     uint8_t *compiled_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -1434,7 +1560,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     uint64_t (*compiled_answer)(uint64_t) =
         (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 76);
     uint64_t (*compiled_adjust)(uint64_t) =
-        (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 192);
+        (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 196);
     if (compiled_answer(20) != 42 || compiled_answer(0) != 86 ||
         compiled_adjust(40) != 42 || compiled_adjust(0) != 2)
         fail(89);

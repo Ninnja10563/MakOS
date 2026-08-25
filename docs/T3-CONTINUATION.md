@@ -27,30 +27,33 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG loop-capable self-host milestone:
-  PID 358340, user service `makos-visible-selfhost-loop.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG pointer-capable self-host milestone:
+  PID 365270, user service `makos-visible-selfhost-pointer.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL`, private boot clone
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL/boot.img`, private data clone
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL/data.img`, private variables
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL/vars.fd`, QMP
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL/qmp.sock`, serial
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL/serial.log`, PID file
-  `build/makos-pi-visible-selfhost-loop-Zlx4NpuL/qemu.pid`, and QMP framebuffer
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV`, private boot clone
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV/boot.img`, private data clone
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV/data.img`, private variables
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV/vars.fd`, QMP
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV/qmp.sock`, serial
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV/serial.log`, PID file
+  `build/makos-pi-visible-selfhost-pointer-VRJSOOUV/qemu.pid`, and QMP framebuffer
   captures `login.ppm`/`login.png`. Its boot
   clone SHA-256 is
-  `6694331bdb28987701aeeb8144d16a100d8f4700674c2f6672e230cf7e81d98e`,
+  `1de63df19c3f40740f089b1f04ed50b6a859a3fba51ca18149bb4c2f51095563`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `100,97,100`, with no fatal/panic. The 800x600 capture was visually
+  counters `100,102,98`, with no fatal/panic. The 800x600 capture was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 358340/session `build/makos-pi-visible-selfhost-loop-Zlx4NpuL`
+  was stopped cleanly through QMP before the pointer-capable self-host runtime;
+  its private files remain.
   Prior PID 351586/session
   `build/makos-pi-visible-selfhost-three-object-hardened-dMPn4hSC` was stopped
   cleanly through QMP before the loop-capable self-host runtime; its private
@@ -287,17 +290,20 @@ Preserve existing files and changes.
   full broad-gate pass.
 - 2026-08-25 the guest-native AArch64 toolchain now builds three source files
   into three persisted ELF64 `ET_REL` objects. The assembler emits 76 bytes of
-  `_start` code in a 688-byte object. The bounded C compiler emits a 116-byte
-  `answer` and 108-byte `adjust` in 728/664-byte objects, including a 64-byte
-  AAPCS64 non-leaf save frame, mutable parameter/local assignments,
+  `_start` code in a 688-byte object. The bounded C compiler emits a 120-byte
+  `answer` and 152-byte `adjust` in 728/704-byte objects, including a 96-byte
+  AAPCS64 non-leaf frame, mutable parameter/local assignments,
   equality/inequality comparisons, a signed backward-branch assignment-only
-  `while`, and a real `answer`→`adjust` call. The bounded
+  `while`, bounded `int *pointer = &local`, real dereference loads/stores, and
+  a real `answer`→`adjust` call. The bounded
   linker discovers definitions/undefined symbols across all three, applies
   `_start`→`answer` and `answer`→`adjust` `R_AARCH64_CALL26` relocations, and
-  emits 300 linked bytes in an 815-byte `ET_EXEC`. The fully linked C graph
+  emits 348 linked bytes in an 815-byte `ET_EXEC`. The fully linked C graph
   executes `answer(20)=42`, `answer(0)=86`, `adjust(40)=42`, and
   `adjust(0)=2`; the normal loader executes the final ELF twice with status 42.
-  Unsupported division, missing all-path return, undefined-variable assignment,
+  The adjust outcomes require real stack address formation, dereference memory
+  writes and an address-taken reload. Unsupported division, missing all-path
+  return, undefined-variable assignment/address target, pointer reassignment,
   an out-of-range BL site, relocation type 282, a nonzero CALL26 addend,
   unresolved `adjust`, and duplicate `answer` fail closed. Exact source
   passes release artifact checks, `make unit check`, structural guard, and
@@ -305,7 +311,7 @@ Preserve existing files and changes.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
   Partial: this is not a full C/Rust compiler, general linker/build system/
   debugger, or substantial in-guest MakOS build.
-- At this handoff PID 358340 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 365270 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -394,8 +400,8 @@ Preserve existing files and changes.
    automatic load balancing and repeated migration contention while retaining
    CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
    any focused runtime.
-3. Expand the bounded guest C compiler into pointer/memory expressions and
-   nested/general blocks, then add multiple functions per translation unit, broader relocation/
+3. Expand the bounded guest C compiler into pointer arithmetic/parameters,
+   arrays/structs and nested/general blocks, then add multiple functions per translation unit, broader relocation/
    object support, and a real build driver before a substantial in-guest build. Preserve real implementation
    requirements—no fake/spoofed apps.
 

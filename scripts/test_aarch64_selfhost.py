@@ -35,14 +35,20 @@ for fragment in (
     '"        return adjust(normalized);\\n"',
     '"    return 86;\\n"',
     '"int adjust(int value) {\\n"',
+    '"    int scratch = value;\\n"',
+    '"    int *pointer = &scratch;\\n"',
+    '"    *pointer = *pointer + 1;\\n"',
     '"    int count = 0;\\n"',
-    '"    while (count != 2) {\\n"',
-    '"        value = value + 1;\\n"',
+    '"    while (count != 1) {\\n"',
+    '"        *pointer = *pointer + 1;\\n"',
     '"        count = count + 1;\\n"',
-    '"    return value;\\n"',
+    '"    return scratch;\\n"',
     "static size_t assemble(",
     "static size_t compile_c(",
     "static int c_variable_register(",
+    "static struct c_local *c_find_local(",
+    "static int c_store_stack_local(",
+    "static int c_load_stack_local(",
     "static int c_additive(",
     "static int c_multiplicative(",
     "static int c_comparison(",
@@ -57,9 +63,13 @@ for fragment in (
     "UINT32_C(0x0b000000)",
     "UINT32_C(0x4b000000)",
     "UINT32_C(0x52800000)",
-    "UINT32_C(0xa9bc7bfd)",
-    "UINT32_C(0xa8c47bfd)",
+    "UINT32_C(0xa9ba7bfd)",
+    "UINT32_C(0xa8c67bfd)",
     "UINT32_C(0x2a0003f7)",
+    "UINT32_C(0xaa0003e0)",
+    "UINT32_C(0xb9000000)",
+    "UINT32_C(0xb9400000)",
+    "UINT32_C(0x910003e0)",
     "UINT32_C(0x94000000)",
     "UINT32_C(0x6b00001f)",
     "UINT32_C(0x54000000)",
@@ -68,6 +78,8 @@ for fragment in (
     "malformed_control_source",
     "malformed_loop_source",
     "malformed_assignment_source",
+    "malformed_address_source",
+    "malformed_pointer_assignment_source",
     "compile_c(malformed_c_source",
     "static size_t emit_object(",
     "static int parse_object(",
@@ -84,15 +96,15 @@ for fragment in (
     "addend != 0",
     "link_objects(objects, object_lengths, 2",
     "link_objects(duplicate_objects, duplicate_lengths, 3",
-    "answer_relocations[0].offset != 68",
+    "answer_relocations[0].offset != 72",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
     "compiled_adjust(40) != 42 || compiled_adjust(0) != 2",
     "main_object_length != 688 || answer_object_length != 728",
-    "adjust_object_length != 664",
-    "linked_length != 300",
+    "adjust_object_length != 704",
+    "linked_length != 348",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_c_denied=4",
+    "persisted_reopened=1 malformed_c_denied=6",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -143,10 +155,10 @@ require(SHELL, "objects=3 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocations=R_AARCH64_CALL26:2 symbols=_start,answer,adjust")
 require(SHELL, "c_abi=aapcs64-int32")
-require(SHELL, "c_features=parameter,local,assignment,if,equality,inequality,while,call,return nonleaf_frame=64")
+require(SHELL, "c_features=parameter,local,assignment,pointer,address-of,dereference,if,equality,inequality,while,call,return nonleaf_frame=96")
 require(SHELL, "c_operators=mul,sub,add branch_results=42,86")
-require(SHELL, "loop_results=42,2 code_bytes=76,116,108 object_bytes=688,728,664 linked_bytes=300 output_bytes=815")
-require(SHELL, "malformed_c_denied=4")
+require(SHELL, "loop_results=42,2 memory_results=42,2 code_bytes=76,120,152 object_bytes=688,728,704 linked_bytes=348 output_bytes=815")
+require(SHELL, "malformed_c_denied=6")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -155,7 +167,7 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_c_denied=4")
+require(FOCUSED_RUNTIME, "malformed_c_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

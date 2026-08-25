@@ -181,21 +181,28 @@ Last updated: 2026-08-25.
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
   `*`/`+`/`-`, mutable parameter/local assignments, equality/inequality
   comparisons, an equality `if`, a bounded assignment-only `while`, and a
-  one-argument cross-object call. Forward conditional and signed backward
-  unconditional branches are range-checked before patching. Emitted non-leaf
-  functions preserve FP/LR and x19-x23 in a 64-byte frame. The compiler
-  produces 116-byte `answer` and 108-byte `adjust` code in 728/664-byte ELF64
+  one-argument cross-object call. It now also accepts `int *pointer = &local`,
+  dereference loads inside expressions, and `*pointer = expression` stores.
+  Address-taken `int` locals occupy bounded 32-bit stack slots and are reloaded
+  from memory, while pointer locals use preserved 64-bit registers. Forward
+  conditional and signed backward unconditional branches are range-checked
+  before patching. Emitted non-leaf functions preserve FP/LR and x19-x23 in a
+  96-byte frame. The compiler produces 120-byte `answer` and 152-byte `adjust`
+  code in 728/704-byte ELF64
   `ET_REL` objects; the assembler produces 76 bytes in a 688-byte object. All
   three persist and reopen. The bounded general linker concatenates up to three
   objects, discovers global definitions/undefined symbols, applies two validated
-  `R_AARCH64_CALL26` relocations (`_start`→`answer`→`adjust`), and emits 300 code
+  `R_AARCH64_CALL26` relocations (`_start`→`answer`→`adjust`), and emits 348 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
   and duplicate `answer` definitions. Division syntax
-  and a non-total conditional function, loop without a terminal return, and
-  assignment to an undefined variable also fail closed. RX execution of the
+  and a non-total conditional function, loop without a terminal return,
+  assignment to an undefined variable, address-of an undefined local, and
+  untyped pointer reassignment also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
-  `adjust(40)=42`, and `adjust(0)=2`; focused Pi/QEMU 10.0.11 TCG then
+  `adjust(40)=42`, and `adjust(0)=2`; the latter two require real stack-address
+  formation, two dereference loads/stores, and an address-taken reload. Focused
+  Pi/QEMU 10.0.11 TCG then
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
   Release artifact validation, focused runtime, structural guard, and full
   `make unit check` pass. This is a real but deliberately bounded seed, not a
