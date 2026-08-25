@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove one EL0 task migrates from AP1 to AP2 without duplicate ownership."""
+"""Prove forced migration and shared-Ready-queue AP load ownership."""
 
 from __future__ import annotations
 
@@ -132,7 +132,10 @@ def main() -> int:
                 json.loads(stream.readline())
                 if "error" in qmp_command(stream, "qmp_capabilities"):
                     raise AssertionError("QMP capability negotiation failed")
-                marker = b"free_balance=1 scheduler_scope=boot-probe desktop_gate=closed"
+                marker = (
+                    b"statuses=80,81,82,83,84,85 free_balance=1 "
+                    b"scheduler_scope=boot-probe desktop_gate=closed"
+                )
                 wait_for_output(selector, process, output, marker, 90)
                 required = (
                     b"MAKOS_AARCH64_SMP_USER_OK cpus=4",
@@ -140,6 +143,9 @@ def main() -> int:
                     b"source_cpu=1 target_cpu=2 source_mask=0x2 target_mask=0x4",
                     b"migrations=1 ownership=running,ready-unowned,running",
                     b"context=gpr,sp,tls,simd status=71",
+                    b"MAKOS_AARCH64_SMP_LOAD_OK tasks=6 worker_cpus=3 cpu_mask=0xe",
+                    b"contention=yields:288 run_queue=shared-ready",
+                    b"selection=per-cpu-round-robin ownership=exclusive",
                     marker,
                 )
                 for value in required:
@@ -161,6 +167,11 @@ def main() -> int:
         "MAKOS_AARCH64_SMP_MIGRATION_RUNTIME_OK "
         f"accel={accel} tid=same source_cpu=1 target_cpu=2 "
         "ownership=exclusive context=gpr,sp,tls,simd"
+    )
+    print(
+        "MAKOS_AARCH64_SMP_LOAD_RUNTIME_OK "
+        f"accel={accel} tasks=6 worker_cpus=3 cpu_mask=0xe "
+        "run_queue=shared-ready selection=per-cpu-round-robin ownership=exclusive"
     )
     return 0
 

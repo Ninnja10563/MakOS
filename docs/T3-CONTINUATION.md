@@ -27,23 +27,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for forced migration:
-  PID 248288, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-migration-wHSJuT`, private data clone
-  `build/makos-pi-visible-migration-wHSJuT/data.img`, private variables
-  `build/makos-pi-visible-migration-wHSJuT/vars.fd`, QMP
-  `build/makos-pi-visible-migration-wHSJuT/qmp.sock`, serial
-  `build/makos-pi-visible-migration-wHSJuT/serial.log`, PID file
-  `build/makos-pi-visible-migration-wHSJuT/qemu.pid`, and QMP framebuffer
-  captures `login.png` (background-only transition) and `login-2.png` (visible
-  native dialog). It is the sole QEMU
+- Active visible Pi/QEMU 10.0.11 TCG shared-run-queue milestone:
+  PID 261990, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-load-LhlxSbON`, private data clone
+  `build/makos-pi-visible-load-LhlxSbON/data.img`, private variables
+  `build/makos-pi-visible-load-LhlxSbON/vars.fd`, QMP
+  `build/makos-pi-visible-load-LhlxSbON/qmp.sock`, serial
+  `build/makos-pi-visible-load-LhlxSbON/serial.log`, PID file
+  `build/makos-pi-visible-load-LhlxSbON/qemu.pid`, and QMP framebuffer capture
+  `build/makos-pi-visible-load-LhlxSbON/login.png`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
-  `MAKOS_AARCH64_BOOT_OK`, with no fatal/panic. VNC required QEMU's bundled
+  `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load counters `99,100,98`, with no
+  fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 248288/session `build/makos-pi-visible-migration-wHSJuT` was stopped
+  cleanly through QMP before the focused shared-queue work; its files remain.
   Prior PID 241019/session `build/makos-pi-visible-tcp-5o5pxp` was stopped
   cleanly through QMP before migration runtime; its files remain. Prior PID
   224308/session `build/makos-pi-visible-TMvEbm` was stopped cleanly
@@ -185,8 +187,8 @@ Preserve existing files and changes.
   `MAKOS_AARCH64_SMP_TCP_RUNTIME_OK accel=tcg requester_cpu=1 service_cpu=0 protocol=tcp4 request=exact response=exact close=fin tx_mmio_owner=cpu0 rx_mmio_owner=cpu0 socket_state=locked-publication`.
   The opt-in SmpProbe additionally bypasses the last-runnable WFI shortcut so
   host vCPU ordering cannot evade the required scheduler-idle publication;
-  production last-runnable behavior is unchanged. TCPv6 runtime, load
-  balancing, and general desktop SMP remain open. Full `make unit check`,
+  production last-runnable behavior is unchanged. TCPv6 runtime and general
+  desktop SMP remain open. Full `make unit check`,
   scheduler structural guard, and dedicated 90-second runtime gate pass.
 - A new ordinary-boot fixture forces the same live EL0 TID from AP1 to AP2.
   Under the process lock the source captures GPR/SP/TLS/SIMD state, changes
@@ -198,8 +200,24 @@ Preserve existing files and changes.
   unchanged repeat passes source/target masks `0x2`/`0x4`, one migration,
   exclusive ownership, preserved GPR/SP/TLS/SIMD, status 71 and frame balance.
   Marker: `MAKOS_AARCH64_SMP_MIGRATION_RUNTIME_OK accel=tcg tid=same source_cpu=1 target_cpu=2 ownership=exclusive context=gpr,sp,tls,simd`.
-  Reproducer: `make test-aarch64-smp-migration-runtime`. This closes forced
-  migration only; automatic load balancing/general desktop SMP remain open.
+  Reproducer: `make test-aarch64-smp-migration-runtime`. This closes the
+  bounded forced-migration case only.
+- The ordinary boot now follows migration with six immutable load tasks on the
+  shared Ready queue. Each executes 48 real yields; AP selectors check exactly
+  one CPU owner on every recorded dispatch. Focused Pi/QEMU 10.0.11 TCG passes
+  all statuses 80-85, CPU mask `0xe`, exact reap/frame balance, 288 contention
+  yields, and even `99,99,99` dispatch counters (297 total). The fresh visible
+  boot independently records `99,100,98`, confirming bounded scheduling skew.
+  Qualification exposed and fixed the real wake path: session liveness retains
+  Ready/Blocked tasks, Ready publication sends the scheduler SGI, AP idle
+  acknowledges IRQs around `WFI`, and CPU0 keeps its scheduler timer armed
+  during the bounded AP-deadline wait. Marker:
+  `MAKOS_AARCH64_SMP_LOAD_RUNTIME_OK accel=tcg tasks=6 worker_cpus=3 cpu_mask=0xe run_queue=shared-ready selection=per-cpu-round-robin ownership=exclusive`.
+  Reproducer: `make test-aarch64-smp-load-runtime`. Full `make unit check`, the
+  structural guard, release image/artifact build, focused runtime, and visible
+  login pass. Production priorities/affinity, automatic migration and real
+  Firefox/desktop contention remain open; `userspace_scheduler_cpus=1` stays
+  truthful.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -209,12 +227,12 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 248288 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 261990 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- The forced-migration milestone is the current implementation state; the
-  stateful TCP owner service and CPU0-owned device services remain its
-  foundations. Generated
+- The shared-Ready-queue milestone is the current implementation state; forced
+  migration, stateful TCP owner service and CPU0-owned device services remain
+  its foundations. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:

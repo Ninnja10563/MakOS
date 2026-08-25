@@ -140,6 +140,21 @@ GPR/SP/TLS/SIMD preservation, status 71, and frame balance. This is Pi/TCG
 functional evidence for forced migration, not automatic load balancing or
 general desktop SMP.
 
+The same ordinary image contains a six-task shared-Ready-queue contention
+proof. Run its focused gate with:
+
+```sh
+make test-aarch64-smp-load-runtime
+```
+
+Each task performs 48 real yield syscalls and exits with its distinct status
+80-85. The gate requires all three APs (`cpu_mask=0xe`), at least 288 yield
+contention points, exclusive single-CPU ownership at every recorded selection,
+bounded dispatch skew, exact reap/frame balance, and the prior migration proof.
+The 2026-08-25 Raspberry Pi/QEMU 10.0.11 TCG pass records 99 dispatches on each
+AP (297 total). This is functional AP load-sharing evidence; the desktop gate
+remains closed and macOS/HVF Firefox qualification is still required.
+
 The boot also runs a remote `exit_group` fixture. A CPU0 leader clones a worker
 fixed to AP1; after the worker proves active EL0 execution, the leader invokes
 syscall 119 with status 55. The kernel must publish the dying group, prevent

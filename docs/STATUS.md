@@ -124,12 +124,21 @@ Last updated: 2026-08-25.
   under the scheduler lock fixes that observer race. The unchanged repeat on
   Pi/QEMU 10.0.11 TCG passes exact source/target masks `0x2`/`0x4`, one
   migration, exclusive ownership, GPR/SP/TLS/SIMD preservation, status 71 and
-  frame balance. This qualifies forced migration, not general load balancing.
+  frame balance. This qualifies forced migration.
+  A following shared-Ready-queue fixture runs six immutable tasks across AP1-3.
+  Each task performs 48 real yields; selection checks exactly one CPU owner and
+  records per-task/per-CPU evidence. The unchanged focused Pi/QEMU 10.0.11 TCG
+  gate passes statuses 80-85, worker mask `0xe`, exact frame balance, and even
+  dispatch counters `99,99,99` (297 total) under 288 yield contention points.
+  Longer absolute sleeps exposed and fixed a real wake path: session liveness
+  now retains Ready/Blocked tasks, Ready publication sends the scheduler SGI,
+  AP idle acknowledges IRQs around `WFI`, and CPU0 keeps its sole global timer
+  armed while waiting for AP sleep deadlines.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending load balancing and broader contention, so the
-  scheduler audit row remains Partial and still reports one desktop scheduler
-  CPU.
+  scheduling remains gated pending production policy, automatic migration and
+  Firefox/desktop contention, so the scheduler audit row remains Partial and
+  still reports one desktop scheduler CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment
@@ -527,8 +536,10 @@ Last updated: 2026-08-25.
 - Scheduling: preemptive kernel/user tasks and event block/wake work on BSP.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
-  state are CPU-indexed; multicore userspace still needs general AP run queues,
-  load balancing, and broader contention before the desktop gate can open.
+  state are CPU-indexed. A bounded shared Ready queue now balances six EL0 load
+  tasks over AP1-3 through 288 yields with even `99,99,99` dispatch counts and
+  exclusive ownership; production affinity/priorities, automatic migration,
+  and Firefox/desktop contention remain before the desktop gate can open.
   CPU0-only virtio input, virtio-net TX/RX,
   virtio-blk, and virtio-GPU submission now have focused AP runtime evidence
   for keyboard wake, copied UDPv4 DNS send/receive, timer-serviced 4 KiB

@@ -11,7 +11,7 @@ pub(crate) use aarch64::{
     network_rx_affinity_evidence, reset_input_service_affinity_evidence,
     reset_network_rx_affinity_evidence, return_to_kernel, send_scheduler_ipi,
     service_input_on_owner_cpu, service_network_rx_on_owner_cpu, smp_probe_scheduler_enabled,
-    user_range_readable, user_range_writable,
+    start_scheduler_timer, stop_scheduler_timer, user_range_readable, user_range_writable,
 };
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{

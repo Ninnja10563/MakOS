@@ -99,6 +99,23 @@ before the source incremented a later counter; publishing the intended target
 inside the locked transition made the evidence race-free. This qualifies one
 forced migration, not load balancing or unrestricted desktop migration.
 
+A shared-Ready-queue fixture then creates six immutable EL0 tasks for AP1-AP3.
+Every task executes 48 real yield syscalls, so the three per-CPU round-robin
+selectors contend for one locked queue across at least 288 Ready publications.
+Selection verifies that the chosen task has exactly one CPU owner before each
+dispatch; per-task CPU masks and per-CPU counters are recorded independently.
+The focused Pi/QEMU 10.0.11 TCG gate requires all six exact statuses 80-85,
+worker mask `0xe`, at least 32 dispatches per AP, bounded max/min skew, exact
+frame recovery, and no duplicate ownership. The passing run records perfectly
+even counters `99,99,99` (297 selections total). During qualification, longer
+absolute sleeps exposed two real wake-path defects: session liveness incorrectly
+ignored Blocked/Ready tasks, and CPU0 stopped its sole global timer while
+waiting in EL1. Liveness now includes Ready/Running/Blocked tasks; Ready
+publication uses the scheduler SGI; AP idle acknowledges interrupts around
+`WFI`; and CPU0 explicitly keeps its scheduler timer armed during the bounded
+completion wait. This qualifies shared-queue AP load execution under repeated
+yield contention. The general desktop gate remains closed.
+
 An opt-in seventh fixture runs only with `test.smp-input=required`, after the
 virtio keyboard/tablet and graphics service are initialized. AP1 enters the
 real EL0 `read_key` syscall while a CPU0-affined Ready sentinel prevents the
@@ -194,8 +211,10 @@ safe general process migration.
   non-leader Firefox workers. Broader affinity/load balancing remains gated
   until device-owning and PID1/UI paths are qualified.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
-  ownership through a Ready/unowned publication. Repeated contention, policy,
-  fairness and automatic load balancing remain open.
+  ownership through a Ready/unowned publication. Six load tasks also contend
+  through 288 yields on the shared Ready queue and receive 99 dispatches on
+  each AP with exclusive ownership. Production policy, priorities, repeated
+  automatic migration, and Firefox/desktop contention remain open.
 - `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
   loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit
@@ -219,9 +238,11 @@ safe general process migration.
   half service proof for real AP 4 KiB reads, 4 KiB writes, and `fsync`/FLUSH
   through VFS/MakFS4. Virtio-GPU now has CPU0-only low-level submission and a
   production timer-bottom-half proof for composition requested through the AP
-  native surface ABI. TCPv6 and general load balancing remain to be qualified.
-- Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
-  Release unlock; idle selection must consume after Acquire lock acquisition.
+  native surface ABI. TCPv6 remains to be qualified.
+- Ready publication now sends the scheduler SGI after the process lock's
+  Release unlock; AP idle acknowledges IRQs around `WFI`, then consumes queue
+  state after Acquire lock acquisition. This has bounded boot-probe proof but
+  still needs production desktop/Firefox qualification.
 
 Outside the bounded boot proof, APs remain in closed-gate WFI at EL1. Routine
 BSP `SEV` traffic cannot wake this gate and consume host CPU. The probe issues

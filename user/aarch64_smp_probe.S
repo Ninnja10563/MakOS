@@ -6,7 +6,10 @@ _start:
     mov x19, x0
     mov x8, #27
     svc #0
-    add x0, x0, #2
+    // Keep the absolute deadline safely ahead of delayed TCG vCPU dispatch.
+    // The runtime gate still retains its unchanged 20 s guest completion and
+    // 90 s host limits; this makes the actual blocked interval stronger.
+    add x0, x0, #200
     mov x8, #103
     svc #0
     adrp x0, futex_word

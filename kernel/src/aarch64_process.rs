@@ -101,6 +101,8 @@ static SMP_MIGRATION_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-migration-probe.elf"
 ));
+static SMP_LOAD_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-load-probe.elf"));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -115,6 +117,7 @@ pub enum ProcessRole {
     Nano,
     Native,
     SmpProbe,
+    SmpLoad,
     Firefox,
 }
 
@@ -220,6 +223,8 @@ impl SchedulerState {
             if slot.is_some_and(|slot| slot.role == ProcessRole::SmpProbe) {
                 cpu < SMP_PROBE_AFFINITY.len()
                     && SMP_PROBE_AFFINITY[cpu].load(Ordering::Acquire) == info.pid
+            } else if slot.is_some_and(|slot| slot.role == ProcessRole::SmpLoad) {
+                cpu != 0 && cpu < SMP_PROBE_AFFINITY.len()
             } else {
                 cpu == 0
                     || slot.is_some_and(|slot| {
@@ -298,6 +303,16 @@ static SMP_PROBE_MIGRATION_DESTINATION: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_MIGRATION_SOURCE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_MIGRATION_COUNT: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_SCHEDULER_LOOP_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_SCHEDULER_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_SCHEDULER_WAKE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_SCHEDULER_REDISPATCH_MASK: AtomicU64 = AtomicU64::new(0);
+const SMP_LOAD_TASK_COUNT: usize = 6;
+static SMP_LOAD_TIDS: [AtomicU64; SMP_LOAD_TASK_COUNT] =
+    [const { AtomicU64::new(0) }; SMP_LOAD_TASK_COUNT];
+static SMP_LOAD_TASK_CPU_MASKS: [AtomicU64; SMP_LOAD_TASK_COUNT] =
+    [const { AtomicU64::new(0) }; SMP_LOAD_TASK_COUNT];
+static SMP_LOAD_CPU_DISPATCHES: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -307,9 +322,17 @@ fn scheduler_cpu() -> usize {
 
 #[inline]
 fn notify_idle_cpus() {
-    // Scheduler state unlock publishes with Release before this DSB/SEV.
-    // Closed AP gate currently turns this into a harmless wake/recheck.
-    unsafe { asm!("dsb ish", "sev", options(nostack)) };
+    // Scheduler state unlock publishes with Release before this barrier. Once
+    // AP scheduling is enabled, use its dedicated SGI: WFE event state can be
+    // consumed before a delayed secondary reaches the idle loop, while a
+    // pending interrupt remains a reliable wake/recheck request. The closed
+    // gate retains the cheap SEV used by BSP-only operation.
+    unsafe { asm!("dsb ish", options(nostack)) };
+    if crate::arch::smp_probe_scheduler_enabled() {
+        crate::arch::send_scheduler_ipi();
+    } else {
+        unsafe { asm!("sev", options(nostack)) };
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -378,6 +401,7 @@ pub fn report_runtime_tasks() {
                 ProcessRole::Nano => "nano",
                 ProcessRole::Native => "native",
                 ProcessRole::SmpProbe => "smp-probe",
+                ProcessRole::SmpLoad => "smp-load",
                 ProcessRole::Firefox => "firefox",
             };
             let task_state = match info.state {
@@ -498,6 +522,10 @@ pub fn run_smp_userspace_self_test() {
     SMP_PROBE_FUTEX_RESUME_MASK.store(0, Ordering::Release);
     SMP_PROBE_IO_IDLE_MASK.store(0, Ordering::Release);
     SMP_PROBE_IO_RESUME_MASK.store(0, Ordering::Release);
+    SMP_PROBE_SCHEDULER_LOOP_MASK.store(0, Ordering::Release);
+    SMP_PROBE_SCHEDULER_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_SCHEDULER_WAKE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_SCHEDULER_REDISPATCH_MASK.store(0, Ordering::Release);
     for tid in &SMP_PROBE_AFFINITY {
         tid.store(0, Ordering::Release);
     }
@@ -551,6 +579,10 @@ pub fn run_smp_userspace_self_test() {
     crate::arch::switch_address_space(crate::arch::kernel_root());
     smp_probe_leave();
 
+    // enter_user_context disables the per-CPU scheduler timer on its kernel
+    // return path. CPU0 must keep owning global monotonic ticks while it waits
+    // for AP sleep deadlines, so arm the timer for this bounded wait.
+    crate::arch::start_scheduler_timer();
     let completion_deadline = crate::arch::counter_deadline_millis(20_000);
     loop {
         let complete = with_state(|state| {
@@ -564,10 +596,56 @@ pub fn run_smp_userspace_self_test() {
             break;
         }
         if crate::arch::counter_deadline_expired(completion_deadline) {
+            let mut states = [0u64; PROBE_COUNT];
+            let mut owners = [u64::MAX; PROBE_COUNT];
+            with_state(|state| {
+                for (index, pid) in pids.iter().copied().enumerate() {
+                    states[index] = match state.table.get(pid).map(|info| info.state) {
+                        Some(makos_process_table::ProcessState::Ready) => 1,
+                        Some(makos_process_table::ProcessState::Running) => 2,
+                        Some(makos_process_table::ProcessState::Blocked) => 3,
+                        Some(makos_process_table::ProcessState::Zombie) => 4,
+                        Some(makos_process_table::ProcessState::Empty) | None => 0,
+                    };
+                    owners[index] = state
+                        .table
+                        .running_cpu(pid)
+                        .map_or(u64::MAX, |cpu| cpu as u64);
+                }
+            });
+            crate::serial_println!(
+                "MAKOS_AARCH64_SMP_COMPLETION_TIMEOUT active={:#x} states={},{},{},{} owners={},{},{},{} idle={:#x} resume={:#x} futex_idle={:#x} futex_resume={:#x} io_idle={:#x} io_resume={:#x} scheduler_loop={:#x} scheduler_idle={:#x} scheduler_wake={:#x} scheduler_redispatch={:#x}",
+                SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire),
+                states[0],
+                states[1],
+                states[2],
+                states[3],
+                owners[0],
+                owners[1],
+                owners[2],
+                owners[3],
+                SMP_PROBE_IDLE_MASK.load(Ordering::Acquire),
+                SMP_PROBE_RESUME_MASK.load(Ordering::Acquire),
+                SMP_PROBE_FUTEX_IDLE_MASK.load(Ordering::Acquire),
+                SMP_PROBE_FUTEX_RESUME_MASK.load(Ordering::Acquire),
+                SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire),
+                SMP_PROBE_IO_RESUME_MASK.load(Ordering::Acquire),
+                SMP_PROBE_SCHEDULER_LOOP_MASK.load(Ordering::Acquire),
+                SMP_PROBE_SCHEDULER_IDLE_MASK.load(Ordering::Acquire),
+                SMP_PROBE_SCHEDULER_WAKE_MASK.load(Ordering::Acquire),
+                SMP_PROBE_SCHEDULER_REDISPATCH_MASK.load(Ordering::Acquire),
+            );
             crate::fatal("AArch64 SMP probe completion timeout");
         }
-        core::hint::spin_loop();
+        // enter_user_context returns to EL1 with IRQs masked. CPU0 owns the
+        // global monotonic tick, so an IRQ-masked completion spin would freeze
+        // deadlines belonging to sleeping AP tasks. Idle until the next timer
+        // interrupt, then recheck their state.
+        crate::arch::enable_interrupts();
+        unsafe { asm!("wfi", options(nomem, nostack)) };
+        crate::arch::disable_interrupts();
     }
+    crate::arch::stop_scheduler_timer();
     crate::arch::disable_smp_probe_scheduler();
 
     let mut statuses = [0u64; PROBE_COUNT];
@@ -737,6 +815,149 @@ pub fn run_smp_forced_migration_self_test() {
         pid,
         source,
         target,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_load_balancing_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_PEAK_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(false, Ordering::Release);
+    for value in &SMP_LOAD_TIDS {
+        value.store(0, Ordering::Release);
+    }
+    for value in &SMP_LOAD_TASK_CPU_MASKS {
+        value.store(0, Ordering::Release);
+    }
+    for value in &SMP_LOAD_CPU_DISPATCHES {
+        value.store(0, Ordering::Release);
+    }
+
+    let mut pids = [0u64; SMP_LOAD_TASK_COUNT];
+    for (index, pid) in pids.iter_mut().enumerate() {
+        *pid = spawn_process(
+            0,
+            SMP_LOAD_PROBE_ELF,
+            index as u64,
+            ProcessRole::SmpLoad,
+        )
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP load probe spawn failed"))
+        .0;
+        SMP_LOAD_TIDS[index].store(*pid, Ordering::Release);
+    }
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let dispatch_deadline = crate::arch::counter_deadline_millis(2_000);
+    while SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) & 0b1110 != 0b1110 {
+        if crate::arch::counter_deadline_expired(dispatch_deadline) {
+            crate::fatal("AArch64 SMP load probe AP dispatch timeout");
+        }
+        core::hint::spin_loop();
+    }
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    notify_idle_cpus();
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let complete = with_state(|state| {
+            pids.iter().all(|pid| {
+                state.table.get(*pid).is_some_and(|info| {
+                    info.state == makos_process_table::ProcessState::Zombie
+                })
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP load probe completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let mut statuses = [0u64; SMP_LOAD_TASK_COUNT];
+    for (index, pid) in pids.iter().copied().enumerate() {
+        let (resource, status) = with_state(|state| {
+            let WaitResult::Reaped {
+                resource,
+                exit_status,
+                ..
+            } = state.table.wait(0, pid)
+            else {
+                crate::fatal("AArch64 SMP load probe reap failed");
+            };
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) {
+                *slot = ContextSlot::EMPTY;
+            }
+            (resource, exit_status)
+        });
+        statuses[index] = status;
+        cleanup_reaped(pid, resource, status);
+    }
+
+    let dispatches = [
+        SMP_LOAD_CPU_DISPATCHES[1].load(Ordering::Acquire),
+        SMP_LOAD_CPU_DISPATCHES[2].load(Ordering::Acquire),
+        SMP_LOAD_CPU_DISPATCHES[3].load(Ordering::Acquire),
+    ];
+    let total_dispatches = dispatches.iter().sum::<u64>();
+    let min_dispatches = *dispatches.iter().min().unwrap_or(&0);
+    let max_dispatches = *dispatches.iter().max().unwrap_or(&0);
+    let mut task_cpu_union = 0u64;
+    let mut task_masks_valid = true;
+    for value in &SMP_LOAD_TASK_CPU_MASKS {
+        let mask = value.load(Ordering::Acquire);
+        task_cpu_union |= mask;
+        task_masks_valid &= mask != 0 && mask & !0b1110 == 0;
+    }
+    let peak = SMP_PROBE_PEAK_MASK.load(Ordering::Acquire);
+    let free_balance = crate::mm::free_frames() == free_before;
+    for value in &SMP_LOAD_TIDS {
+        value.store(0, Ordering::Release);
+    }
+    if statuses != [80, 81, 82, 83, 84, 85]
+        || peak & 0b1110 != 0b1110
+        || task_cpu_union != 0b1110
+        || !task_masks_valid
+        || min_dispatches < 32
+        || total_dispatches < 288
+        || max_dispatches > min_dispatches.saturating_mul(3)
+        || !free_balance
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SMP_LOAD_DIAGNOSTIC peak={:#x} cpu_mask={:#x} dispatches={},{},{} total={} min={} max={} statuses={},{},{},{},{},{} task_masks_valid={} free_balance={}",
+            peak,
+            task_cpu_union,
+            dispatches[0],
+            dispatches[1],
+            dispatches[2],
+            total_dispatches,
+            min_dispatches,
+            max_dispatches,
+            statuses[0],
+            statuses[1],
+            statuses[2],
+            statuses[3],
+            statuses[4],
+            statuses[5],
+            u8::from(task_masks_valid),
+            u8::from(free_balance),
+        );
+        crate::fatal("AArch64 SMP load-balancing proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_LOAD_OK tasks=6 worker_cpus=3 cpu_mask={:#x} dispatches={},{},{} total_dispatches={} min_dispatches={} max_dispatches={} contention=yields:288 run_queue=shared-ready selection=per-cpu-round-robin ownership=exclusive statuses=80,81,82,83,84,85 free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
+        task_cpu_union,
+        dispatches[0],
+        dispatches[1],
+        dispatches[2],
+        total_dispatches,
+        min_dispatches,
+        max_dispatches,
     );
     reset_scheduler();
 }
@@ -3231,15 +3452,34 @@ fn reset_scheduler() {
     with_state(|state| *state = SchedulerState::new());
 }
 
+fn record_smp_load_dispatch(state: &SchedulerState, pid: u64, cpu: usize) {
+    let Some(index) = SMP_LOAD_TIDS
+        .iter()
+        .position(|value| value.load(Ordering::Acquire) == pid)
+    else {
+        return;
+    };
+    let owner_count = (0..SMP_PROBE_AFFINITY.len())
+        .filter(|candidate| state.table.current_pid_on(*candidate) == Some(pid))
+        .count();
+    if owner_count != 1 || state.table.current_pid_on(cpu) != Some(pid) {
+        crate::fatal("AArch64 SMP load task acquired duplicate CPU ownership");
+    }
+    SMP_LOAD_TASK_CPU_MASKS[index].fetch_or(1u64 << cpu, Ordering::AcqRel);
+    SMP_LOAD_CPU_DISPATCHES[cpu].fetch_add(1, Ordering::AcqRel);
+}
+
 /// Closed-gate AP dispatch foundation. Every selection, including later
-/// timer/yield paths, is limited to non-leader Firefox workers. Block-to-idle
-/// and remote teardown gates still prevent architecture code enabling it.
+/// timer/yield paths, is limited to boot probes or non-leader Firefox workers.
+/// Block-to-idle and remote teardown gates still prevent production enablement.
 pub(crate) fn run_secondary_scheduler() -> ! {
     let cpu = scheduler_cpu();
     if cpu == 0 {
         crate::fatal("AArch64 secondary dispatcher entered on BSP");
     }
     loop {
+        let cpu_bit = 1u64 << cpu;
+        SMP_PROBE_SCHEDULER_LOOP_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
         if !crate::arch::smp_probe_scheduler_enabled() {
             crate::arch::idle_secondary_after_smp_probe();
         }
@@ -3248,6 +3488,7 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                 return None;
             }
             let process = state.schedule_next_for_cpu(cpu)?;
+            record_smp_load_dispatch(state, process.pid, cpu);
             state
                 .contexts
                 .iter()
@@ -3255,9 +3496,20 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                 .map(|slot| (process.pid, slot.context))
         });
         let Some((pid, context)) = selected else {
-            unsafe { asm!("wfe", options(nomem, nostack)) };
+            // The EL1 return trampoline leaves IRQs masked. Unmask around the
+            // idle instruction so a scheduler SGI is acknowledged rather than
+            // depending on implementation-specific masked-WFI behavior, then
+            // mask again before touching scheduler state.
+            SMP_PROBE_SCHEDULER_IDLE_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+            crate::arch::enable_interrupts();
+            unsafe { asm!("wfi", options(nomem, nostack)) };
+            crate::arch::disable_interrupts();
+            SMP_PROBE_SCHEDULER_WAKE_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
             continue;
         };
+        if SMP_PROBE_SCHEDULER_IDLE_MASK.load(Ordering::Acquire) & cpu_bit != 0 {
+            SMP_PROBE_SCHEDULER_REDISPATCH_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+        }
         smp_probe_enter(pid);
         while !SMP_PROBE_RELEASE.load(Ordering::Acquire) {
             unsafe { asm!("wfe", options(nomem, nostack)) };
@@ -4707,7 +4959,7 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
         exit_thread_from_exception(status, frame);
         return;
     }
-    let smp_probe = current_app_role() == ProcessRole::SmpProbe;
+    let smp_probe = matches!(current_app_role(), ProcessRole::SmpProbe | ProcessRole::SmpLoad);
     robust_list_on_current_exit();
     clear_child_tid_on_exit();
     let (pid, next) = with_state(|state| {
@@ -4726,6 +4978,7 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
             }
         }
         let next = state.schedule_next_for_cpu(scheduler_cpu()).map(|next| {
+            record_smp_load_dispatch(state, next.pid, scheduler_cpu());
             let index = state
                 .contexts
                 .iter()
@@ -4738,7 +4991,17 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
             && !state
                 .contexts
                 .iter()
-                .any(|slot| slot.pid != 0 && state.table.running_cpu(slot.pid).is_some())
+                .any(|slot| {
+                    slot.pid != 0
+                        && state.table.get(slot.pid).is_some_and(|info| {
+                            matches!(
+                                info.state,
+                                makos_process_table::ProcessState::Ready
+                                    | makos_process_table::ProcessState::Running
+                                    | makos_process_table::ProcessState::Blocked
+                            )
+                        })
+                })
         {
             state.session_active = false;
         }
@@ -4867,7 +5130,17 @@ pub(crate) fn exit_group_from_exception(status: u64, frame: &mut crate::arch::Ex
             && !state
                 .contexts
                 .iter()
-                .any(|slot| slot.pid != 0 && state.table.running_cpu(slot.pid).is_some())
+                .any(|slot| {
+                    slot.pid != 0
+                        && state.table.get(slot.pid).is_some_and(|info| {
+                            matches!(
+                                info.state,
+                                makos_process_table::ProcessState::Ready
+                                    | makos_process_table::ProcessState::Running
+                                    | makos_process_table::ProcessState::Blocked
+                            )
+                        })
+                })
         {
             state.session_active = false;
         }
@@ -5397,6 +5670,7 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
         let next = priority
             .or_else(|| state.schedule_next_for_cpu(cpu))
             .unwrap_or_else(|| crate::fatal("AArch64 schedule found no runnable process"));
+        record_smp_load_dispatch(state, next.pid, cpu);
         let index = state
             .contexts
             .iter()
