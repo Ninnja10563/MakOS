@@ -65,17 +65,19 @@ See `docs/SYSCALLS.md`.
 
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
-normal VFS. Its C subset accepts one `int` function with one `int` parameter.
-The body may declare up to four initialized register locals, use the parameter,
+normal VFS. Its C subset accepts one `int` function with one `int` or `int *`
+parameter. With an `int` parameter, the body may use and assign that parameter.
+The body may declare up to four initialized register locals, use integer
 locals, unsigned 16-bit constants, parentheses, multiplication, addition and
-subtraction, assign expressions to the parameter or declared locals, contain
+subtraction, assign expressions to declared integer locals, contain
 an equality/inequality condition in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
-one argument. A pointer local may be initialized as `int *pointer = &local`;
-`*pointer` performs a 32-bit load and `*pointer = expression` a 32-bit store to
-the address-taken local's stack slot. A final unconditional return is required.
-It emits AAPCS64 32-bit
-`int` code with validated forward conditional and signed backward branch fixups
+one argument. A pointer local may be initialized as `int *pointer = &local`,
+and an address expression may be passed to the external function. `*pointer`
+performs a 32-bit load and `*pointer = expression` a 32-bit store through a
+pointer local or pointer parameter. A final unconditional return is required.
+It emits AAPCS64 32-bit `int` code, passing pointer arguments in `x0`, with
+validated forward conditional and signed backward branch fixups
 and a 96-byte non-leaf FP/LR/x19-x23 frame containing four bounded local slots,
 then a real
 ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
@@ -85,7 +87,7 @@ discovers symbols across up to three objects, resolves two
 Unsupported tokens, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
-This seed has no pointer arithmetic or parameters, arrays, structs,
+This seed has no pointer arithmetic, arrays, structs,
 nested/general blocks, multiple functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
 archives, dynamic linking, CLI build driver, or

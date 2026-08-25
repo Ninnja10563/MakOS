@@ -138,12 +138,13 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
   startup and two C sources from MakFS. A bounded source-driven C compiler emits
-  AAPCS64-int32 expressions, register locals, mutable parameter/local
+  AAPCS64 integer/pointer expressions, register locals, mutable integer parameter/local
   assignments, equality/inequality control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
-  loads and stores, non-leaf frames, cross-object calls, and genuine ELF64
-  `ET_REL` objects; both linked branch outcomes and direct loop/memory outcomes
-  execute in EL0.
+  loads and stores, typed pointer parameters passed in AAPCS64 `x0`, non-leaf
+  frames, cross-object calls that mutate caller-owned memory, and genuine
+  ELF64 `ET_REL` objects; both linked branch outcomes and direct loop/memory
+  outcomes execute in EL0.
   The assembler emits `_start`. The guest static
   linker resolves `_start`→`answer`→`adjust` across three objects, applies two
   `R_AARCH64_CALL26` relocations, rejects malformed C, invalid relocation type,
