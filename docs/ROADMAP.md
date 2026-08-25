@@ -138,7 +138,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
   startup and three C sources from MakFS. A bounded source-driven C compiler emits
-  AAPCS64 integer/pointer expressions, up to three typed parameters/call arguments
+  AAPCS64 integer/pointer expressions including unary negation and signed
+  division/remainder, up to three typed parameters/call arguments
   in x0-x2, register locals, mutable integer parameter/local
   assignments, signed equality/inequality/ordering control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
@@ -151,7 +152,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
   loop/memory outcomes execute in EL0. A separate 140-byte `sum3`/`invoke3`
   unit emits a 752-byte object, resolves its same-object call, and executes both
-  three-argument paths as 42.
+  three-argument paths as 42. A 784-byte three-definition arithmetic object
+  directly proves positive and negative `SDIV`, `MSUB` remainder, and negation.
   The assembler emits `_start`. The guest static
   linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
   external `adjust`→`combine` across the required three persisted objects,

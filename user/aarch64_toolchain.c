@@ -472,7 +472,8 @@ static size_t assemble(const char *source, size_t source_length,
  *   }
  *
  * Expressions contain the integer parameter, unsigned 16-bit constants,
- * parentheses, left-associative *, +, and -, address-of and dereference of
+ * parentheses, unary +/-, left-associative *, signed / and %, +, and -,
+ * address-of and dereference of
  * bounded local pointers or the pointer parameter, checked fixed-array
  * indexing, constant- or scalar-variable-element pointer addition in pointer
  * initializers/calls and parenthesized dereferences, typed pointer subtraction
@@ -920,20 +921,67 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
                             (source_register << 16) | destination);
 }
 
+static int c_unary(struct c_compiler *compiler, uint32_t destination) {
+    c_space(compiler);
+    if (compiler->cursor == compiler->source_length ||
+        (compiler->source[compiler->cursor] != '+' &&
+         compiler->source[compiler->cursor] != '-'))
+        return c_primary(compiler, destination);
+    char operation = compiler->source[compiler->cursor++];
+    if (!c_primary(compiler, destination)) return 0;
+    return operation == '+' ||
+           c_emit(compiler, UINT32_C(0x4b0003e0) |
+                             (destination << 16) | destination);
+}
+
+static int c_literal_zero_operand(struct c_compiler *compiler) {
+    size_t saved = compiler->cursor;
+    uint32_t value = 0;
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        (compiler->source[compiler->cursor] == '+' ||
+         compiler->source[compiler->cursor] == '-'))
+        ++compiler->cursor;
+    int zero = c_number(compiler, &value) && value == 0;
+    compiler->cursor = saved;
+    return zero;
+}
+
 static int c_multiplicative(struct c_compiler *compiler,
                             uint32_t destination) {
-    if (!c_primary(compiler, destination)) return 0;
+    if (!c_unary(compiler, destination)) return 0;
     for (;;) {
         c_space(compiler);
-        if (compiler->cursor == compiler->source_length ||
-            compiler->source[compiler->cursor] != '*')
-            return 1;
+        if (compiler->cursor == compiler->source_length) return 1;
+        char operation = compiler->source[compiler->cursor];
+        if (operation != '*' && operation != '/' && operation != '%') return 1;
         ++compiler->cursor;
-        if (!c_primary(compiler, destination + 1) ||
-            !c_emit(compiler, UINT32_C(0x1b007c00) |
-                              ((destination + 1) << 16) |
-                              (destination << 5) | destination))
+        if ((operation == '/' || operation == '%') &&
+            c_literal_zero_operand(compiler))
             return 0;
+        if (!c_unary(compiler, destination + 1)) return 0;
+        if (operation == '*') {
+            if (!c_emit(compiler, UINT32_C(0x1b007c00) |
+                                  ((destination + 1) << 16) |
+                                  (destination << 5) | destination))
+                return 0;
+        } else if (operation == '/') {
+            if (!c_emit(compiler, UINT32_C(0x1ac00c00) |
+                                  ((destination + 1) << 16) |
+                                  (destination << 5) | destination))
+                return 0;
+        } else {
+            uint32_t quotient = destination + 2;
+            if (quotient > 7 ||
+                !c_emit(compiler, UINT32_C(0x1ac00c00) |
+                                  ((destination + 1) << 16) |
+                                  (destination << 5) | quotient) ||
+                !c_emit(compiler, UINT32_C(0x1b008000) |
+                                  ((destination + 1) << 16) |
+                                  (destination << 10) |
+                                  (quotient << 5) | destination))
+                return 0;
+        }
     }
 }
 
@@ -2270,7 +2318,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "    return value + 2;\n"
         "}\n";
     static const char malformed_c_source[] =
-        "int answer(int value) { return value / 2; }\n";
+        "int answer(int value) { return value | 2; }\n";
+    static const char malformed_divide_zero_source[] =
+        "int answer(int value) { return value / 0; }\n";
     static const char malformed_control_source[] =
         "int answer(int value) { if (value == 1) { return 42; } }\n";
     static const char malformed_loop_source[] =
@@ -2310,6 +2360,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "int invoke3(int value) {\n"
         "    return sum3(value, 1, 1);\n"
         "}\n";
+    static const char signed_arithmetic_source[] =
+        "int divide(int value) { return value / 3; }\n"
+        "int remainder(int value) { return value % 6; }\n"
+        "int negate(int value) { return -value; }\n";
     static const char relational_greater_source[] =
         "int greater(int value) { if (value > 5) { return 42; } return 0; }\n";
     static const char relational_at_most_source[] =
@@ -2327,12 +2381,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=4 cache=makstate-v2 cache_hits=0 cache_misses=4 state_committed=1 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c translation_unit_functions=2,1,1 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,three-argument,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
-        "max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
+        "c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+        "max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 linked_bytes=500 output_bytes=815 helper_result=42 "
-        "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17 "
+        "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=18 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -2480,6 +2534,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     char malformed_function[MAX_LABEL_BYTES] = {0};
     size_t malformed_function_length = 0;
     if (compile_c(malformed_c_source, sizeof(malformed_c_source) - 1,
+                  malformed_code, sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_divide_zero_source,
+                  sizeof(malformed_divide_zero_source) - 1,
                   malformed_code, sizeof(malformed_code), malformed_function,
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
@@ -2683,6 +2743,62 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     if (three_argument_linked_length != 140 || three_argument_entry != 80)
         fail(88);
 
+    uint8_t signed_arithmetic_code[192] = {0};
+    struct c_definition signed_arithmetic_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t signed_arithmetic_definition_count = 0;
+    struct relocation signed_arithmetic_relocations[MAX_RELOCATIONS] = {0};
+    size_t signed_arithmetic_relocation_count = 0;
+    size_t signed_arithmetic_code_length = compile_c_unit(
+        signed_arithmetic_source, sizeof(signed_arithmetic_source) - 1,
+        signed_arithmetic_code, sizeof(signed_arithmetic_code),
+        signed_arithmetic_definitions, &signed_arithmetic_definition_count,
+        signed_arithmetic_relocations, &signed_arithmetic_relocation_count);
+    if (signed_arithmetic_code_length != 168 ||
+        signed_arithmetic_definition_count != 3 ||
+        !same_name(signed_arithmetic_definitions[0].name,
+                   signed_arithmetic_definitions[0].length, "divide", 6) ||
+        signed_arithmetic_definitions[0].offset != 0 ||
+        signed_arithmetic_definitions[0].size != 56 ||
+        !same_name(signed_arithmetic_definitions[1].name,
+                   signed_arithmetic_definitions[1].length, "remainder", 9) ||
+        signed_arithmetic_definitions[1].offset != 56 ||
+        signed_arithmetic_definitions[1].size != 60 ||
+        !same_name(signed_arithmetic_definitions[2].name,
+                   signed_arithmetic_definitions[2].length, "negate", 6) ||
+        signed_arithmetic_definitions[2].offset != 116 ||
+        signed_arithmetic_definitions[2].size != 52 ||
+        signed_arithmetic_relocation_count != 0)
+        fail(82);
+    uint8_t signed_arithmetic_object[OBJECT_CAPACITY] = {0};
+    size_t signed_arithmetic_object_length = emit_object_definitions(
+        signed_arithmetic_object, signed_arithmetic_code,
+        signed_arithmetic_code_length, signed_arithmetic_definitions,
+        signed_arithmetic_definition_count, signed_arithmetic_relocations,
+        signed_arithmetic_relocation_count);
+    struct object_view signed_arithmetic_view;
+    if (signed_arithmetic_object_length != 784 ||
+        !parse_object(signed_arithmetic_object,
+                      signed_arithmetic_object_length,
+                      &signed_arithmetic_view) ||
+        signed_arithmetic_view.text_length != 168 ||
+        signed_arithmetic_view.rela_count != 0 ||
+        signed_arithmetic_view.symbol_count != 4)
+        fail(85);
+    const uint8_t *signed_arithmetic_objects[MAX_LINK_OBJECTS] = {
+        signed_arithmetic_object,
+    };
+    size_t signed_arithmetic_object_lengths[MAX_LINK_OBJECTS] = {
+        signed_arithmetic_object_length,
+    };
+    uint8_t signed_arithmetic_linked[192] = {0};
+    size_t signed_arithmetic_entry = 0;
+    size_t signed_arithmetic_linked_length = link_objects(
+        signed_arithmetic_objects, signed_arithmetic_object_lengths, 1,
+        signed_arithmetic_linked, sizeof(signed_arithmetic_linked), "divide",
+        &signed_arithmetic_entry);
+    if (signed_arithmetic_linked_length != 168 || signed_arithmetic_entry != 0)
+        fail(88);
+
     uint8_t *relational_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
     if ((uintptr_t)relational_jit == UINT64_MAX) fail(83);
@@ -2709,6 +2825,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         &relational_function_length, 0, 0);
     copy_bytes(relational_jit + 512, three_argument_linked,
                three_argument_linked_length);
+    copy_bytes(relational_jit + 768, signed_arithmetic_linked,
+               signed_arithmetic_linked_length);
     if (!greater_length || greater_length > 128 ||
         !at_most_length || at_most_length > 128 ||
         !previous_length || previous_length > 128 ||
@@ -2732,6 +2850,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     uint64_t (*compiled_invoke3)(uint64_t) =
         (uint64_t (*)(uint64_t))(uintptr_t)
             (relational_jit + 512 + three_argument_entry);
+    uint64_t (*compiled_divide)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)(relational_jit + 768);
+    uint64_t (*compiled_remainder)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)(relational_jit + 768 + 56);
+    uint64_t (*compiled_negate)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)(relational_jit + 768 + 116);
     uint32_t previous_values[2] = {42, 7};
     uint32_t distance_values[4] = {0, 0, 0, 0};
     if (compiled_greater(6) != 42 || compiled_greater(5) != 0 ||
@@ -2740,7 +2864,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         compiled_distance(distance_values + 3, distance_values) != 3 ||
         (uint32_t)compiled_distance(distance_values, distance_values + 3) !=
             UINT32_MAX - 2 ||
-        compiled_sum3(40, 1, 1) != 42 || compiled_invoke3(40) != 42)
+        compiled_sum3(40, 1, 1) != 42 || compiled_invoke3(40) != 42 ||
+        compiled_divide(20) != 6 ||
+        (uint32_t)compiled_divide(UINT32_MAX - 19) != UINT32_MAX - 5 ||
+        compiled_remainder(20) != 2 ||
+        (uint32_t)compiled_remainder(UINT32_MAX - 19) != UINT32_MAX - 1 ||
+        (uint32_t)compiled_negate(42) != UINT32_MAX - 41 ||
+        compiled_negate(UINT32_MAX - 41) != 42)
         fail(83);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);

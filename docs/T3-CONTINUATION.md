@@ -27,21 +27,27 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG three-argument self-host milestone: PID
-  614416, user service `makos-visible-selfhost-three-argument-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG signed-arithmetic self-host milestone: PID
+  630079, user service `makos-visible-selfhost-signed-arithmetic-final2.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1`, private read-only boot
+  `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
   `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and capture `login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `340e37930e819d48a6e6ac69714c246e3eb869e452b35691fd980bc20f7f696c`.
+  `4cbe815d7193b817eabf75d971f02900c57f817ee5357f96ea7fd899a60333d3`.
   It is the sole QEMU process and reports four online PEs,
   `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
   `userspace_scheduler_cpus=4`, with no fatal/panic. The visually inspected
   800x600 login PNG has SHA-256
-  `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`
+  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 606789 and
+  testing; use QMP `quit` before any later runtime gate. Prior PID 624159 and
+  session `build/makos-pi-visible-selfhost-signed-arithmetic-final-CZWWR9Iz`
+  were stopped cleanly through QMP before the exact-source final runtime;
+  their files remain. Prior PID 614416 and
+  session `build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1` were
+  stopped cleanly through QMP before the signed-arithmetic self-host runtime;
+  their files remain. Prior PID 606789 and
   session `build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q` were stopped
   cleanly through QMP before the three-argument self-host runtime; their files
   remain. Prior PID 549619 and
@@ -383,7 +389,10 @@ Preserve existing files and changes.
   parameters and call arguments. AAPCS64 carries them in `x0` through `x2`
   (`w0` through `w2` for integers) and preserves them in x23 through x25. The
   x25 stack save/restore is emitted only for three-parameter functions, so
-  existing one- and two-parameter code sizes remain exact. Dynamic pointer addition emits
+  existing one- and two-parameter code sizes remain exact. Unary `+`/`-` and
+  precedence-correct signed `/`/`%` now join multiplication/addition/subtraction;
+  division emits 32-bit `SDIV`, remainder uses `SDIV` plus `MSUB`, and direct
+  literal-zero divisors fail closed. Dynamic pointer addition emits
   `ADD ... SXTW #2`, so a signed negative offset is preserved. Known local
   bounds reject one-past-end constants and unproved variable offsets. The real
   `answer`→`adjust(values + 1, 1)` call, `next = pointer + delta`, and
@@ -404,14 +413,18 @@ Preserve existing files and changes.
   RX execution proves `helper(40)=42`. A separate `sum3`/`invoke3` translation
   unit emits 140 code bytes in a 752-byte ELF64 `ET_REL`, resolves a same-object
   `R_AARCH64_CALL26` with entry offset 80, and executes both
-  `sum3(40,1,1)` and `invoke3(40)` as 42 from RX memory. The fully linked C graph
+  `sum3(40,1,1)` and `invoke3(40)` as 42 from RX memory. A separate
+  three-definition arithmetic unit emits 168 code bytes in a parsed 784-byte
+  `ET_REL` and executes positive/negative division `6`/`-6`, remainder
+  `2`/`-2`, and negation `-42`/`42` from RX memory. The fully linked C graph
   executes `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
   `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; direct-call arrays must become
   `41:42:0`/`42:0:44`/`1:2:0`; separate RX functions exercise all four signed
   relations and prove `pointer + -1` loads 42, and the
   normal loader executes the final ELF twice with status 42. The adjust
   outcomes require real stack address formation and dereference memory writes.
-  Unsupported division, duplicate parameter names, more than three parameters or
+  Unsupported bitwise syntax, direct literal-zero division/remainder, duplicate
+  parameter names, more than three parameters or
   call arguments, missing all-path return, undefined-variable assignment/address target, pointer reassignment,
   pointer/address-as-`int` return, a known two-element array indexed at two, a known
   two-element array advanced by two or an unproved variable amount,
@@ -425,7 +438,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 614416 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 630079 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.

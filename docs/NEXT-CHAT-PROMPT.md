@@ -15,7 +15,8 @@ scanout pixel changes, virtio-GPU cursor plane, and host cursor hidden. Typed IP
 passes 12/12 unit tests, structural guard, full unit/check, and isolated full HVF
 runtime. The guest-native AArch64 toolchain now reads a valid multi-statement
 assembly startup and three C sources containing four functions from MakFS, compiles parameterized
-arithmetic, register locals, mutable parameter/local assignments,
+arithmetic including unary negation and signed division/remainder, register
+locals, mutable parameter/local assignments,
 signed equality/inequality/ordering control flow, a backward-branch `while`, a 96-byte non-leaf
 frame preserving x19-x24, bounded local address-of/dereference memory loads/stores,
 up to three independently typed `int`/`int *` parameters and call arguments in
@@ -48,6 +49,9 @@ emits 500 linked bytes in an 815-byte `ET_EXEC`, directly executes
 `helper(40)=42`, and separately compiles `sum3(int,int,int)` plus
 `invoke3(int)` into 140 bytes and a parsed 752-byte `ET_REL`, resolves its
 same-object `CALL26` with entry offset 80, and executes both as 42,
+emits a separate 168-byte three-definition arithmetic unit in a parsed 784-byte
+`ET_REL` and executes signed division `6`/`-6`, remainder `2`/`-2`, and unary
+negation `-42`/`42` while rejecting direct literal-zero divisors,
 executes both linked branch paths plus direct delta-1/delta-2 loop, exact
 indexed-array outcomes (`41:42:0`, `42:0:44`, and `1:2:0`), all four signed
 ordering relations, a `pointer + -1` load, and pointer differences `3`/`-3`,
@@ -80,15 +84,15 @@ acts as a priority time slice, fixing observed fork-child starvation. Full
 `make unit check` passes. This is functional Pi/TCG evidence only; strict
 Firefox timing still needs the unchanged idle macOS/HVF gate.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 614416, user
-service `makos-visible-selfhost-three-argument-final.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 630079, user
+service `makos-visible-selfhost-signed-arithmetic-final2.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1/qmp.sock`. Its
+`build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`340e37930e819d48a6e6ac69714c246e3eb869e452b35691fd980bc20f7f696c`;
+`4cbe815d7193b817eabf75d971f02900c57f817ee5357f96ea7fd899a60333d3`;
 the inspected 800x600 login PNG is
-`133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
+`ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
 Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 

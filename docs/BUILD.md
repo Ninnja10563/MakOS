@@ -138,7 +138,8 @@ and the final executable write. Bad version, relative path, colliding paths,
 and missing-link manifests fail closed before compilation. A bounded C
 translation unit accepts up to three `int` functions, each with up to three typed
 `int`/`int *` parameters, 0..65535 constants,
-parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
+parentheses, unary `+`/`-`, and precedence-correct `*`, signed `/`/`%`, `+`,
+and `-`, up to four register locals,
 mutable parameter/local assignments, signed `==`, `!=`, `<`, `<=`, `>`, and
 `>=` comparisons, one conditional `if` block containing a return, a bounded `while` body containing one
 or more assignments, a one- through three-argument function call, and bounded pointer
@@ -153,6 +154,9 @@ also supply the offset for an unknown-bound pointer; codegen uses signed
 `SXTW #2`, and guest execution proves both positive offsets and `-1`. Known
 local-array/derived-pointer bounds reject one-past-end constants and all
 variable offsets whose range this compiler cannot prove.
+Signed 32-bit division emits AArch64 `SDIV`; signed remainder emits `SDIV`
+plus `MSUB`, retaining C's truncation-toward-zero and dividend-sign remainder
+semantics. A direct literal-zero divisor is rejected before code emission.
 Subtracting one typed `int *` expression from another emits a 64-bit `SUB`
 followed by arithmetic shift-right two, producing a signed element count as
 the subset's 32-bit `int`. The caller remains responsible for C's same-array
@@ -201,9 +205,13 @@ compiles `sum3(int,int,int)` plus `invoke3(int)`, preserves the third parameter
 from `x2` in `x25`, emits 140 code bytes in a 752-byte ELF64 `ET_REL`, resolves
 the same-object `invoke3`→`sum3` `R_AARCH64_CALL26` relocation, links with entry
 offset 80, and executes both `sum3(40,1,1)` and `invoke3(40)` as 42 from RX
-memory. Invalid
+memory. A separate three-definition arithmetic unit emits 168 code bytes in a
+784-byte parsed ELF64 `ET_REL`, links it with entry offset zero, and executes
+positive and negative division (`6`/`-6`), remainder (`2`/`-2`), and negation
+(`-42`/`42`) from RX memory. Invalid
 relocation type/addend/site, unresolved `adjust`, a missing library object, and
-duplicate `answer` inputs are denied, as are unsupported division, a conditional-only function, a loop
+duplicate `answer` inputs are denied, as are unsupported bitwise syntax,
+literal-zero division/remainder, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.

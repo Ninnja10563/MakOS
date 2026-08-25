@@ -241,8 +241,9 @@ Last updated: 2026-08-26.
   Each bounded C
   translation unit accepts up to three
   AAPCS64 `int` functions, each with up to three typed parameters and up to four
-  register locals, unsigned 16-bit constants, parentheses, precedence-correct
-  `*`/`+`/`-`, mutable parameter/local assignments, signed
+  register locals, unsigned 16-bit constants, parentheses, unary `+`/`-`,
+  precedence-correct `*`/signed `/`/`%`/`+`/`-`, mutable parameter/local
+  assignments, signed
   `==`/`!=`/`<`/`<=`/`>`/`>=` comparisons, a conditional `if`, a bounded
   assignment-only `while`, and a
   one- through three-argument call within or across objects. Parameters may independently
@@ -291,7 +292,8 @@ Last updated: 2026-08-26.
   code bytes and a 752-byte ELF64 `ET_REL`; the linker resolves its same-object
   `CALL26`, selects entry offset 80, and RX execution requires both calls to
   return 42. Duplicate parameter names, more than three parameters, more than
-  three call arguments, division syntax,
+  three call arguments, unsupported bitwise syntax, direct literal-zero
+  division/remainder,
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
   untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
@@ -304,6 +306,10 @@ Last updated: 2026-08-26.
   three also prove the arrays change to `41:42:0`, `42:0:44`, and `1:2:0`.
   Separate RX probes exercise all four signed ordering relations and prove a
   `pointer + -1` load returns 42 plus pointer differences of `3` and `-3`.
+  A separate three-definition unit emits 168 code bytes in a parsed 784-byte
+  ELF64 `ET_REL`; 32-bit `SDIV`, quotient-based `MSUB` remainder, and unary
+  `SUB` execute positive/negative results `6`/`-6`, `2`/`-2`, and `-42`/`42`
+  from RX memory.
   Same-array provenance remains a caller obligation. The linked `answer`→`adjust` call passes the
   stack-backed `values[3] + 1` address; that internal call plus the external
   `adjust`→`combine` call require real relocations, scaled pointer addition, and
@@ -314,12 +320,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  three-argument self-host milestone is PID 614416 under
-  `makos-visible-selfhost-three-argument-final.service`, with
+  signed-arithmetic self-host milestone is PID 630079 under the user service
+  `makos-visible-selfhost-signed-arithmetic-final2.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-selfhost-three-argument-final-gZuXvkd1`; its boot clone
+  `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`; its boot clone
   exactly matches the current release image SHA-256
-  `340e37930e819d48a6e6ac69714c246e3eb869e452b35691fd980bc20f7f696c`.
+  `4cbe815d7193b817eabf75d971f02900c57f817ee5357f96ea7fd899a60333d3`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

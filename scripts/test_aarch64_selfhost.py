@@ -101,6 +101,8 @@ for fragment in (
     "static int c_pointer_register(",
     "static int c_pointer_index_register(",
     "static int c_call_argument(",
+    "static int c_unary(",
+    "static int c_literal_zero_operand(",
     "static struct c_local *c_find_local(",
     "static int c_store_stack_local(",
     "static int c_load_stack_local(",
@@ -118,6 +120,9 @@ for fragment in (
     "MAX_C_FUNCTIONS = 3",
     "MAX_C_PARAMETERS = 3",
     "UINT32_C(0x1b007c00)",
+    "UINT32_C(0x1ac00c00)",
+    "UINT32_C(0x1b008000)",
+    "UINT32_C(0x4b0003e0)",
     "UINT32_C(0x0b000000)",
     "UINT32_C(0x4b000000)",
     "UINT32_C(0x52800000)",
@@ -141,6 +146,7 @@ for fragment in (
     "UINT32_C(0x54000000)",
     "UINT32_C(0x14000000)",
     "malformed_c_source",
+    "malformed_divide_zero_source",
     "malformed_control_source",
     "malformed_loop_source",
     "malformed_assignment_source",
@@ -160,6 +166,10 @@ for fragment in (
     "three_argument_source",
     '"int sum3(int first, int second, int third) {\\n"',
     '"    return sum3(value, 1, 1);\\n"',
+    "signed_arithmetic_source",
+    '"int divide(int value) { return value / 3; }\\n"',
+    '"int remainder(int value) { return value % 6; }\\n"',
+    '"int negate(int value) { return -value; }\\n"',
     "relational_greater_source",
     "relational_at_most_source",
     "signed_pointer_offset_source",
@@ -219,9 +229,15 @@ for fragment in (
     "three_argument_object_length != 752",
     "three_argument_linked_length != 140 || three_argument_entry != 80",
     "compiled_sum3(40, 1, 1) != 42 || compiled_invoke3(40) != 42",
+    "signed_arithmetic_code_length != 168",
+    "signed_arithmetic_object_length != 784",
+    "signed_arithmetic_linked_length != 168 || signed_arithmetic_entry != 0",
+    "compiled_divide(20) != 6",
+    "compiled_remainder(20) != 2",
+    "compiled_negate(UINT32_MAX - 41) != 42",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=17",
+    "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=18",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -301,10 +317,14 @@ require(SHELL, "build_manifest=/home/user/generated.build")
 require(SHELL, "build_driver=makbuild-v1 build_inputs=4")
 require(SHELL, "translation_unit_functions=2,1,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=multi-function,multi-parameter,three-argument,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
+require(SHELL, "c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return")
 require(SHELL, "max_parameters=3 max_call_arguments=3 nonleaf_frame=96")
 require(SHELL, "three_argument_result=42 three_argument_link=et-rel,same-object")
-require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge")
+require(SHELL, "c_operators=mul,sdiv,srem,neg,sub,add")
+require(SHELL, "signed_division_results=20:6,-20:-6")
+require(SHELL, "signed_remainder_results=20:2,-20:-2")
+require(SHELL, "unary_negation_results=42:-42,-42:42")
+require(SHELL, "arithmetic_object=elf64-et-rel:784")
 require(SHELL, "branch_results=42,86 loop_results=42,2 memory_results=42,2")
 require(SHELL, "pointer_call=answer-to-adjust pointee_results=42,44,2")
 require(SHELL, "delta_results=1:42,2:44,1:2")
@@ -315,7 +335,7 @@ require(SHELL, "relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44")
 require(SHELL, "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608")
 require(SHELL, "intra_object_calls=1 cross_object_calls=2 linked_bytes=500")
 require(SHELL, "output_bytes=815 helper_result=42 persisted_reopened=1")
-require(SHELL, "malformed_c_denied=17")
+require(SHELL, "malformed_c_denied=18")
 require(SHELL, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(SHELL, "malformed_relocation_denied=1")
 require(SHELL, "unresolved_symbol_denied=1 duplicate_definition_denied=1")
@@ -348,7 +368,7 @@ require(FOCUSED_RUNTIME, "write generated-library.c")
 require(FOCUSED_RUNTIME, "write generated.build.state corrupt")
 require(FOCUSED_RUNTIME, "makbuild /home/user/generated-three.build")
 require(FOCUSED_RUNTIME, "runtime_graphs=4,3")
-require(FOCUSED_RUNTIME, "malformed_c_denied=17")
+require(FOCUSED_RUNTIME, "malformed_c_denied=18")
 require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")

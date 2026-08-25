@@ -70,8 +70,9 @@ normal VFS. Its C subset accepts up to three `int` functions in one translation
 unit, each with up to three typed `int`/`int *` parameters. Integer parameters
 may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
-locals, unsigned 16-bit constants, parentheses, multiplication, addition and
-subtraction, assign expressions to declared integer locals, contain
+locals, unsigned 16-bit constants, parentheses, unary plus/minus,
+multiplication, signed division/remainder, addition and subtraction, assign
+expressions to declared integer locals, contain
 signed `==`, `!=`, `<`, `<=`, `>`, or `>=` conditions in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
 one through three arguments. A pointer local may be initialized from `&local` or from
@@ -87,6 +88,9 @@ reject one-past-end constants and unproved variable offsets.
 the 64-bit addresses and arithmetic-shifting by two. The result is the subset's
 32-bit `int`; callers must satisfy C's same-array provenance requirement, and
 pointer-minus-scalar is rejected.
+Integer division uses 32-bit `SDIV`; remainder uses the quotient with `MSUB`,
+so negative operands follow C truncation-toward-zero semantics. A direct
+literal-zero divisor is rejected before emission.
 A final unconditional return is required.
 Fixed local `int` arrays may contain one to four exactly initialized elements
 within the same four-slot frame budget. The compiler supports constant indexed
@@ -115,6 +119,9 @@ library fails closed. A separate source emits `sum3(int,int,int)` and its
 three-argument caller `invoke3(int)` as 140 code bytes in a 752-byte object;
 the linker resolves the internal `CALL26`, selects entry offset 80, and both
 functions execute as 42 from RX memory.
+A separate three-definition arithmetic unit emits 168 code bytes in a
+784-byte object and directly executes signed division results `6`/`-6`, signed
+remainders `2`/`-2`, and unary-negation results `-42`/`42`.
 The guest reads `/home/user/generated.build` in the versioned `MAKBUILD1`
 format. Its input records select language, absolute MakFS source path,
 and distinct absolute object path; the final record selects the absolute ELF
@@ -129,7 +136,8 @@ copies it into the toolchain's child-owned SysV startup vector, and launches the
 EL0 toolchain with `argv[1]` naming the manifest. `MODE=build` consumes existing
 MakFS files and does not seed or overwrite source/manifest inputs;
 `selfhost-aarch64` alone requests the deterministic `MODE=fixture` seeding path.
-Unsupported tokens, duplicate parameter names, more than three parameters or
+Unsupported tokens and direct literal-zero division/remainder, duplicate
+parameter names, more than three parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
