@@ -4,6 +4,25 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the AArch64 guest-native build driver resolves one bounded
+  absolute quoted header at the start of each C translation unit through the
+  guest MakFS/VFS. The compiler hashes the expanded header-plus-source bytes,
+  so the existing state-last `MAKSTATE2` cache now invalidates a dependent C
+  object when its header changes while retaining unrelated objects. The
+  deterministic Pi/QEMU 10.0.11 TCG gate seeds a separate two-input header
+  graph, proves cold `0/2`, warm `2/0`, header-edit `1/1`, and rewarm `2/0`
+  hit/miss results, then launches the resulting
+  `/home/user/generated-header.elf` through the authenticated shell `run`
+  command and reaps status 42. Missing, relative, and nested includes fail
+  closed. The focused runtime, structural guard, AArch64 release/artifact
+  check, full `make unit check`, unchanged Firefox-role production SMP,
+  ordinary Native SMP, and cursor regressions pass. The production run reports
+  dispatches `11093,9905,9975`, overlap TIDs 5/6 on AP1/AP2, watcher TID 8 on
+  AP2, input INTID 78, and status 42; Native reports
+  `9859,11160,9837`, overlap TIDs 6/7 on AP2/AP3, and status 42. This is an actual
+  first header/dependency step, but remains deliberately limited to one
+  non-nested quoted header rather than a general C preprocessor or transitive
+  dependency engine.
 - 2026-08-26 the sandboxed AArch64 guest-native C compiler now accepts six
   typed parameters and six call arguments through AAPCS64 `x0`-`x5`. Values
   are retained in callee-saved `x23`-`x28`; four- through six-parameter
@@ -327,7 +346,7 @@ Last updated: 2026-08-26.
   seeding or overwriting them. `selfhost-aarch64` explicitly selects the
   separate deterministic `MODE=fixture` path. It also seeds a separate
   three-input manifest. Focused Pi/TCG runtime executes fixture mode once and
-  build mode eight times across the four- and three-input graphs, with every
+  build mode twelve times across the four-, three-, and two-input graphs, with every
   toolchain process reaped at status 42. Build mode derives a versioned
   120-byte `MAKSTATE2`
   record and commits it only after object writes and an always-relinked final
@@ -336,7 +355,11 @@ Last updated: 2026-08-26.
   the persisted object to parse and pass symbol validation. The focused run
   proves four-input cold `0/4`, warm `4/0`, corrupt-object `3/1`, rewarm `4/0`,
   edited-source `3/1`, rewarm `4/0`, and corrupt-state full `0/4` hit/miss
-  results, followed by three-input cold `0/3` and warm `3/0`. Stale, missing,
+  results, followed by three-input cold `0/3` and warm `3/0`, then quoted-header
+  cold `0/2`, warm `2/0`, edited-header selective `1/1`, and rewarm `2/0`.
+  The one-level resolver reads an absolute quoted header through MakFS, hashes
+  expanded header-plus-source bytes for cache identity, and rejects missing,
+  relative, or nested includes. Stale, missing,
   old-version, or malformed state safely forces a full rebuild.
   Each bounded C
   translation unit accepts up to six
@@ -421,16 +444,18 @@ Last updated: 2026-08-26.
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
   The library function is executed directly as `combine(40,2)=42`; the linked
   mutation paths also require the external C-to-C call. Release artifact validation,
-  focused runtime, structural guard, full
-  `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  self-hosting milestone is PID 721926 under the user service
-  `makos-visible-selfhost-six-argument-final.service`, with
+  focused runtime, structural guard, full `make unit check`, unchanged
+  Firefox-role and Native SMP regressions, cursor runtime, and a fresh visible
+  Pi/TCG login pass. The active visible self-hosting milestone is PID 738303
+  under the user service `makos-visible-selfhost-header-final3.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2`; its boot clone
+  `build/makos-pi-visible-selfhost-header-final3-QcQK2rez`; its boot clone
   exactly matches the current release image SHA-256
-  `12004f3df4d6bbed71c69004fd08d084149f0aa2341925aa7ffc540e1452100e`.
+  `31121830fbd3c84eb3835502fb72ca39b32f9da5609f798095561b10061f786f`.
+  QMP capture `login.ppm` has SHA-256
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   This is a real but deliberately bounded seed, not a
-  general C/Rust compiler/linker, transitive dependency/header engine,
+  general C preprocessor or transitive dependency engine, general C/Rust compiler/linker,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative

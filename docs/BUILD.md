@@ -260,7 +260,8 @@ addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than six functions or parameters per translation unit, general object
-count/relocation repertoire, transitive dependency/header discovery, or
+count/relocation repertoire, a general preprocessor or transitive dependency
+engine, or
 unbounded input graphs. The
 authenticated shell command `makbuild <manifest>` accepts either a name under
 `/home/user/` or an absolute `/home/user/` path. The kernel validates and copies
@@ -268,8 +269,8 @@ that path into the sandboxed toolchain's child-owned SysV `argv[1]`; build mode
 reads the existing MakFS manifest and sources without seeding or overwriting
 them. The deterministic self-host fixture uses a separate `MODE=fixture` startup
 and is the only path that seeds the documented files. The fixture also seeds a
-separate three-input manifest, and focused runtime builds both four- and
-three-input graphs. The current CLI remains bounded to one leading assembly
+separate three-input manifest plus a two-input quoted-header graph, and focused
+runtime builds all three. The current CLI remains bounded to one leading assembly
 input plus one through five C inputs. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build.
@@ -289,12 +290,32 @@ written. Missing, malformed, stale-manifest, or corrupt state safely rebuilds
 all actual inputs. Changed source or corrupt/missing object selectively rebuilds
 only the affected input.
 
+For a C input whose first line is exactly `#include "<absolute-path>"`,
+`makbuild` reads one bounded header through the guest VFS, concatenates its
+bytes with the remaining translation-unit source, and compiles and fingerprints
+that expanded byte stream. The header path must be absolute, use the same
+bounded path alphabet, and not collide with a manifest source/object/output.
+Empty, missing, oversized, relative, malformed, or nested includes fail closed.
+This one-level resolver intentionally does not implement macro expansion,
+system include search, conditional preprocessing, or recursive/transitive
+headers.
+
+The fixture seeds `/home/user/generated-header.build`, a small assembly
+startup, `/home/user/generated-header.c`, and
+`/home/user/generated-inline.h`. The focused gate builds this two-object graph
+cold (`0/2`) and warm (`2/0`), edits only the header from the authenticated
+guest shell, proves selective dependent-object rebuild (`1/1`) and rewarm
+(`2/0`), then uses `run generated-header.elf` to launch the normal validated
+ELF-by-path loader and reap status 42.
+
 The focused runtime proves four-input cold `0/4`, warm `4/0`, corrupt-object
 `3/1`, warm `4/0`, changed-source `3/1`, warm `4/0`, and corrupt-state `0/4`
-hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`
-results. All eight authenticated CLI builds link, execute, and reap with status
+hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`, plus
+header-graph cold `0/2`, warm `2/0`, edited-header `1/1`, and rewarm `2/0`
+results. All twelve authenticated CLI builds link and reap with status
 42; the state-invalidated build re-establishes a valid cache. This is bounded
-incremental reuse, not transitive header discovery, parallel builds, an
+incremental reuse with a one-level quoted-header dependency, not general
+transitive header discovery, parallel builds, an
 arbitrary graph beyond six inputs, a general dependency engine, or a trust
 mechanism. The linker also retains its 512-byte aggregate code bound and fails
 closed when a user-supplied accepted graph exceeds it.

@@ -82,6 +82,41 @@ THREE_CLI_REAP_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated-three.build "
     b"source=existing-makfs seeded=0 startup=sysv status=42"
 )
+HEADER_COLD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-header.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=0 cache_misses=2 "
+    b"state_committed=1 status=42"
+)
+HEADER_WARM_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-header.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=2 cache_misses=0 "
+    b"state_committed=1 status=42"
+)
+HEADER_SELECTIVE_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-header.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=1 cache_misses=1 "
+    b"state_committed=1 status=42"
+)
+HEADER_DEP_MARKER = (
+    b"MAKOS_AARCH64_C_HEADER_DEP_OK source=/home/user/generated-header.c "
+    b"header=/home/user/generated-inline.h resolver=quoted-absolute depth=1 "
+    b"fingerprint=expanded-source"
+)
+HEADER_GUARD_MARKER = (
+    b"MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=1 missing=denied "
+    b"relative=denied nested=denied depth=1"
+)
+HEADER_CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated-header.build "
+    b"source=existing-makfs seeded=0 startup=sysv status=42"
+)
+HEADER_RUN_MARKER = (
+    b"MAKOS_AARCH64_RUN_OK path=/home/user/generated-header.elf status=42 "
+    b"lifecycle=spawn,run,exit,wait,reap"
+)
 SIX_FUNCTION_MARKER = (
     b"MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5 "
     b"relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
@@ -236,6 +271,9 @@ def main() -> int:
                     selector, process, output, FIXTURE_BUILD_MARKER, 60
                 )
                 common.wait_for_output(
+                    selector, process, output, HEADER_GUARD_MARKER, 60
+                )
+                common.wait_for_output(
                     selector, process, output, SIX_FUNCTION_MARKER, 60
                 )
                 common.wait_for_output(
@@ -351,6 +389,61 @@ def main() -> int:
                 common.wait_for_output_count(
                     selector, process, output, THREE_CLI_REAP_MARKER, 2, 60
                 )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-header.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, HEADER_COLD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, HEADER_DEP_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, HEADER_CLI_REAP_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-header.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, HEADER_WARM_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, HEADER_CLI_REAP_MARKER, 2, 60
+                )
+                common.send_command(
+                    stream,
+                    "write generated-inline.h "
+                    "int included_answer(int value) { return value +  2; }",
+                )
+                common.wait_for_output(
+                    selector,
+                    process,
+                    output,
+                    b"MAKOS_AARCH64_SHELL_CMD write bytes=53 persisted=1",
+                    30,
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-header.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, HEADER_SELECTIVE_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, HEADER_CLI_REAP_MARKER, 3, 60
+                )
+                common.send_command(stream, "run generated-header.elf")
+                common.wait_for_output(
+                    selector, process, output, HEADER_RUN_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-header.build"
+                )
+                common.wait_for_output_count(
+                    selector, process, output, HEADER_WARM_MARKER, 2, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, HEADER_CLI_REAP_MARKER, 4, 60
+                )
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
         finally:
@@ -366,9 +459,10 @@ def main() -> int:
         "compiler=guest-native assembler=guest-native objects=4 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
-        "toolchain_startup=sysv manifest_arg=1 cli_builds=8 seeded_modes=fixture,existing "
-        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3 invalidations=object,source,state "
-        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0 "
+        "toolchain_startup=sysv manifest_arg=1 cli_builds=12 seeded_modes=fixture,existing "
+        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2 invalidations=object,source,state,header "
+        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0 "
+        "header_dependency=quoted-absolute depth=1 fingerprint=expanded-source malformed_headers=missing,relative,nested-denied header_execution=42 "
         "translation_unit_functions=2,1,1 "
         "max_functions_per_unit=6 six_function_calls=5 six_function_result=42 "
         "c_abi=aapcs64-int32-pointer64 "

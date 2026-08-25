@@ -27,6 +27,17 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The guest-native AArch64 build driver now resolves one bounded absolute
+  quoted header per C translation unit through guest MakFS and fingerprints
+  the expanded header-plus-source bytes. Focused Pi/QEMU 10.0.11 TCG runtime
+  proves a separate two-input graph cold `0/2`, warm `2/0`, header-edit
+  selective `1/1`, and rewarm `2/0`, then executes/reaps its generated ELF at
+  status 42 through the authenticated `run` shell command. Missing, relative,
+  and nested includes fail closed. This is not a general preprocessor or
+  recursive/transitive include engine; the SDK/self-hosting rows remain
+  Partial. AArch64 artifact validation, full `make unit check`, unchanged
+  Firefox-role production SMP, Native SMP, cursor runtime, and a fresh visible
+  login capture pass.
 - The sandboxed AArch64 guest-native C compiler now accepts six typed
   parameters and six call arguments through AAPCS64 `x0`-`x5`. A separate
   `sum6`/`invoke6` unit emits 196 code bytes in a parsed 808-byte ELF64
@@ -60,7 +71,21 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG self-hosting milestone: PID 721926,
+- Active visible Pi/QEMU 10.0.11 TCG quoted-header milestone: PID 738303,
+  user service `makos-visible-selfhost-header-final3.service`, session
+  `build/makos-pi-visible-selfhost-header-final3-QcQK2rez`, private read-only
+  `boot.img`, sparse `data.img`, private `vars.fd`, `qmp.sock`, `serial.log`,
+  `qemu.pid`, and `login.ppm`. The boot clone and current release image both
+  have SHA-256
+  `31121830fbd3c84eb3835502fb72ca39b32f9da5609f798095561b10061f786f`;
+  the 800x600 QMP login capture has SHA-256
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
+  It reports `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, four online PEs,
+  and post-desktop `userspace_scheduler_cpus=4`. The user-local Debian QEMU
+  build lacks the optional VNC module, so live display is disabled while the
+  guest remains fully inspectable and controllable through QMP captures/input.
+  It is the sole QEMU process. Stop it with QMP `quit` before any runtime gate.
+- Prior visible Pi/QEMU 10.0.11 TCG self-hosting milestone: PID 721926,
   user service `makos-visible-selfhost-six-argument-final.service`, VNC
   `127.0.0.1:5901`, session
   `build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2`, private read-only boot
@@ -69,15 +94,15 @@ Preserve existing files and changes.
   `login.ppm`/`login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
   `12004f3df4d6bbed71c69004fd08d084149f0aa2341925aa7ffc540e1452100e`.
-  It is the sole QEMU process and reports four online PEs,
+  It was stopped cleanly through QMP before the quoted-header work; its private
+  files remain. No QEMU was running when this increment began. It had reported four online PEs,
   the GICv2 network route (INTID 76), both input routes (INTIDs 77/78),
   `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
   `userspace_scheduler_cpus=4` with Firefox and Native AP-worker roles, and no
   fatal/panic. The visually inspected
   800x600 login PNG has SHA-256
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
-  and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 710770 and
+  and shows the native login with username focus. Prior PID 710770 and
   session `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv` were
   stopped cleanly through QMP before the six-argument self-host work; their
   files remain. Prior PID 699985 and
@@ -426,15 +451,20 @@ Preserve existing files and changes.
   the EL0 toolchain's child-owned SysV `argv[1]`. Its `MODE=build` consumes the
   already-persisted MakFS manifest and sources without seeding or overwriting
   them; `selfhost-aarch64` alone selects `MODE=fixture`. Focused Pi/TCG runtime
-  runs the fixture once and eight authenticated CLI builds across distinct
-  four- and three-input manifests, reaping every toolchain process with status
+  runs the fixture once and twelve authenticated CLI builds across distinct
+  four-, three-, and two-input manifests, reaping every toolchain process with status
   42. A derived 120-byte `MAKSTATE2` record is
   committed after object and final-ELF writes. Its non-cryptographic 64-bit
   FNV-1a manifest/source/object fingerprints are cache keys only; reuse also
   requires the object to pass ELF parsing and symbol validation. Runtime proves
   four-input cold `0/4`, warm `4/0`, corrupt-object `3/1`, rewarm `4/0`,
   edited-source `3/1`, rewarm `4/0`, and corrupt-state full `0/4` hit/miss
-  results, plus three-input cold `0/3` and warm `3/0`. The
+  results, plus three-input cold `0/3` and warm `3/0`, then quoted-header cold
+  `0/2`, warm `2/0`, edited-header selective `1/1`, and rewarm `2/0`. The
+  one-level resolver reads the absolute quoted header through MakFS and hashes
+  expanded header-plus-source bytes; missing, relative, and nested forms fail
+  closed. The authenticated shell `run` command launches and reaps the
+  header-built ELF with status 42. The
   assembler emits 76 bytes of
   `_start` code in a 688-byte object. The program C translation unit contains
   the 140-byte `answer` and 168-byte `adjust(int *pointer, int delta)` in a
@@ -503,13 +533,15 @@ Preserve existing files and changes.
   passes release artifact checks, `make unit check`, structural guard, focused
   Pi/QEMU 10.0.11 TCG runtime.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
-  Partial: this is not a full C/Rust compiler/linker, transitive dependency/
-  header engine, an arbitrary graph beyond six inputs, a parallel build
+  Partial: this is not a full C/Rust compiler/linker, general preprocessor or
+  recursive/transitive header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 721926 is the sole QEMU and no runtime-test harness is
-  active. Check process state before every runtime gate and stop the visible
-  guest through its recorded QMP socket; never start concurrent QEMU.
+- At this handoff PID 738303 in
+  `build/makos-pi-visible-selfhost-header-final3-QcQK2rez` is the sole QEMU;
+  no runtime-test harness is active. Check process state before every runtime
+  gate and stop this guest through its recorded QMP socket; never start
+  concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
   Same-thread-group get/set validates online masks; a caller excluding its
   current PE crosses a real scheduling boundary. Official-musl patch 65 maps

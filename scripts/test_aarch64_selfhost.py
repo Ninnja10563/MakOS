@@ -60,6 +60,18 @@ for fragment in (
     "MIN_BUILD_INPUTS = 2",
     "MAX_BUILD_INPUTS = 6",
     "MAX_BUILD_PATH_BYTES = 96",
+    "BUILD_SOURCE_CAPACITY = 768",
+    "BUILD_EXPANDED_SOURCE_CAPACITY = 1024",
+    "BUILD_HEADER_CAPACITY = 384",
+    "static size_t expand_build_source(",
+    "static int source_contains(",
+    "MAKOS_AARCH64_C_HEADER_DEP_OK",
+    "MAKOS_AARCH64_C_HEADER_GUARD_OK",
+    "fingerprint=expanded-source",
+    "missing=denied ",
+    "relative=denied nested=denied depth=1",
+    '"/home/user/generated-header.build"',
+    '"/home/user/generated-inline.h"',
     "malformed_build_header",
     "malformed_build_relative",
     "malformed_build_duplicate",
@@ -323,8 +335,11 @@ require(TOOLCHAIN, '"        return adjust(values + 1, 1);\\n"')
 require(TOOLCHAIN, '"        *(pointer + delta) = pointer[0] + count + 1;\\n"')
 require(SHELL, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(SHELL, "static void run_makbuild(")
+require(SHELL, "static void run_path(")
 require(SHELL, '"makbuild "')
+require(SHELL, '"run "')
 require(SHELL, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
+require(SHELL, "MAKOS_AARCH64_RUN_OK")
 require(SHELL, "source=existing-makfs seeded=0 startup=sysv status=42")
 require(SHELL, "toolchain_startup=sysv manifest_arg=1")
 require(SHELL, "build_inputs=4 cache=makstate-v2")
@@ -389,6 +404,12 @@ require(FOCUSED_RUNTIME, "SELECTIVE_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "INVALIDATED_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "THREE_INPUT_COLD_MARKER")
 require(FOCUSED_RUNTIME, "THREE_INPUT_WARM_MARKER")
+require(FOCUSED_RUNTIME, "HEADER_COLD_MARKER")
+require(FOCUSED_RUNTIME, "HEADER_WARM_MARKER")
+require(FOCUSED_RUNTIME, "HEADER_SELECTIVE_MARKER")
+require(FOCUSED_RUNTIME, "HEADER_DEP_MARKER")
+require(FOCUSED_RUNTIME, "HEADER_GUARD_MARKER")
+require(FOCUSED_RUNTIME, "HEADER_RUN_MARKER")
 require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "THREE_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "cache_hits=4 cache_misses=0")
@@ -398,7 +419,13 @@ require(FOCUSED_RUNTIME, "write generated-library.o corrupt")
 require(FOCUSED_RUNTIME, "write generated-library.c")
 require(FOCUSED_RUNTIME, "write generated.build.state corrupt")
 require(FOCUSED_RUNTIME, "makbuild /home/user/generated-three.build")
-require(FOCUSED_RUNTIME, "runtime_graphs=4,3")
+require(FOCUSED_RUNTIME, "makbuild /home/user/generated-header.build")
+require(FOCUSED_RUNTIME, "write generated-inline.h")
+require(FOCUSED_RUNTIME, "run generated-header.elf")
+require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2")
+require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
+require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute depth=1 fingerprint=expanded-source")
+require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,nested-denied header_execution=42")
 require(FOCUSED_RUNTIME, "malformed_c_denied=18")
 require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")

@@ -39,7 +39,15 @@ Branch: main
    808, one `R_AARCH64_CALL26`, direct and same-object-call results 42, and a
    denied seventh parameter/argument. The final host marker must retain
    `max_parameters=6`, `max_call_arguments=6`, `nonleaf_frame=96,112`, and
-   `six_argument_object=elf64-et-rel:808`. The Native gate must
+   `six_argument_object=elf64-et-rel:808`. It must also report the exact
+   quoted-header guard and dependency markers, prove the separate two-input
+   graph cold `0/2`, warm `2/0`, edited-header selective `1/1`, and rewarm
+   `2/0`, and execute `/home/user/generated-header.elf` with status 42 through
+   `MAKOS_AARCH64_RUN_OK`. Missing, relative, and nested headers must remain
+   denied; the final host marker must contain `runtime_graphs=4,3,2`,
+   `invalidations=object,source,state,header`, and
+   `header_dependency=quoted-absolute depth=1 fingerprint=expanded-source`.
+   The Native gate must
    report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero
    dispatch counts on AP1/AP2/AP3, a live/final overlap match containing at
