@@ -27,15 +27,16 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `82bba86`:
-  PID 155994, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-kp25oT`, private data clone
-  `build/makos-pi-visible-kp25oT/data.img`, private variables
-  `build/makos-pi-visible-kp25oT/vars.fd`, QMP
-  `build/makos-pi-visible-kp25oT/qmp.sock`, serial
-  `build/makos-pi-visible-kp25oT/serial.log`, and PID file
-  `build/makos-pi-visible-kp25oT/qemu.pid`. It is the sole QEMU process and
-  passes the four-PE EL0 marker, `MAKOS_LOGIN_UI_OK`, and
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `0e0b2f3`:
+  PID 163481, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-1O9IUZ`, private data clone
+  `build/makos-pi-visible-1O9IUZ/data.img`, private variables
+  `build/makos-pi-visible-1O9IUZ/vars.fd`, QMP
+  `build/makos-pi-visible-1O9IUZ/qmp.sock`, serial
+  `build/makos-pi-visible-1O9IUZ/serial.log`, and PID file
+  `build/makos-pi-visible-1O9IUZ/qemu.pid`. It is the sole QEMU process and
+  passes the four-PE EL0 marker, both remote group-stop markers, the concurrent
+  independent-group serialization marker, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
   before any later runtime gate.
 - A bounded four-PE AArch64 EL0 scheduler proof now passes on Pi/QEMU 10.0.11
@@ -72,9 +73,17 @@ Preserve existing files and changes.
   exception that entered just before publication is handled by the same locked
   stop contract and contributes an early-stop bit rather than losing the
   target.
+  A fifth fixture rendezvous-holds two independent CPU0/AP1 processes inside
+  syscall 119 before either can acquire the new teardown coordinator. Both
+  acquire it serially, exit with statuses 57/58, reap distinct roots, and
+  report `rendezvous_mask=0x3`/`serialized_acquire_mask=0x3` with exact frame
+  balance. This concurrent cleanup exposed an actual overflow of the former
+  64 KiB AP1 kernel stack into the adjacent kernel-root atomic; QMP inspection
+  confirmed the cleared word. All AP kernel stacks now match the BSP at 1 MiB,
+  and runtime requires `stack_bytes=1048576`.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending input/device-triggered blocking proof, concurrent group-exit
-  serialization, device-affinity and contention gates.
+  remains pending input/device-triggered blocking proof, simultaneous
+  same-group exit joining, device-affinity and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
