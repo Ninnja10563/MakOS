@@ -27,19 +27,19 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `5e16640`:
-  PID 189401, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-IpgkA3`, private data clone
-  `build/makos-pi-visible-IpgkA3/data.img`, private variables
-  `build/makos-pi-visible-IpgkA3/vars.fd`, QMP
-  `build/makos-pi-visible-IpgkA3/qmp.sock`, serial
-  `build/makos-pi-visible-IpgkA3/serial.log`, and PID file
-  `build/makos-pi-visible-IpgkA3/qemu.pid`. It is the sole QEMU process and
-  passes the four-PE EL0 marker, both remote group-stop markers, the concurrent
-  independent-group serialization marker, the simultaneous same-group join
-  marker, ordinary-config `smp_input_probe=0`, `MAKOS_LOGIN_UI_OK`, and
-  `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
-  before any later runtime gate.
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `5b9bc5d`:
+  PID 193461, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-ncttcL`, private data clone
+  `build/makos-pi-visible-ncttcL/data.img`, private variables
+  `build/makos-pi-visible-ncttcL/vars.fd`, QMP
+  `build/makos-pi-visible-ncttcL/qmp.sock`, serial
+  `build/makos-pi-visible-ncttcL/serial.log`, and PID file
+  `build/makos-pi-visible-ncttcL/qemu.pid`. It is the sole QEMU process and the
+  ordinary config reports `smp_input_probe=0`, four online PEs,
+  `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
+  `MAKOS_AARCH64_BOOT_OK`, with no fatal/panic. VNC required QEMU's bundled
+  data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
+  for user testing; use QMP `quit` before any later runtime gate.
 - A bounded four-PE AArch64 EL0 scheduler proof now passes on Pi/QEMU 10.0.11
   TCG: a GICv2 SGI wakes the AP gate, each AP enables its banked virtual-timer
   PPI, the four contexts rendezvous immediately before EL0 entry, and four
@@ -89,7 +89,8 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending network TX, block, and GPU service-affinity/contention gates.
+  remains pending stateful TCP TX, block, and GPU service-affinity/contention
+  gates.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -101,14 +102,21 @@ Preserve existing files and changes.
   boot completion. Full `make unit`, `make check`, normal release image/artifact
   checks, and the fresh visible login pass. Normal `boot/MAKOS.CFG` never arms
   this external-input wait.
-  The same opt-in image first runs an eighth fixture: AP1 sends UDP transaction
-  `0x4d4c` to QEMU slirp DNS, blocks in receive, and returns to idle. CPU0 alone
-  drains/demultiplexes the virtio-net RX ring and sends the wake SGI. Two
-  repeated Pi/TCG passes require a validated response, nonzero CPU0 frames/AP
-  deferrals, I/O idle/resume masks `0x2`, status 63, and exact frame balance.
-  The first attempt exposed rejection of legal saved EL0 NZCV bits on AP
-  re-entry; the invariant now permits NZCV only and still rejects privileged
-  SPSR state. RX is qualified; `tx_path=ap-syscall-unqualified` remains honest.
+  The same opt-in image first runs an eighth fixture. AP1 copies UDP transaction
+  `0x4d4c` into an eight-slot/1,400-byte service queue; CPU0 alone mutates the
+  virtio-net TX ring and completes it. AP1 then blocks in receive and returns to
+  idle; CPU0 alone drains/demultiplexes RX and sends the wake SGI. Three Pi/TCG
+  passes (two before and one after the final malformed-length guard) require
+  nonzero AP requests/CPU0 TX completions, a validated DNS response, nonzero
+  CPU0 RX frames/AP deferrals, matching I/O masks `0x2`, status 63, and exact
+  frame balance. One intervening post-guard run passed the network fixture but
+  missed the independently QMP-injected Ctrl-K; its immediate unchanged repeat
+  passed the whole combined gate. The first RX attempt had exposed rejection of
+  legal saved EL0 NZCV bits; only NZCV is now permitted. Copied UDPv4/v6 TX and
+  RX ownership are qualified. Stateful AP TCP TX fails closed and remains
+  pending; the AP UDP completion wait is bounded EL1 `WFE`, not scheduler-idle
+  proof. Full `make check`, `make unit`, release/image artifact checks, and the
+  SMP structural guard pass for core commit `5b9bc5d`.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -118,10 +126,10 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 189401 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 193461 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- Core ownership commit `5e16640` is ready on GitHub `main`. Generated
+- Core ownership commit `5b9bc5d` is ready for GitHub `main`. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -193,9 +201,10 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A still
    exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds.
 2. Continue the AArch64 userspace SMP row with the next real service-ownership
-   gate. Network TX is the strongest candidate after completing input and RX
-   ownership; block and GPU ownership remain after it. Stop the
-   visible QEMU through QMP before any focused runtime.
+   gate. Copied UDP TX and RX are now CPU0-owned and qualified; implement a
+   stateful CPU0 TCP service without sharing mutable connection state across
+   PEs, or take the block/GPU ownership gate next. Stop the visible QEMU through
+   QMP before any focused runtime.
 3. Boot a fresh visible login milestone after the next verified behavior change
    and record PID/session/data clone/QMP. Preserve real implementation
    requirements—no fake/spoofed apps.
