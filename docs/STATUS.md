@@ -4,25 +4,29 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
-- 2026-08-26 the AArch64 guest-native build driver resolves one bounded
-  absolute quoted header at the start of each C translation unit through the
-  guest MakFS/VFS. The compiler hashes the expanded header-plus-source bytes,
+- 2026-08-26 the AArch64 guest-native build driver resolves bounded recursive
+  absolute quoted headers on exact directive lines anywhere in each C
+  translation unit through the guest MakFS/VFS. Resolution is capped at four
+  nested headers and eight unique dependencies, detects include cycles, and
+  fingerprints the fully expanded source bytes,
   so the existing state-last `MAKSTATE2` cache now invalidates a dependent C
   object when its header changes while retaining unrelated objects. The
-  deterministic Pi/QEMU 10.0.11 TCG gate seeds a separate two-input header
-  graph, proves cold `0/2`, warm `2/0`, header-edit `1/1`, and rewarm `2/0`
+  deterministic Pi/QEMU 10.0.11 TCG gate seeds a separate two-input build
+  graph whose C unit defines one function before including a root header that
+  includes a leaf header. It proves cold `0/2`, warm `2/0`, leaf-header edit
+  `1/1`, and rewarm `2/0`
   hit/miss results, then launches the resulting
   `/home/user/generated-header.elf` through the authenticated shell `run`
-  command and reaps status 42. Missing, relative, and nested includes fail
-  closed. The focused runtime, structural guard, AArch64 release/artifact
+  command and reaps status 42. Missing, relative, cyclic, and over-depth
+  includes fail closed. The focused runtime, structural guard, AArch64 release/artifact
   check, full `make unit check`, unchanged Firefox-role production SMP,
   ordinary Native SMP, and cursor regressions pass. The production run reports
-  dispatches `11093,9905,9975`, overlap TIDs 5/6 on AP1/AP2, watcher TID 8 on
-  AP2, input INTID 78, and status 42; Native reports
-  `9859,11160,9837`, overlap TIDs 6/7 on AP2/AP3, and status 42. This is an actual
-  first header/dependency step, but remains deliberately limited to one
-  non-nested quoted header rather than a general C preprocessor or transitive
-  dependency engine.
+  dispatches `15986,17990,17575`, overlap TIDs 6/5 on AP1/AP2, watcher TID 8
+  on AP3, input INTID 78, and status 42; Native reports
+  `11049,14112,11797`, overlap TIDs 5/6 on AP1/AP3, and status 42. This is
+  genuine bounded transitive dependency discovery, but it is not a general C
+  preprocessor: macro expansion, conditional processing, system include
+  search, and graphs beyond the explicit depth/dependency limits remain absent.
 - 2026-08-26 the sandboxed AArch64 guest-native C compiler now accepts six
   typed parameters and six call arguments through AAPCS64 `x0`-`x5`. Values
   are retained in callee-saved `x23`-`x28`; four- through six-parameter
@@ -357,9 +361,10 @@ Last updated: 2026-08-26.
   edited-source `3/1`, rewarm `4/0`, and corrupt-state full `0/4` hit/miss
   results, followed by three-input cold `0/3` and warm `3/0`, then quoted-header
   cold `0/2`, warm `2/0`, edited-header selective `1/1`, and rewarm `2/0`.
-  The one-level resolver reads an absolute quoted header through MakFS, hashes
-  expanded header-plus-source bytes for cache identity, and rejects missing,
-  relative, or nested includes. Stale, missing,
+  The recursive resolver reads absolute quoted headers through MakFS, hashes
+  fully expanded source bytes for cache identity, records up to eight unique
+  dependencies across four nested headers, and rejects missing, relative,
+  cyclic, or over-depth includes. Stale, missing,
   old-version, or malformed state safely forces a full rebuild.
   Each bounded C
   translation unit accepts up to six
@@ -446,16 +451,18 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full `make unit check`, unchanged
   Firefox-role and Native SMP regressions, cursor runtime, and a fresh visible
-  Pi/TCG login pass. The active visible self-hosting milestone is PID 738303
-  under the user service `makos-visible-selfhost-header-final3.service`, with
+  Pi/TCG login pass. The active visible self-hosting milestone is PID 749533
+  under the user service
+  `makos-visible-selfhost-transitive-header-final.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-selfhost-header-final3-QcQK2rez`; its boot clone
+  `build/makos-pi-visible-selfhost-transitive-header-final-eFN3BPGd`; its boot clone
   exactly matches the current release image SHA-256
-  `31121830fbd3c84eb3835502fb72ca39b32f9da5609f798095561b10061f786f`.
+  `a0c2e7e5a8fd744ab082d046cc33f144c2b611e21d4e1d47686f0a13980f0f7a`.
   QMP capture `login.ppm` has SHA-256
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   This is a real but deliberately bounded seed, not a
-  general C preprocessor or transitive dependency engine, general C/Rust compiler/linker,
+  general macro/conditional/system-header preprocessor or unbounded dependency
+  engine, general C/Rust compiler/linker,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative

@@ -290,20 +290,24 @@ written. Missing, malformed, stale-manifest, or corrupt state safely rebuilds
 all actual inputs. Changed source or corrupt/missing object selectively rebuilds
 only the affected input.
 
-For a C input whose first line is exactly `#include "<absolute-path>"`,
-`makbuild` reads one bounded header through the guest VFS, concatenates its
-bytes with the remaining translation-unit source, and compiles and fingerprints
-that expanded byte stream. The header path must be absolute, use the same
-bounded path alphabet, and not collide with a manifest source/object/output.
-Empty, missing, oversized, relative, malformed, or nested includes fail closed.
-This one-level resolver intentionally does not implement macro expansion,
-system include search, conditional preprocessing, or recursive/transitive
-headers.
+For a C input, `makbuild` recognizes exact `#include "<absolute-path>"`
+directive lines, with optional leading spaces or tabs, anywhere in the source
+or a resolved header. It recursively reads each bounded header through the
+guest VFS, substitutes its bytes at the directive, and compiles and
+fingerprints the fully expanded byte stream. Paths must be absolute, use the
+same bounded path alphabet, and not collide with a manifest
+source/object/output. Discovery is capped at four nested headers and eight
+unique dependencies, with an active-path stack for cycle detection. Empty,
+missing, oversized, relative, malformed, cyclic, or over-depth includes fail
+closed. This bounded resolver intentionally does not implement macro expansion,
+system include search, conditional preprocessing, or unbounded include graphs.
 
 The fixture seeds `/home/user/generated-header.build`, a small assembly
-startup, `/home/user/generated-header.c`, and
-`/home/user/generated-inline.h`. The focused gate builds this two-object graph
-cold (`0/2`) and warm (`2/0`), edits only the header from the authenticated
+startup, `/home/user/generated-header.c`,
+`/home/user/generated-inline.h`, and `/home/user/generated-leaf.h`. The C unit
+defines a function before including the root header, which in turn includes the
+leaf. The focused gate builds this two-object graph cold (`0/2`) and warm
+(`2/0`), edits only the leaf header from the authenticated
 guest shell, proves selective dependent-object rebuild (`1/1`) and rewarm
 (`2/0`), then uses `run generated-header.elf` to launch the normal validated
 ELF-by-path loader and reap status 42.
@@ -314,8 +318,8 @@ hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`, plus
 header-graph cold `0/2`, warm `2/0`, edited-header `1/1`, and rewarm `2/0`
 results. All twelve authenticated CLI builds link and reap with status
 42; the state-invalidated build re-establishes a valid cache. This is bounded
-incremental reuse with a one-level quoted-header dependency, not general
-transitive header discovery, parallel builds, an
+incremental reuse with bounded recursive quoted-header discovery, not a general
+preprocessor, parallel builds, an
 arbitrary graph beyond six inputs, a general dependency engine, or a trust
 mechanism. The linker also retains its 512-byte aggregate code bound and fails
 closed when a user-supplied accepted graph exceeds it.

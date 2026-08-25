@@ -178,8 +178,10 @@ enum {
     MAX_BUILD_INPUTS = 6,
     MAX_BUILD_PATH_BYTES = 96,
     BUILD_SOURCE_CAPACITY = 768,
-    BUILD_EXPANDED_SOURCE_CAPACITY = 1024,
+    BUILD_EXPANDED_SOURCE_CAPACITY = 1536,
     BUILD_HEADER_CAPACITY = 384,
+    MAX_BUILD_HEADER_DEPTH = 4,
+    MAX_BUILD_HEADER_DEPENDENCIES = 8,
     BUILD_STATE_BYTES = 120,
     BUILD_STATE_SUFFIX_BYTES = 6,
 };
@@ -199,6 +201,13 @@ struct build_manifest {
     size_t output_path_length;
     char entry[MAX_LABEL_BYTES + 1];
     size_t entry_length;
+};
+
+struct build_dependencies {
+    char paths[MAX_BUILD_HEADER_DEPENDENCIES][MAX_BUILD_PATH_BYTES];
+    size_t path_lengths[MAX_BUILD_HEADER_DEPENDENCIES];
+    size_t count;
+    size_t max_depth;
 };
 
 static int build_path_byte(char byte) {
@@ -1465,76 +1474,141 @@ static size_t read_file(const char *path, size_t path_length, uint8_t *bytes,
     return (size_t)count;
 }
 
-static int source_contains(const uint8_t *source, size_t source_length,
-                           const char *token) {
-    size_t token_length = length(token);
-    if (!token_length || token_length > source_length) return 0;
-    for (size_t start = 0; start + token_length <= source_length; ++start) {
-        size_t index = 0;
-        while (index < token_length &&
-               source[start + index] == (uint8_t)token[index])
-            ++index;
-        if (index == token_length) return 1;
-    }
-    return 0;
-}
-
 static int build_state_path_safe(const struct build_manifest *build,
                                  const char *path, size_t path_length);
+
+struct include_context {
+    const struct build_manifest *build;
+    uint8_t *expanded;
+    size_t expanded_capacity;
+    size_t output;
+    struct build_dependencies *dependencies;
+    char active_paths[MAX_BUILD_HEADER_DEPTH][MAX_BUILD_PATH_BYTES];
+    size_t active_path_lengths[MAX_BUILD_HEADER_DEPTH];
+};
+
+static int append_expanded(struct include_context *context,
+                           const uint8_t *bytes, size_t count) {
+    if (count > context->expanded_capacity - context->output) return 0;
+    copy_bytes(context->expanded + context->output, bytes, count);
+    context->output += count;
+    return 1;
+}
+
+static int record_dependency(struct include_context *context,
+                             const char *path, size_t path_length,
+                             size_t depth) {
+    for (size_t active = 0; active < depth - 1; ++active)
+        if (build_path_equal(path, path_length,
+                             context->active_paths[active],
+                             context->active_path_lengths[active]))
+            return 0;
+    for (size_t dependency = 0;
+         dependency < context->dependencies->count; ++dependency) {
+        if (build_path_equal(path, path_length,
+                             context->dependencies->paths[dependency],
+                             context->dependencies->path_lengths[dependency])) {
+            if (depth > context->dependencies->max_depth)
+                context->dependencies->max_depth = depth;
+            return 1;
+        }
+    }
+    if (context->dependencies->count == MAX_BUILD_HEADER_DEPENDENCIES)
+        return 0;
+    size_t dependency = context->dependencies->count++;
+    for (size_t index = 0; index < path_length; ++index)
+        context->dependencies->paths[dependency][index] = path[index];
+    context->dependencies->path_lengths[dependency] = path_length;
+    if (depth > context->dependencies->max_depth)
+        context->dependencies->max_depth = depth;
+    return 1;
+}
+
+static int expand_source_recursive(struct include_context *context,
+                                   const uint8_t *source,
+                                   size_t source_length, size_t depth) {
+    static const char prefix[] = "#include \"";
+    size_t cursor = 0;
+    while (cursor < source_length) {
+        size_t line_start = cursor;
+        while (cursor < source_length && source[cursor] != '\n') ++cursor;
+        size_t line_end = cursor;
+        size_t next = cursor < source_length ? cursor + 1 : cursor;
+        size_t directive = line_start;
+        while (directive < line_end &&
+               (source[directive] == ' ' || source[directive] == '\t'))
+            ++directive;
+        if (directive == line_end || source[directive] != '#') {
+            if (!append_expanded(context, source + line_start,
+                                 next - line_start))
+                return 0;
+            cursor = next;
+            continue;
+        }
+        if (line_end - directive <= sizeof(prefix) - 1) return 0;
+        for (size_t index = 0; index < sizeof(prefix) - 1; ++index)
+            if (source[directive + index] != (uint8_t)prefix[index]) return 0;
+        size_t include_depth = depth + 1;
+        if (include_depth > MAX_BUILD_HEADER_DEPTH) return 0;
+        size_t path_cursor = directive + sizeof(prefix) - 1;
+        char path[MAX_BUILD_PATH_BYTES] = {0};
+        size_t path_length = 0;
+        while (path_cursor < line_end && source[path_cursor] != '"') {
+            if (path_length == MAX_BUILD_PATH_BYTES ||
+                !build_path_byte((char)source[path_cursor]))
+                return 0;
+            path[path_length++] = (char)source[path_cursor++];
+        }
+        if (!path_length || path[0] != '/' || path_cursor == line_end ||
+            source[path_cursor++] != '"' || path_cursor != line_end ||
+            !build_state_path_safe(context->build, path, path_length) ||
+            !record_dependency(context, path, path_length, include_depth))
+            return 0;
+        uint8_t header[BUILD_HEADER_CAPACITY] = {0};
+        size_t header_length = read_file(path, path_length, header,
+                                         sizeof(header));
+        if (!header_length || header_length == sizeof(header)) return 0;
+        size_t active = include_depth - 1;
+        for (size_t index = 0; index < path_length; ++index)
+            context->active_paths[active][index] = path[index];
+        context->active_path_lengths[active] = path_length;
+        if (!expand_source_recursive(context, header, header_length,
+                                     include_depth))
+            return 0;
+        context->active_path_lengths[active] = 0;
+        if (next < source_length && context->output &&
+            context->expanded[context->output - 1] != '\n') {
+            static const uint8_t newline = '\n';
+            if (!append_expanded(context, &newline, 1)) return 0;
+        }
+        cursor = next;
+    }
+    return 1;
+}
 
 static size_t expand_build_source(
     const struct build_manifest *build, size_t input, const uint8_t *source,
     size_t source_length, uint8_t *expanded, size_t expanded_capacity,
-    char header_path[MAX_BUILD_PATH_BYTES], size_t *header_path_length) {
-    static const char prefix[] = "#include \"";
+    struct build_dependencies *dependencies) {
     if (!build || input >= build->input_count || !source || !source_length ||
-        !expanded || !header_path_length)
+        !expanded || !dependencies)
         return 0;
-    *header_path_length = 0;
-    if (build->inputs[input].language != BUILD_LANGUAGE_C ||
-        source[0] != '#') {
+    memset(dependencies, 0, sizeof(*dependencies));
+    if (build->inputs[input].language != BUILD_LANGUAGE_C) {
         if (source_length > expanded_capacity) return 0;
         copy_bytes(expanded, source, source_length);
         return source_length;
     }
-    if (source_length <= sizeof(prefix) - 1) return 0;
-    for (size_t index = 0; index < sizeof(prefix) - 1; ++index)
-        if (source[index] != (uint8_t)prefix[index]) return 0;
-    size_t cursor = sizeof(prefix) - 1;
-    size_t path_length = 0;
-    while (cursor < source_length && source[cursor] != '"') {
-        if (path_length == MAX_BUILD_PATH_BYTES ||
-            !build_path_byte((char)source[cursor]))
-            return 0;
-        header_path[path_length++] = (char)source[cursor++];
-    }
-    if (!path_length || header_path[0] != '/' || cursor == source_length ||
-        source[cursor++] != '"' || cursor == source_length ||
-        source[cursor++] != '\n' ||
-        !build_state_path_safe(build, header_path, path_length))
+    struct include_context context = {
+        .build = build,
+        .expanded = expanded,
+        .expanded_capacity = expanded_capacity,
+        .dependencies = dependencies,
+    };
+    if (!expand_source_recursive(&context, source, source_length, 0) ||
+        !context.output)
         return 0;
-    if (source_contains(source + cursor, source_length - cursor, "#include"))
-        return 0;
-    uint8_t header[BUILD_HEADER_CAPACITY] = {0};
-    size_t header_length = read_file(header_path, path_length, header,
-                                     sizeof(header));
-    if (!header_length || header_length == sizeof(header) ||
-        source_contains(header, header_length, "#include"))
-        return 0;
-    if (header_length > expanded_capacity ||
-        source_length - cursor > expanded_capacity - header_length)
-        return 0;
-    copy_bytes(expanded, header, header_length);
-    size_t output = header_length;
-    if (source_length > cursor && header[header_length - 1] != '\n') {
-        if (output == expanded_capacity) return 0;
-        expanded[output++] = '\n';
-    }
-    if (source_length - cursor > expanded_capacity - output) return 0;
-    copy_bytes(expanded + output, source + cursor, source_length - cursor);
-    output += source_length - cursor;
-    *header_path_length = path_length;
-    return output;
+    return context.output;
 }
 
 static void section(volatile uint8_t *object, size_t section_headers,
@@ -2274,14 +2348,24 @@ static void write_build_marker(const char *mode, const char *manifest_path,
 }
 
 static void write_header_marker(const struct build_manifest *build,
-                                size_t input, const char *header_path,
-                                size_t header_path_length) {
+                                size_t input,
+                                const struct build_dependencies *dependencies) {
+    char count = (char)('0' + dependencies->count);
+    char depth = (char)('0' + dependencies->max_depth);
     write_text("MAKOS_AARCH64_C_HEADER_DEP_OK source=");
     write_bytes(build->inputs[input].source_path,
                 build->inputs[input].source_path_length);
-    write_text(" header=");
-    write_bytes(header_path, header_path_length);
-    write_text(" resolver=quoted-absolute depth=1 fingerprint=expanded-source\n");
+    write_text(" root=");
+    write_bytes(dependencies->paths[0], dependencies->path_lengths[0]);
+    write_text(" leaf=");
+    write_bytes(dependencies->paths[dependencies->count - 1],
+                dependencies->path_lengths[dependencies->count - 1]);
+    write_text(" headers=");
+    write_bytes(&count, 1);
+    write_text(" max_depth=");
+    write_bytes(&depth, 1);
+    write_text(" resolver=quoted-absolute-recursive depth_limit=4 "
+               "fingerprint=expanded-source\n");
 }
 
 static void fail(uint64_t status) {
@@ -2306,8 +2390,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "/home/user/generated-header.c";
     static const char inline_header_path[] =
         "/home/user/generated-inline.h";
-    static const char nested_header_path[] =
-        "/home/user/generated-nested.h";
+    static const char leaf_header_path[] = "/home/user/generated-leaf.h";
+    static const char cycle_a_header_path[] = "/home/user/generated-cycle-a.h";
+    static const char cycle_b_header_path[] = "/home/user/generated-cycle-b.h";
+    static const char deep1_header_path[] = "/home/user/generated-deep1.h";
+    static const char deep2_header_path[] = "/home/user/generated-deep2.h";
+    static const char deep3_header_path[] = "/home/user/generated-deep3.h";
+    static const char deep4_header_path[] = "/home/user/generated-deep4.h";
     static const char build_manifest_source[] =
         "MAKBUILD1\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -2439,17 +2528,34 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "mov x8, #5\n"
         "svc #0\n";
     static const char header_c_source[] =
+        "int identity(int value) { return value; }\n"
         "#include \"/home/user/generated-inline.h\"\n";
+    static const char header_prefix_source[] =
+        "int identity(int value) { return value; }\n";
     static const char inline_header_source[] =
+        "#include \"/home/user/generated-leaf.h\"\n";
+    static const char leaf_header_source[] =
         "int included_answer(int value) { return value + 2; }\n";
-    static const char nested_header_source[] =
-        "#include \"/home/user/generated-inline.h\"\n";
+    static const char cycle_a_header_source[] =
+        "#include \"/home/user/generated-cycle-b.h\"\n";
+    static const char cycle_b_header_source[] =
+        "#include \"/home/user/generated-cycle-a.h\"\n";
+    static const char deep1_header_source[] =
+        "#include \"/home/user/generated-deep2.h\"\n";
+    static const char deep2_header_source[] =
+        "#include \"/home/user/generated-deep3.h\"\n";
+    static const char deep3_header_source[] =
+        "#include \"/home/user/generated-deep4.h\"\n";
+    static const char deep4_header_source[] =
+        "#include \"/home/user/generated-deep5.h\"\n";
     static const char relative_include_source[] =
         "#include \"generated-inline.h\"\n";
     static const char missing_include_source[] =
         "#include \"/home/user/generated-missing.h\"\n";
-    static const char nested_include_source[] =
-        "#include \"/home/user/generated-nested.h\"\n";
+    static const char cycle_include_source[] =
+        "#include \"/home/user/generated-cycle-a.h\"\n";
+    static const char overdepth_include_source[] =
+        "#include \"/home/user/generated-deep1.h\"\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value | 2; }\n";
     static const char malformed_divide_zero_source[] =
@@ -2593,9 +2699,27 @@ __attribute__((section(".text._start"), noreturn)) void _start(
          !write_file(inline_header_path, sizeof(inline_header_path) - 1,
                      (const uint8_t *)inline_header_source,
                      sizeof(inline_header_source) - 1) ||
-         !write_file(nested_header_path, sizeof(nested_header_path) - 1,
-                     (const uint8_t *)nested_header_source,
-                     sizeof(nested_header_source) - 1)))
+         !write_file(leaf_header_path, sizeof(leaf_header_path) - 1,
+                     (const uint8_t *)leaf_header_source,
+                     sizeof(leaf_header_source) - 1) ||
+         !write_file(cycle_a_header_path, sizeof(cycle_a_header_path) - 1,
+                     (const uint8_t *)cycle_a_header_source,
+                     sizeof(cycle_a_header_source) - 1) ||
+         !write_file(cycle_b_header_path, sizeof(cycle_b_header_path) - 1,
+                     (const uint8_t *)cycle_b_header_source,
+                     sizeof(cycle_b_header_source) - 1) ||
+         !write_file(deep1_header_path, sizeof(deep1_header_path) - 1,
+                     (const uint8_t *)deep1_header_source,
+                     sizeof(deep1_header_source) - 1) ||
+         !write_file(deep2_header_path, sizeof(deep2_header_path) - 1,
+                     (const uint8_t *)deep2_header_source,
+                     sizeof(deep2_header_source) - 1) ||
+         !write_file(deep3_header_path, sizeof(deep3_header_path) - 1,
+                     (const uint8_t *)deep3_header_source,
+                     sizeof(deep3_header_source) - 1) ||
+         !write_file(deep4_header_path, sizeof(deep4_header_path) - 1,
+                     (const uint8_t *)deep4_header_source,
+                     sizeof(deep4_header_source) - 1)))
         fail(80);
     uint8_t manifest_input[512] = {0};
     size_t manifest_length = read_file(
@@ -2639,8 +2763,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                           [BUILD_EXPANDED_SOURCE_CAPACITY] = {{0}};
     const uint8_t *build_sources[MAX_BUILD_INPUTS] = {0};
     size_t build_source_lengths[MAX_BUILD_INPUTS] = {0};
-    char header_paths[MAX_BUILD_INPUTS][MAX_BUILD_PATH_BYTES] = {{0}};
-    size_t header_path_lengths[MAX_BUILD_INPUTS] = {0};
+    struct build_dependencies dependencies[MAX_BUILD_INPUTS] = {0};
     for (size_t input = 0; input < build.input_count; ++input) {
         build_sources[input] = source_storage[input];
         size_t raw_source_length = read_file(
@@ -2653,7 +2776,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         build_source_lengths[input] = expand_build_source(
             &build, input, raw_source_storage[input], raw_source_length,
             source_storage[input], sizeof(source_storage[input]),
-            header_paths[input], &header_path_lengths[input]);
+            &dependencies[input]);
         if (!build_source_lengths[input]) fail(81);
     }
     if (fixture_mode &&
@@ -2665,33 +2788,41 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         fail(81);
     if (fixture_mode) {
         uint8_t include_output[BUILD_EXPANDED_SOURCE_CAPACITY] = {0};
-        char include_path[MAX_BUILD_PATH_BYTES] = {0};
-        size_t include_path_length = 0;
+        struct build_dependencies include_dependencies = {0};
         size_t included_length = expand_build_source(
             &build, 1, (const uint8_t *)header_c_source,
             sizeof(header_c_source) - 1, include_output,
-            sizeof(include_output), include_path, &include_path_length);
-        if (included_length != sizeof(inline_header_source) - 1 ||
-            !same_name(include_path, include_path_length, inline_header_path,
-                       sizeof(inline_header_path) - 1) ||
+            sizeof(include_output), &include_dependencies);
+        if (included_length != sizeof(header_prefix_source) - 1 +
+                                   sizeof(leaf_header_source) - 1 ||
+            include_dependencies.count != 2 ||
+            include_dependencies.max_depth != 2 ||
+            !same_name(include_dependencies.paths[0],
+                       include_dependencies.path_lengths[0],
+                       inline_header_path, sizeof(inline_header_path) - 1) ||
+            !same_name(include_dependencies.paths[1],
+                       include_dependencies.path_lengths[1], leaf_header_path,
+                       sizeof(leaf_header_path) - 1) ||
             expand_build_source(
                 &build, 1, (const uint8_t *)relative_include_source,
                 sizeof(relative_include_source) - 1, include_output,
-                sizeof(include_output), include_path,
-                &include_path_length) != 0 ||
+                sizeof(include_output), &include_dependencies) != 0 ||
             expand_build_source(
                 &build, 1, (const uint8_t *)missing_include_source,
                 sizeof(missing_include_source) - 1, include_output,
-                sizeof(include_output), include_path,
-                &include_path_length) != 0 ||
+                sizeof(include_output), &include_dependencies) != 0 ||
             expand_build_source(
-                &build, 1, (const uint8_t *)nested_include_source,
-                sizeof(nested_include_source) - 1, include_output,
-                sizeof(include_output), include_path,
-                &include_path_length) != 0)
+                &build, 1, (const uint8_t *)cycle_include_source,
+                sizeof(cycle_include_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)overdepth_include_source,
+                sizeof(overdepth_include_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0)
             fail(81);
-        write_text("MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=1 missing=denied "
-                   "relative=denied nested=denied depth=1\n");
+        write_text("MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=transitive "
+                   "headers=2 max_depth=2 missing=denied relative=denied "
+                   "cycle=denied overdepth=denied depth_limit=4\n");
     }
     if (build_mode) {
         size_t cache_hits = 0, cache_misses = 0;
@@ -2706,9 +2837,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                            build_manifest_path_length, 0, build.input_count,
                            cache_hits, cache_misses);
         for (size_t input = 0; input < build.input_count; ++input)
-            if (header_path_lengths[input])
-                write_header_marker(&build, input, header_paths[input],
-                                    header_path_lengths[input]);
+            if (dependencies[input].count)
+                write_header_marker(&build, input, &dependencies[input]);
         syscall4(SYS_EXIT, 42, 0, 0, 0);
         __builtin_unreachable();
     }

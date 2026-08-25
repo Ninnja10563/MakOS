@@ -102,12 +102,14 @@ HEADER_SELECTIVE_MARKER = (
 )
 HEADER_DEP_MARKER = (
     b"MAKOS_AARCH64_C_HEADER_DEP_OK source=/home/user/generated-header.c "
-    b"header=/home/user/generated-inline.h resolver=quoted-absolute depth=1 "
+    b"root=/home/user/generated-inline.h leaf=/home/user/generated-leaf.h "
+    b"headers=2 max_depth=2 resolver=quoted-absolute-recursive depth_limit=4 "
     b"fingerprint=expanded-source"
 )
 HEADER_GUARD_MARKER = (
-    b"MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=1 missing=denied "
-    b"relative=denied nested=denied depth=1"
+    b"MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=transitive headers=2 "
+    b"max_depth=2 missing=denied relative=denied cycle=denied "
+    b"overdepth=denied depth_limit=4"
 )
 HEADER_CLI_REAP_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated-header.build "
@@ -412,7 +414,7 @@ def main() -> int:
                 )
                 common.send_command(
                     stream,
-                    "write generated-inline.h "
+                    "write generated-leaf.h "
                     "int included_answer(int value) { return value +  2; }",
                 )
                 common.wait_for_output(
@@ -462,7 +464,7 @@ def main() -> int:
         "toolchain_startup=sysv manifest_arg=1 cli_builds=12 seeded_modes=fixture,existing "
         "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2 invalidations=object,source,state,header "
         "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0 "
-        "header_dependency=quoted-absolute depth=1 fingerprint=expanded-source malformed_headers=missing,relative,nested-denied header_execution=42 "
+        "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 fingerprint=expanded-source malformed_headers=missing,relative,cycle,overdepth-denied transitive_header_execution=42 "
         "translation_unit_functions=2,1,1 "
         "max_functions_per_unit=6 six_function_calls=5 six_function_result=42 "
         "c_abi=aapcs64-int32-pointer64 "
