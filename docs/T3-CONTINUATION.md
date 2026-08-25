@@ -27,7 +27,7 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for the GPU-owner working tree:
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `97b695d`:
   PID 224308, VNC `127.0.0.1:5901`, session
   `build/makos-pi-visible-TMvEbm`, private data clone
   `build/makos-pi-visible-TMvEbm/data.img`, private variables
@@ -177,8 +177,9 @@ Preserve existing files and changes.
 - At this handoff PID 224308 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- Core production block-service commit `0868b79` is the implementation state
-  for GitHub `main`. Generated
+- Core CPU0-owned GPU-service commit `97b695d` is the implementation state for
+  GitHub `main`; block-service commit `0868b79` remains its immediate storage
+  foundation. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
