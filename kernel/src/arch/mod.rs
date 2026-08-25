@@ -6,7 +6,8 @@ mod x86_64;
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::{
     ExceptionFrame, UserContext, counter_deadline_expired, counter_deadline_millis, cpu_index,
-    disable_smp_probe_scheduler, enable_smp_probe_scheduler, enter_user_context,
+    disable_smp_probe_scheduler, enable_production_userspace_scheduler,
+    enable_smp_probe_scheduler, enter_user_context,
     idle_secondary_after_smp_probe, input_service_affinity_evidence,
     network_rx_affinity_evidence, reset_input_service_affinity_evidence,
     reset_network_rx_affinity_evidence, return_to_kernel, send_scheduler_ipi,

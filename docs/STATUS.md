@@ -4,6 +4,28 @@ Last updated: 2026-08-25.
 
 ## Implemented
 
+- 2026-08-25 AArch64 now opens a bounded production scheduler gate after
+  driver and login-UI initialization. Process leaders, shell/UI tasks,
+  and every non-Firefox role remain on CPU0; non-leader Firefox-role threads
+  are eligible on the shared AP1-3 Ready queue. All device MMIO remains
+  CPU0-owned, Ready publication sends a scheduler SGI, and an AP with no local
+  successor publishes Blocked/unowned state and returns to its WFI dispatcher
+  for sleep, I/O, input, IPC, and futex waits. Firefox's TaskController request
+  is restored from one to three workers. The focused `firefox-smp` command runs
+  the upstream musl pthread workload under the exact production Firefox role;
+  Pi/QEMU 10.0.11 TCG reports `cpu_mask=0xe`, all three APs, exclusive ownership,
+  final status 42, and dispatch counts `24,1713,157`. This fixture exercises
+  clone/futex/pipe/signal/block/wake/join/exit/wait/reap but is explicitly not
+  real Firefox or macOS/HVF performance evidence. A pre-fix repeat exposed an
+  IRQ window inside the EL1-to-EL0 restore trampoline at `0x48000164`; EL1 IRQs
+  now stay masked until the target SPSR is installed atomically by `ERET`.
+  Subsequent load gates complete all 297 selections and the focused production
+  runtime passes. Release image/artifact validation and final `make unit check`
+  pass. The broad Pi/TCG harness reaches later desktop/libc/application gates
+  but retains the pre-existing Settings resize mismatch (`560x360` observed,
+  exact `450x290` required), so it is not recorded as a full broad-gate pass.
+  Real Firefox overlap plus the unchanged idle-macOS/HVF Gate 3 remain required,
+  and the scheduler audit row stays Partial.
 - 2026-08-25 AArch64 has its first genuine four-PE EL0 scheduling proof. After
   PSCI/GIC bring-up, the kernel publishes a bounded boot-probe gate and sends a
   GICv2 SGI to three WFI APs. Each AP enables its banked virtual-timer PPI; four
@@ -135,10 +157,10 @@ Last updated: 2026-08-25.
   AP idle acknowledges IRQs around `WFI`, and CPU0 keeps its sole global timer
   armed while waiting for AP sleep deadlines.
   The current AArch64 release image/artifact check, full `make check` and
-  `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending production policy, automatic migration and
-  Firefox/desktop contention, so the scheduler audit row remains Partial and
-  still reports one desktop scheduler CPU.
+  `make unit`, and both SMP structural guards pass. The later desktop gate now
+  admits only non-leader Firefox-role threads to AP1-3; all leaders, non-Firefox
+  roles, and device MMIO remain on CPU0. Automatic migration and genuine
+  Firefox overlap/contention are still open, so the scheduler row stays Partial.
 - 2026-08-25 the AArch64 guest-native toolchain now crosses the first genuine
   object/link boundary. Two sources are written and reread through MakFS. The
   bounded assembler emits separate 680-byte and 568-byte ELF64 `ET_REL` files
@@ -547,12 +569,13 @@ Last updated: 2026-08-25.
   writable/shared file maps, COW, ASLR, higher-half kernel, swap, and kernel-heap
   reclaim remain absent.
 - Scheduling: preemptive kernel/user tasks and event block/wake work on BSP.
-  Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
-  deliberately park after proof. Current-task, kernel-return, and active-TTBR
-  state are CPU-indexed. A bounded shared Ready queue now balances six EL0 load
-  tasks over AP1-3 through 288 yields with even `99,99,99` dispatch counts and
-  exclusive ownership; production affinity/priorities, automatic migration,
-  and Firefox/desktop contention remain before the desktop gate can open.
+  Four AArch64 PEs execute coherent EL1 code with private stacks. Current-task,
+  kernel-return, and active-TTBR state are CPU-indexed. A bounded shared Ready
+  queue balances six EL0 load tasks over AP1-3 through 288 yields with even
+  `99,99,99` dispatch counts and
+  exclusive ownership. After desktop startup, Firefox workers are AP-eligible
+  while leaders and all other roles stay on CPU0; production priorities,
+  automatic migration, and real Firefox/desktop contention remain open.
   CPU0-only virtio input, virtio-net TX/RX,
   virtio-blk, and virtio-GPU submission now have focused AP runtime evidence
   for keyboard wake, copied UDPv4 DNS send/receive, timer-serviced 4 KiB

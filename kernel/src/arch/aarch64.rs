@@ -242,6 +242,7 @@ aarch64_saved_kernel_context:
     .global aarch64_enter_user_context
     .type aarch64_enter_user_context,%function
 aarch64_enter_user_context:
+    msr daifset, #0xf
     adrp x10, aarch64_saved_kernel_context
     add x10, x10, :lo12:aarch64_saved_kernel_context
     mrs x11, tpidr_el1
@@ -1090,7 +1091,10 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
         crate::fatal("AArch64 EL0 entry precondition failed");
     }
     start_scheduler_timer();
-    enable_interrupts();
+    // Keep EL1 IRQs masked across the assembly restore. The target SPSR
+    // unmasks IRQs atomically with ERET; taking an EL1 timer exception while
+    // the trampoline is midway through consuming its stack-resident context
+    // would expose a partially restored register set to the vector path.
     let status = unsafe { aarch64_enter_user_context(context) };
     disable_interrupts();
     stop_scheduler_timer();
@@ -1722,6 +1726,14 @@ fn secondary_scheduler_idle() -> ! {
 }
 
 pub(crate) fn enable_smp_probe_scheduler() {
+    SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);
+    send_scheduler_ipi();
+}
+
+/// Keep the qualified AP dispatchers live for the bounded production policy.
+/// Eligibility remains enforced by the process scheduler; this gate only
+/// admits work after all boot probes and CPU0-owned device services are ready.
+pub(crate) fn enable_production_userspace_scheduler() {
     SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);
     send_scheduler_ipi();
 }
@@ -3574,7 +3586,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             }
         }
         SYS_PROCESS_SPAWN => match frame.registers[0] {
-            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16)
+            selector @ (0 | 1 | 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17)
                 if crate::aarch64_process::process_control_allowed() =>
             {
                 match selector {
@@ -3593,6 +3605,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     14 => crate::aarch64_process::spawn_firefox(),
                     15 => crate::aarch64_process::spawn_stack_protector_probe(),
                     16 => crate::aarch64_process::spawn_toolchain(),
+                    17 => crate::aarch64_process::spawn_firefox_smp_probe(),
                     _ => None,
                 }
                 .unwrap_or(ERROR_INVALID)

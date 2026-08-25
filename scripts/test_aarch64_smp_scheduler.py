@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline invariants for bounded AArch64 SMP EL0 proof and gated desktop."""
+"""Offline invariants for AArch64 SMP probes and bounded production dispatch."""
 
 from pathlib import Path
 
@@ -26,11 +26,13 @@ TCP_PROBE = (ROOT / "user/aarch64_smp_tcp_probe.S").read_text()
 TCP_OWNER_PROBE = (ROOT / "user/aarch64_smp_tcp_owner_probe.S").read_text()
 MIGRATION_PROBE = (ROOT / "user/aarch64_smp_migration_probe.S").read_text()
 LOAD_PROBE = (ROOT / "user/aarch64_smp_load_probe.S").read_text()
+SHELL = (ROOT / "user/aarch64_shell.c").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
 TCP_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_tcp.py").read_text()
 MIGRATION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_migration.py").read_text()
+PRODUCTION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_production_smp.py").read_text()
 INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
 TCP_CONFIG = (ROOT / "boot/MAKOS-SMP-TCP.CFG").read_text()
 
@@ -52,6 +54,7 @@ for token in (
     "ACTIVE_USER_ROOTS",
     "pub(crate) fn cpu_index()",
     ".space 1024",
+    "aarch64_enter_user_context:\n    msr daifset, #0xf",
     "add x10, x10, x11, lsl #8",
     '"tlbi vae1is, {page}"',
     "root_active_on_any_cpu(root)",
@@ -61,7 +64,10 @@ for token in (
     "if cpu_index() == 0",
     "SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);",
     "SMP_USER_SCHEDULER_ENABLED.store(false, Ordering::Release);",
+    "pub(crate) fn enable_production_userspace_scheduler()",
     "user_stack_pointer_valid_in(context.ttbr0, context.sp_el0)",
+    "Keep EL1 IRQs masked across the assembly restore.",
+    "unmasks IRQs atomically with ERET",
     "pub(crate) fn send_scheduler_ipi()",
     "pub(crate) fn service_input_on_owner_cpu()",
     "pub(crate) fn service_network_rx_on_owner_cpu()",
@@ -162,8 +168,19 @@ for token in (
     "SMP_PROBE_FUTEX_RESUME_MASK",
     "SMP_PROBE_AFFINITY",
     "FutexBlockResult::BspIdle",
-    "force_smp_probe_ap_idle",
-    "runtime_stats().runnable <= 1 && !force_smp_probe_ap_idle",
+    "fn secondary_scheduler_can_idle() -> bool",
+    "runtime_stats().runnable <= 1 && !secondary_idle",
+    "PRODUCTION_WORKER_CPU_MASK",
+    "PRODUCTION_WORKER_REPORTED_MASK",
+    "PRODUCTION_WORKER_GROUP_PID",
+    "PRODUCTION_WORKER_DISPATCHES",
+    "AArch64 production worker acquired duplicate CPU ownership",
+    "MAKOS_AARCH64_PRODUCTION_SMP_READY",
+    "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK",
+    "MAKOS_AARCH64_PRODUCTION_SMP_OK",
+    "pid == PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)",
+    "pub fn spawn_firefox_smp_probe()",
+    "fixture=upstream-musl-pthread role=firefox",
     "SMP_PROBE_IO_IDLE_MASK",
     "SMP_PROBE_IO_RESUME_MASK",
     "SMP_PROBE_IPC_IDLE_MASK",
@@ -340,7 +357,7 @@ for cpu0_wrapper in (
 ):
     assert cpu0_wrapper not in PROCESS, cpu0_wrapper
 
-assert "Until every gate passes, MakOS reports `userspace_scheduler_cpus=1`." in DESIGN
+assert "The production scheduler scope remains\nbounded" in DESIGN
 assert "Firefox first paint/navigation" in DESIGN
 assert '"test.smp-input=required" => smp_input_probe = true' in MAIN
 assert '"test.smp-tcp=required" => smp_tcp_probe = true' in MAIN
@@ -350,6 +367,7 @@ assert "test-aarch64-smp-input-runtime: image-aarch64-smp-input" in MAKEFILE
 assert "test-aarch64-smp-tcp-runtime: image-aarch64-smp-tcp" in MAKEFILE
 assert "test-aarch64-smp-migration-runtime: image-aarch64" in MAKEFILE
 assert "test-aarch64-smp-load-runtime: image-aarch64" in MAKEFILE
+assert "test-aarch64-production-smp-runtime: image-aarch64" in MAKEFILE
 assert "test.smp-input=required" in INPUT_CONFIG
 assert "test.smp-tcp=required" in TCP_CONFIG
 for token in (
@@ -403,9 +421,33 @@ for token in (
 ):
     assert token in MIGRATION_RUNTIME, token
 
+for token in (
+    "syscall4(SYS_PROCESS_SPAWN, 17, 0, 0, 0)",
+    "MAKOS_AARCH64_FIREFOX_SMP_REAP_OK",
+    'exact(command, command_length, "firefox-smp")',
+):
+    assert token in SHELL, token
+
+for token in (
+    "MAKOS_AARCH64_PRODUCTION_SMP_READY",
+    "MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK",
+    "MAKOS_AARCH64_PRODUCTION_SMP_OK",
+    "MAKOS_AARCH64_FIREFOX_SMP_REAP_OK",
+    "worker_cpus=",
+    "fixture=upstream-musl-pthread",
+    "role=firefox",
+    "leader_cpu=0",
+    "device_mmio_owner=cpu0",
+    "ownership=exclusive",
+    "block=ap-idle",
+    "status=42",
+):
+    assert token in PRODUCTION_RUNTIME, token
+
 print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "
     "exception_paths=per-cpu kernel_return=per-cpu ttbr_cache=per-cpu "
     "tlbi=inner-shareable "
-    "runtime=boot-probe,4cpus desktop_enabled=0 truthful_marker=userspace_scheduler_cpus=1"
+    "runtime=boot-probe,production-firefox-workers,4cpus "
+    "policy=leader-cpu0,firefox-workers-ap-eligible device_mmio_owner=cpu0"
 )

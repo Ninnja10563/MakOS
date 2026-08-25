@@ -94,8 +94,8 @@ open gates.
 `OVMF_CODE=/path/to/OVMF_CODE.fd` overrides firmware discovery.
 `QEMU_SYSTEM_X86_64=/path/to/qemu-system-x86_64` overrides QEMU discovery.
 `AAVMF_CODE`, `AAVMF_VARS`, and `QEMU_SYSTEM_AARCH64` override AArch64 tools.
-`MAKOS_QEMU_DATA_DIR` supplies QEMU's `-L` data directory to the focused
-self-hosting runtime when using an extracted, non-system QEMU installation.
+`MAKOS_QEMU_DATA_DIR` supplies QEMU's `-L` data directory to focused AArch64
+runtimes when using an extracted, non-system QEMU installation.
 
 After login, `selfhost-aarch64` runs the guest-native assembler/static-linker
 gate. It writes and rereads two A64 sources from MakFS, emits
@@ -137,8 +137,24 @@ idle, retry the original SVC after timer wake, and report
 auto-reset event, clones a shared-VM thread, blocks its leader on AP1, signals
 from the child on CPU0, and requires AP1 idle/resume masks `0x2`, child
 thread-return status 0, parent status 44, and balanced frames. The scheduler
-closes AP dispatch again before the desktop; this is not yet general multicore
-userspace.
+closes AP dispatch between boot fixtures. After driver/login-UI initialization,
+the desktop opens a bounded production policy: leaders and all non-Firefox
+roles remain on CPU0, while non-leader Firefox-role threads are eligible on
+AP1-3. Device MMIO remains CPU0-owned; this is not general multicore userspace.
+
+Run the post-desktop production-role gate with:
+
+```sh
+make test-aarch64-production-smp-runtime
+```
+
+The shell's `firefox-smp` command executes the upstream musl pthread workload
+under the exact Firefox scheduler role. The gate requires an AP CPU mask,
+nonzero dispatch counters, exclusive ownership, AP block/idle/wake behavior,
+and status-42 reap. The Raspberry Pi/QEMU 10.0.11 TCG pass records all APs
+(`cpu_mask=0xe`). This is a scheduler-role fixture, not real Firefox or
+macOS/HVF performance evidence. Real Firefox must still pass the unchanged
+strict Gate 3 on the intended idle host.
 
 The ordinary image also contains a bounded forced-migration proof, with a
 focused early-exit harness:
@@ -167,8 +183,9 @@ Each task performs 48 real yield syscalls and exits with its distinct status
 contention points, exclusive single-CPU ownership at every recorded selection,
 bounded dispatch skew, exact reap/frame balance, and the prior migration proof.
 The 2026-08-25 Raspberry Pi/QEMU 10.0.11 TCG pass records 99 dispatches on each
-AP (297 total). This is functional AP load-sharing evidence; the desktop gate
-remains closed and macOS/HVF Firefox qualification is still required.
+AP (297 total). This is functional AP load-sharing evidence; production scope
+remains restricted to Firefox workers and macOS/HVF Firefox qualification is
+still required.
 
 The boot also runs a remote `exit_group` fixture. A CPU0 leader clones a worker
 fixed to AP1; after the worker proves active EL0 execution, the leader invokes
@@ -270,7 +287,8 @@ of recursively taking an owner lock interrupted during direct CPU0 I/O. Current
 Latest Pi/TCG evidence is 22 requests/completions: 13 reads, 6 writes, 3
 flushes, and 22 timer-service completions, with status 65 and balanced frames. Low-level ring
 submission fails closed off CPU0. The AP request wait is bounded EL1 `WFE`, not
-a scheduler idle/wake result, and general desktop SMP remains closed.
+a scheduler idle/wake result. Post-desktop AP scope remains limited to
+Firefox-role workers.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

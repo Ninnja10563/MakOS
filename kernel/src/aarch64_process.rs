@@ -213,7 +213,7 @@ impl SchedulerState {
 
     fn schedule_next_for_cpu(&mut self, cpu: usize) -> Option<makos_process_table::ProcessInfo> {
         let contexts = &self.contexts;
-        self.table.schedule_next_where_on(cpu, |info| {
+        let selected = self.table.schedule_next_where_on(cpu, |info| {
             let slot = contexts.iter().find(|slot| slot.pid == info.pid);
             if slot.is_some_and(|slot| {
                 slot.group_pid == REMOTE_GROUP_STOP_PID.load(Ordering::Acquire)
@@ -231,7 +231,27 @@ impl SchedulerState {
                         slot.pid != slot.group_pid && slot.role == ProcessRole::Firefox
                     })
             }
-        })
+        });
+        if cpu != 0 {
+            if let Some(info) = selected {
+                let production_worker = self.contexts.iter().find(|slot| {
+                    slot.pid == info.pid
+                        && slot.pid != slot.group_pid
+                        && slot.role == ProcessRole::Firefox
+                });
+                if production_worker.is_some() {
+                    let owner_count = (0..SMP_PROBE_AFFINITY.len())
+                        .filter(|candidate| self.table.current_pid_on(*candidate) == Some(info.pid))
+                        .count();
+                    if owner_count != 1 || self.table.current_pid_on(cpu) != Some(info.pid) {
+                        crate::fatal("AArch64 production worker acquired duplicate CPU ownership");
+                    }
+                    PRODUCTION_WORKER_CPU_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                    PRODUCTION_WORKER_DISPATCHES[cpu].fetch_add(1, Ordering::AcqRel);
+                }
+            }
+        }
+        selected
     }
 }
 
@@ -313,6 +333,11 @@ static SMP_LOAD_TIDS: [AtomicU64; SMP_LOAD_TASK_COUNT] =
 static SMP_LOAD_TASK_CPU_MASKS: [AtomicU64; SMP_LOAD_TASK_COUNT] =
     [const { AtomicU64::new(0) }; SMP_LOAD_TASK_COUNT];
 static SMP_LOAD_CPU_DISPATCHES: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static PRODUCTION_WORKER_CPU_MASK: AtomicU64 = AtomicU64::new(0);
+static PRODUCTION_WORKER_REPORTED_MASK: AtomicU64 = AtomicU64::new(0);
+static PRODUCTION_WORKER_GROUP_PID: AtomicU64 = AtomicU64::new(0);
+static PRODUCTION_WORKER_DISPATCHES: [AtomicU64; 4] =
+    [const { AtomicU64::new(0) }; 4];
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -333,6 +358,11 @@ fn notify_idle_cpus() {
     } else {
         unsafe { asm!("sev", options(nostack)) };
     }
+}
+
+#[inline]
+fn secondary_scheduler_can_idle() -> bool {
+    scheduler_cpu() != 0 && crate::arch::smp_probe_scheduler_enabled()
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -2173,8 +2203,13 @@ pub fn run_smp_gpu_self_test() {
 
 pub fn run_desktop_shell() -> ! {
     reset_scheduler();
+    reset_production_worker_evidence();
     let (pid, process) = spawn_process(0, SHELL_ELF, 0, ProcessRole::Shell)
         .unwrap_or_else(|| crate::fatal("AArch64 shell spawn failed"));
+    crate::arch::enable_production_userspace_scheduler();
+    crate::serial_println!(
+        "MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=leader-cpu0,firefox-workers-shared-ap device_mmio_owner=cpu0 wake=sgi block=ap-idle"
+    );
     crate::serial_println!(
         "MAKOS_AARCH64_SHELL_PROCESS_OK pid={} elf=1 el=0 entry={:#x} ttbr0={:#x} syscalls=input,auth,graphics,vfs process_table=owned",
         pid,
@@ -2290,8 +2325,10 @@ pub fn block_current_for_ipc(frame: &mut crate::arch::ExceptionFrame) -> bool {
             return None;
         }
         let Some(next) = state.schedule_next_for_cpu(cpu) else {
-            if cpu != 0 && state.contexts[index].role == ProcessRole::SmpProbe {
-                SMP_PROBE_IPC_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+            if cpu != 0 && crate::arch::smp_probe_scheduler_enabled() {
+                if state.contexts[index].role == ProcessRole::SmpProbe {
+                    SMP_PROBE_IPC_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                }
                 return Some(None);
             }
             let _ = state.table.wake(tid);
@@ -2340,13 +2377,11 @@ pub(crate) fn block_current_for_io_on(
     let now = crate::arch::monotonic_ticks();
     let mut captured = crate::arch::UserContext::capture(frame);
     captured.elr = captured.elr.saturating_sub(4);
-    // As with sleep_until, an opt-in AP qualification task must publish a
-    // genuine scheduler Blocked/idle state even if host vCPU ordering makes
-    // it the last globally runnable task at this instant.
-    let force_smp_probe_ap_idle = scheduler_cpu() != 0
-        && crate::arch::smp_probe_scheduler_enabled()
-        && current_app_role() == ProcessRole::SmpProbe;
-    if runtime_stats().runnable <= 1 && !force_smp_probe_ap_idle {
+    // A task already admitted to an AP must be able to publish Blocked and
+    // return that PE to its dispatcher even when it is the last runnable task.
+    // CPU0 retains the bounded in-syscall WFI path for its sole leader.
+    let secondary_idle = secondary_scheduler_can_idle();
+    if runtime_stats().runnable <= 1 && !secondary_idle {
         // SVC entry keeps IRQs masked through publishing io_wait. A device or
         // timer becoming pending in that window makes the following WFI exit
         // immediately, so readiness cannot be lost between userspace's failed
@@ -2444,8 +2479,10 @@ pub(crate) fn block_current_for_io_on(
         }
         let cpu = scheduler_cpu();
         let Some(next) = state.schedule_next_for_cpu(cpu) else {
-            if cpu != 0 && state.contexts[index].role == ProcessRole::SmpProbe {
-                SMP_PROBE_IO_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+            if cpu != 0 && crate::arch::smp_probe_scheduler_enabled() {
+                if state.contexts[index].role == ProcessRole::SmpProbe {
+                    SMP_PROBE_IO_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                }
                 return Ok((tid, deadline, None));
             }
             state.contexts[index].io_wait = false;
@@ -2562,8 +2599,10 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
         }
         let cpu = scheduler_cpu();
         let Some(next) = state.schedule_next_for_cpu(cpu) else {
-            if cpu != 0 && SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
-                SMP_PROBE_INPUT_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+            if cpu != 0 && crate::arch::smp_probe_scheduler_enabled() {
+                if SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
+                    SMP_PROBE_INPUT_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                }
                 return Ok((tid, None));
             }
             state.contexts[index].input_wait = false;
@@ -2716,14 +2755,10 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
         return;
     }
     frame.registers[0] = 0;
-    // The SMP qualification fixture must exercise the real AP block-to-idle
-    // scheduler transition. A late AP can otherwise observe only itself as
-    // globally runnable and take the single-task EL1 WFI shortcut, making the
-    // per-CPU idle/wake proof depend on host vCPU scheduling order.
-    let force_smp_probe_ap_idle = scheduler_cpu() != 0
-        && crate::arch::smp_probe_scheduler_enabled()
-        && current_app_role() == ProcessRole::SmpProbe;
-    if runtime_stats().runnable <= 1 && !force_smp_probe_ap_idle {
+    // AP tasks always publish a real Blocked/unowned state and return to their
+    // dispatcher. CPU0 alone uses the last-runnable in-syscall WFI fallback.
+    let secondary_idle = secondary_scheduler_can_idle();
+    if runtime_stats().runnable <= 1 && !secondary_idle {
         // No alternate EL0 task exists to run while this one sleeps. Blocking
         // then asking ProcessTable for a successor would fail and return
         // EAGAIN, turning libc nanosleep loops into 100% CPU busy-spins.
@@ -2767,8 +2802,10 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             return Err(22);
         }
         let Some(next) = state.schedule_next_for_cpu(scheduler_cpu()) else {
-            if cpu != 0 && state.contexts[index].role == ProcessRole::SmpProbe {
-                SMP_PROBE_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+            if cpu != 0 && crate::arch::smp_probe_scheduler_enabled() {
+                if state.contexts[index].role == ProcessRole::SmpProbe {
+                    SMP_PROBE_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                }
                 return Ok(None);
             }
             state.contexts[index].sleep_deadline = 0;
@@ -3106,12 +3143,14 @@ pub fn futex(
         }
         let cpu = scheduler_cpu();
         let Some(next) = state.schedule_next_for_cpu(cpu) else {
-            if state.contexts[index].role == ProcessRole::SmpProbe {
-                if cpu == 0 {
-                    return Ok(FutexBlockResult::BspIdle(tid));
+            if cpu != 0 && crate::arch::smp_probe_scheduler_enabled() {
+                if state.contexts[index].role == ProcessRole::SmpProbe {
+                    SMP_PROBE_FUTEX_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
                 }
-                SMP_PROBE_FUTEX_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
                 return Ok(FutexBlockResult::SecondaryIdle);
+            }
+            if state.contexts[index].role == ProcessRole::SmpProbe && cpu == 0 {
+                return Ok(FutexBlockResult::BspIdle(tid));
             }
             let _ = state.futex.cancel(handle);
             let _ = state.futex.take_outcome(handle);
@@ -3469,9 +3508,27 @@ fn record_smp_load_dispatch(state: &SchedulerState, pid: u64, cpu: usize) {
     SMP_LOAD_CPU_DISPATCHES[cpu].fetch_add(1, Ordering::AcqRel);
 }
 
-/// Closed-gate AP dispatch foundation. Every selection, including later
-/// timer/yield paths, is limited to boot probes or non-leader Firefox workers.
-/// Block-to-idle and remote teardown gates still prevent production enablement.
+fn reset_production_worker_evidence() {
+    PRODUCTION_WORKER_CPU_MASK.store(0, Ordering::Release);
+    PRODUCTION_WORKER_REPORTED_MASK.store(0, Ordering::Release);
+    PRODUCTION_WORKER_GROUP_PID.store(0, Ordering::Release);
+    for dispatches in &PRODUCTION_WORKER_DISPATCHES {
+        dispatches.store(0, Ordering::Release);
+    }
+}
+
+fn production_worker_evidence() -> (u64, [u64; 4]) {
+    (
+        PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
+        core::array::from_fn(|cpu| {
+            PRODUCTION_WORKER_DISPATCHES[cpu].load(Ordering::Acquire)
+        }),
+    )
+}
+
+/// AP dispatch loop for boot probes and the bounded production policy. Process
+/// leaders stay on CPU0; only non-leader Firefox-role threads enter this path
+/// after the desktop opens the gate. Device MMIO remains CPU0-owned.
 pub(crate) fn run_secondary_scheduler() -> ! {
     let cpu = scheduler_cpu();
     if cpu == 0 {
@@ -3493,9 +3550,9 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                 .contexts
                 .iter()
                 .find(|slot| slot.pid == process.pid)
-                .map(|slot| (process.pid, slot.context))
+                .map(|slot| (process.pid, slot.group_pid, slot.role, slot.context))
         });
-        let Some((pid, context)) = selected else {
+        let Some((pid, group_pid, role, context)) = selected else {
             // The EL1 return trampoline leaves IRQs masked. Unmask around the
             // idle instruction so a scheduler SGI is acknowledged rather than
             // depending on implementation-specific masked-WFI behavior, then
@@ -3510,14 +3567,30 @@ pub(crate) fn run_secondary_scheduler() -> ! {
         if SMP_PROBE_SCHEDULER_IDLE_MASK.load(Ordering::Acquire) & cpu_bit != 0 {
             SMP_PROBE_SCHEDULER_REDISPATCH_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
         }
-        smp_probe_enter(pid);
-        while !SMP_PROBE_RELEASE.load(Ordering::Acquire) {
-            unsafe { asm!("wfe", options(nomem, nostack)) };
+        let boot_probe = matches!(role, ProcessRole::SmpProbe | ProcessRole::SmpLoad);
+        if boot_probe {
+            smp_probe_enter(pid);
+            while !SMP_PROBE_RELEASE.load(Ordering::Acquire) {
+                unsafe { asm!("wfe", options(nomem, nostack)) };
+            }
+        } else if role == ProcessRole::Firefox && pid != group_pid {
+            let prior = PRODUCTION_WORKER_REPORTED_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+            if prior & cpu_bit == 0 {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK tid={} pid={} cpu={} cpu_mask={:#x} ownership=exclusive policy=leader-cpu0,firefox-workers-shared-ap",
+                    pid,
+                    group_pid,
+                    cpu,
+                    PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
+                );
+            }
         }
         crate::arch::switch_address_space(context.ttbr0);
         let _ = crate::arch::enter_user_context(&context);
         crate::arch::switch_address_space(crate::arch::kernel_root());
-        smp_probe_leave();
+        if boot_probe {
+            smp_probe_leave();
+        }
     }
 }
 
@@ -4224,6 +4297,42 @@ pub fn spawn_musl_pthread_probe() -> Option<u64> {
     Some(pid)
 }
 
+/// Run the upstream musl pthread workload under the exact production Firefox
+/// scheduler role. This qualifies clone/futex/pipe/signal workers on the live
+/// post-driver AP queue without substituting for the separate real-Firefox gate.
+pub fn spawn_firefox_smp_probe() -> Option<u64> {
+    let parent_pid = current_pid();
+    if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
+        return None;
+    }
+    reset_production_worker_evidence();
+    let argv: [&[u8]; 2] = [b"/system/firefox-smp-probe", b"production-smp"];
+    let envp: [&[u8]; 1] = [b"MODE=firefox-smp"];
+    let (pid, process) = spawn_process_sysv(
+        parent_pid,
+        MUSL_PTHREAD_PROBE_ELF,
+        ProcessRole::Firefox,
+        &argv,
+        &envp,
+    )?;
+    if !crate::security::register_session_process(
+        pid,
+        crate::security::SessionProcessRole::NativeIpc,
+    ) {
+        discard_spawned(pid);
+        return None;
+    }
+    PRODUCTION_WORKER_GROUP_PID.store(pid, Ordering::Release);
+    crate::serial_println!(
+        "MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK pid={} parent={} fixture=upstream-musl-pthread role=firefox leader_cpu=0 workers=shared-ap entry={:#x} ttbr0={:#x}",
+        pid,
+        parent_pid,
+        process.entry,
+        process.root,
+    );
+    Some(pid)
+}
+
 pub fn spawn_musl_interp_probe() -> Option<u64> {
     let parent_pid = current_pid();
     if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
@@ -4421,6 +4530,7 @@ pub fn spawn_firefox() -> Option<u64> {
         profile_state,
     );
     let process = load_dynamic_process_from_vfs(PATH)?;
+    reset_production_worker_evidence();
     let argv = [
         PATH,
         b"--no-remote".as_slice(),
@@ -4446,10 +4556,10 @@ pub fn spawn_firefox() -> Option<u64> {
         // cannot yet satisfy Firefox's isolated socket-process startup.
         // Gecko then runs its real DNS/TCP/TLS stack in the parent process.
         b"MOZ_DISABLE_SOCKET_PROCESS=1".as_slice(),
-        // MakOS userspace currently runs on the BSP.  Firefox otherwise
-        // applies its desktop minimum of two TaskController workers, adding
-        // avoidable runnable contention during cold startup.
-        b"MOZ_TASKCONTROLLER_THREADCOUNT=1".as_slice(),
+        // The leader remains on CPU0 while three TaskController workers can
+        // occupy the qualified AP queue. This matches the three secondary PEs
+        // and keeps device MMIO behind CPU0 service ownership.
+        b"MOZ_TASKCONTROLLER_THREADCOUNT=3".as_slice(),
         b"MOZ_HEADLESS_WIDTH=700".as_slice(),
         b"MOZ_HEADLESS_HEIGHT=400".as_slice(),
         b"MOZ_LOG=timestamp,sync,Widget:5,WidgetFocus:5,nsAppRunner:5".as_slice(),
@@ -4470,6 +4580,7 @@ pub fn spawn_firefox() -> Option<u64> {
         discard_spawned(pid);
         return None;
     }
+    PRODUCTION_WORKER_GROUP_PID.store(pid, Ordering::Release);
     if let Some(browser_pid) = with_state(|state| {
         state
             .contexts
@@ -4696,15 +4807,34 @@ pub fn wait(pid: u64) -> Option<u64> {
             exit_status,
             ..
         } => {
+            let (role, group_pid) = state
+                .contexts
+                .iter()
+                .find(|slot| slot.pid == pid)
+                .map_or((ProcessRole::None, 0), |slot| (slot.role, slot.group_pid));
             if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) {
                 *slot = ContextSlot::EMPTY;
             }
-            Some((resource, exit_status))
+            Some((resource, exit_status, role, group_pid))
         }
         WaitResult::NoChild | WaitResult::Pending => None,
     });
-    let (resource, status) = reaped?;
+    let (resource, status, role, group_pid) = reaped?;
     cleanup_reaped(pid, resource, status);
+    if role == ProcessRole::Firefox
+        && pid == group_pid
+        && pid == PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)
+    {
+        let (cpu_mask, dispatches) = production_worker_evidence();
+        crate::serial_println!(
+            "MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask={:#x} dispatches={},{},{} worker_role=firefox leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle status={}",
+            cpu_mask,
+            dispatches[1],
+            dispatches[2],
+            dispatches[3],
+            status,
+        );
+    }
     Some(status)
 }
 

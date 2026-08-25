@@ -34,7 +34,7 @@ assert "const SHMEM_TRUNCATE_TRACE_LIMIT: u64 = 8;" in SHMEM
 assert "result.is_err()" in SHMEM
 assert "const FIREFOX_EPOLL_TRACE_LIMIT: u64 = 8;" in EPOLL
 assert EPOLL.count("< FIREFOX_EPOLL_TRACE_LIMIT") == 3
-assert 'b"MOZ_TASKCONTROLLER_THREADCOUNT=1".as_slice()' in PROCESS
+assert 'b"MOZ_TASKCONTROLLER_THREADCOUNT=3".as_slice()' in PROCESS
 assert "kMaxConnectionThreadCount = 2" in POOL_PATCH
 assert "kMaxConnectionThreadCount = 20" in POOL_PATCH
 assert "mPool->SetThreadLimit(4)" in POOL_PATCH

@@ -521,6 +521,21 @@ static void run_musl_pthread_probe(void) {
         write_text("musl-pthread: runtime failed\n");
 }
 
+static void run_firefox_smp_probe(void) {
+    uint64_t pid = syscall4(SYS_PROCESS_SPAWN, 17, 0, 0, 0);
+    if (pid == UINT64_MAX) {
+        write_text("firefox-smp: launch failed\n");
+        return;
+    }
+    uint64_t status;
+    while ((status = syscall4(SYS_PROCESS_WAIT, pid, 0, 0, 0)) == UINT64_MAX)
+        syscall4(SYS_YIELD, 0, 0, 0, 0);
+    if (status == 42)
+        write_text("MAKOS_AARCH64_FIREFOX_SMP_REAP_OK fixture=upstream-musl-pthread role=firefox status=42 lifecycle=spawn,threads,ap-dispatch,block,wake,join,exit,wait,reap\n");
+    else
+        write_text("firefox-smp: runtime failed\n");
+}
+
 static void run_musl_interp_probe(void) {
     uint64_t pid = syscall4(SYS_PROCESS_SPAWN, 9, 0, 0, 0);
     if (pid == UINT64_MAX) {
@@ -687,7 +702,7 @@ static const char *completion(const uint8_t *prefix, size_t prefix_length) {
     static const char *commands[] = {
         "help", "status", "clear", "pwd", "ls", "ls -l", "cat note.txt", "cp ", "mv ", "wc ", "echo ",
         "whoami", "uname -a", "uptime", "mem", "ps", "stat note.txt",
-        "touch ", "write ", "rm ", "edit ", "nano ", "python ", "firefox", "selfhost-aarch64", "abi-startup", "musl-probe", "musl-crt", "musl-pthread", "musl-dynamic", "musl-shared", "musl-dso", "musl-dlopen", "musl-exec", "pkg-probe-install", "pkg-probe-remove", "pkg-probe-rollback", "pkg-probe-query-v1", "pkg-probe-query-v2", "adduser ", "signout", "exit",
+        "touch ", "write ", "rm ", "edit ", "nano ", "python ", "firefox", "firefox-smp", "selfhost-aarch64", "abi-startup", "musl-probe", "musl-crt", "musl-pthread", "musl-dynamic", "musl-shared", "musl-dso", "musl-dlopen", "musl-exec", "pkg-probe-install", "pkg-probe-remove", "pkg-probe-rollback", "pkg-probe-query-v1", "pkg-probe-query-v2", "adduser ", "signout", "exit",
     };
     const char *found = 0;
     for (size_t index = 0; index < sizeof(commands) / sizeof(commands[0]); ++index) {
@@ -857,6 +872,8 @@ __attribute__((noreturn)) void _start(void) {
                     run_stack_protector_probe();
                 } else if (exact(command, command_length, "musl-pthread")) {
                     run_musl_pthread_probe();
+                } else if (exact(command, command_length, "firefox-smp")) {
+                    run_firefox_smp_probe();
                 } else if (exact(command, command_length, "musl-dynamic")) {
                     run_musl_interp_probe();
                 } else if (exact(command, command_length, "musl-shared")) {

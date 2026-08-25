@@ -27,23 +27,29 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG self-host-linker milestone:
-  PID 275664, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-ItzH84jx`, private data clone
-  `build/makos-pi-visible-selfhost-ItzH84jx/data.img`, private variables
-  `build/makos-pi-visible-selfhost-ItzH84jx/vars.fd`, QMP
-  `build/makos-pi-visible-selfhost-ItzH84jx/qmp.sock`, serial
-  `build/makos-pi-visible-selfhost-ItzH84jx/serial.log`, PID file
-  `build/makos-pi-visible-selfhost-ItzH84jx/qemu.pid`, and QMP framebuffer
-  capture `build/makos-pi-visible-selfhost-ItzH84jx/login.png`. It is the sole QEMU
+- Active visible Pi/QEMU 10.0.11 TCG production-SMP milestone:
+  PID 286742, user service `makos-visible-production-smp.service`, VNC
+  `127.0.0.1:5901`, session
+  `build/makos-pi-visible-production-smp-nL4neGKM`, private boot clone
+  `build/makos-pi-visible-production-smp-nL4neGKM/boot.img`, private data clone
+  `build/makos-pi-visible-production-smp-nL4neGKM/data.img`, private variables
+  `build/makos-pi-visible-production-smp-nL4neGKM/vars.fd`, QMP
+  `build/makos-pi-visible-production-smp-nL4neGKM/qmp.sock`, serial
+  `build/makos-pi-visible-production-smp-nL4neGKM/serial.log`, PID file
+  `build/makos-pi-visible-production-smp-nL4neGKM/qemu.pid`, and QMP framebuffer
+  capture `build/makos-pi-visible-production-smp-nL4neGKM/login.png`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
-  `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
-  `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load counters `100,100,97`, with no
+  initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
+  `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
+  `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
+  counters `77,107,116`, with no
   fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 275664/session `build/makos-pi-visible-selfhost-ItzH84jx` was
+  stopped cleanly through QMP before the production-SMP work; its files remain.
   Prior PID 261990/session `build/makos-pi-visible-load-LhlxSbON` was stopped
   cleanly through QMP before the self-hosting build/runtime work; its files remain.
   Prior PID 248288/session `build/makos-pi-visible-migration-wHSJuT` was stopped
@@ -107,8 +113,9 @@ Preserve existing files and changes.
   stop acknowledgement, and never duplicates cleanup. Runtime proves
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
-  The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending load balancing and broader contention.
+  The boot-fixture gate closes before the desktop. The later production gate
+  admits only Firefox workers; general roles, automatic load balancing, and
+  genuine Firefox contention remain pending.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -218,8 +225,23 @@ Preserve existing files and changes.
   Reproducer: `make test-aarch64-smp-load-runtime`. Full `make unit check`, the
   structural guard, release image/artifact build, focused runtime, and visible
   login pass. Production priorities/affinity, automatic migration and real
-  Firefox/desktop contention remain open; `userspace_scheduler_cpus=1` stays
-  truthful.
+  Firefox/desktop contention remain open.
+- The desktop now opens a bounded production scheduler policy after driver and
+  login-UI initialization. Leaders, non-Firefox roles, and all device MMIO stay
+  on CPU0; only non-leader Firefox-role threads are AP-eligible. AP sleep, I/O,
+  input, IPC, and futex no-successor cases publish Blocked/unowned state and
+  return to WFI. Firefox requests three TaskController workers. A focused
+  upstream-musl pthread fixture runs under that exact role and passes Pi/QEMU
+  10.0.11 TCG on AP1-3: `cpu_mask=0xe`, exclusive ownership, dispatch counters
+  `24,1713,157`, and status 42. Reproducer:
+  `make test-aarch64-production-smp-runtime`. This is not real Firefox evidence.
+  Qualification also exposed an IRQ window in the EL1-to-EL0 restore
+  trampoline; EL1 stays masked until target SPSR takes effect at `ERET`.
+  Subsequent 297-selection load gates and focused production runtime pass.
+  Final `make unit check`, release image/artifact checks, structural guards,
+  and visible login pass. Two broad Pi/TCG attempts continued deep into the UI
+  suite but retained the known exact Settings resize mismatch (`560x360`
+  observed versus `450x290` required), so no full broad-gate pass is claimed.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -239,7 +261,7 @@ Preserve existing files and changes.
   executions. Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows
   remain Partial because this is a bounded static linker, not a C/Rust compiler,
   general linker/build system/debugger, or substantial in-guest MakOS build.
-- At this handoff PID 275664 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 286742 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -323,9 +345,11 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
-2. Continue the AArch64 userspace SMP row with automatic load balancing and
-   repeated migration contention, retaining CPU0-exclusive device ownership. Stop the visible QEMU
-   through QMP before any focused runtime.
+2. Use the bounded production policy in the next genuine Firefox macOS/HVF run
+   to require overlapping Firefox TIDs on multiple guest CPUs. Then continue
+   automatic load balancing and repeated migration contention while retaining
+   CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
+   any focused runtime.
 3. Expand the bounded guest ET_REL linker toward more symbols/relocations and a
    real compiler/build step, then a substantial in-guest build. Preserve real
    implementation requirements—no fake/spoofed apps.

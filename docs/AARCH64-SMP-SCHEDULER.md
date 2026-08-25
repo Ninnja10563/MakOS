@@ -29,9 +29,12 @@ validated RW/NX thread stack, signals the process-owned handle, and executes
 thread-only exit with no CPU0 successor. AP1 resumes the exact leader, which
 closes the handle and exits 44. Runtime requires `ipc_idle_mask=0x2`,
 `ipc_resume_mask=0x2`, status-0 child return, parent reap, and exact frame
-recovery. The gate then closes and APs return to interrupt-masked WFI. General
-desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
-the truthful scope marker.
+recovery. The gate closes between the qualification fixtures. After driver and
+login-UI initialization, the desktop opens a bounded production gate:
+process leaders, the shell, UI services, and every non-Firefox role remain on
+CPU0, while non-leader Firefox-role threads are AP-eligible on the shared Ready
+queue. Device MMIO remains CPU0-owned. The production scheduler scope remains
+bounded; this is not general desktop SMP scheduling.
 
 A third embedded EL0 program proves remote-running group teardown. Its leader
 clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
@@ -114,7 +117,8 @@ waiting in EL1. Liveness now includes Ready/Running/Blocked tasks; Ready
 publication uses the scheduler SGI; AP idle acknowledges interrupts around
 `WFI`; and CPU0 explicitly keeps its scheduler timer armed during the bounded
 completion wait. This qualifies shared-queue AP load execution under repeated
-yield contention. The general desktop gate remains closed.
+yield contention. The gate closes again before later boot fixtures and only
+reopens under the bounded production policy after desktop startup.
 
 An opt-in seventh fixture runs only with `test.smp-input=required`, after the
 virtio keyboard/tablet and graphics service are initialized. AP1 enters the
@@ -202,14 +206,18 @@ The offline scheduler foundation adds:
   inner-shareable page invalidation (`TLBI VAE1IS`) for shared process roots.
 
 These changes preserve existing CPU0 wrappers. The boot probe is genuine
-parallel EL0 evidence, but it is not evidence of parallel Firefox execution or
-safe general process migration.
+parallel EL0 evidence, but it is not evidence of real Firefox overlap or safe
+general process migration. A separate production-role fixture uses the
+upstream musl pthread ELF under the exact Firefox scheduler role to exercise
+clone, futex, pipe, signal, AP block/wake, join, exit, wait, and reap after the
+desktop has initialized. It is explicitly not a substitute for real Firefox.
 
 ## Next enablement blockers
 
-- Initial and exception-time AP selectors now restrict candidates to
-  non-leader Firefox workers. Broader affinity/load balancing remains gated
-  until device-owning and PID1/UI paths are qualified.
+- Initial and exception-time AP selectors restrict candidates to non-leader
+  Firefox workers after desktop startup. Leaders and all other roles remain on
+  CPU0. Broader affinity/load balancing remains gated until device-owning and
+  PID1/UI paths are qualified.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
   ownership through a Ready/unowned publication. Six load tasks also contend
   through 288 yields on the shared Ready queue and receive 99 dispatches on
@@ -241,12 +249,15 @@ safe general process migration.
   native surface ABI. TCPv6 remains to be qualified.
 - Ready publication now sends the scheduler SGI after the process lock's
   Release unlock; AP idle acknowledges IRQs around `WFI`, then consumes queue
-  state after Acquire lock acquisition. This has bounded boot-probe proof but
-  still needs production desktop/Firefox qualification.
+  state after Acquire lock acquisition. This has boot-probe coverage and a
+  production-role pthread fixture; genuine Firefox overlap and performance on
+  the intended idle macOS/HVF host remain required.
 
-Outside the bounded boot proof, APs remain in closed-gate WFI at EL1. Routine
-BSP `SEV` traffic cannot wake this gate and consume host CPU. The probe issues
-a GICv2 SGI only after publishing its enabled state.
+Before desktop startup and between bounded boot fixtures, APs remain in
+closed-gate WFI at EL1. After desktop startup, they stay available for eligible
+Firefox workers and return to WFI when the shared queue has no eligible task.
+Routine BSP `SEV` traffic cannot open the gate. Enablement and Ready publication
+issue a GICv2 SGI after their Release stores.
 
 ## Required runtime architecture
 
@@ -320,4 +331,7 @@ a GICv2 SGI only after publishing its enabled state.
 - Idle CPU, cursor integrity, pointer latency, and CPU0 fallback suites remain
   green.
 
-Until every gate passes, MakOS reports `userspace_scheduler_cpus=1`.
+The post-desktop marker reports `userspace_scheduler_cpus=4` only for this
+bounded policy. The original audit remains Partial until genuine Firefox
+threads overlap on multiple guest CPUs under the unchanged idle-macOS/HVF
+runtime gate and broader production roles are safely scheduled.
