@@ -441,6 +441,39 @@ pub fn register_session_process(pid: u64, role: SessionProcessRole) -> bool {
     })
 }
 
+/// Bind the immutable opt-in SMP block fixture as the normal uid/gid 1000
+/// file writer while no login session exists. This is kernel-only and refuses
+/// to run once authentication has opened a session; process reap clears the
+/// binding through the same path used by ordinary session applications.
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn register_smp_block_probe(pid: u64) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    with_session(|session| {
+        if session.active {
+            return false;
+        }
+        let Some(binding) = session
+            .bindings
+            .iter_mut()
+            .find(|binding| binding.pid == pid || binding.pid == 0)
+        else {
+            return false;
+        };
+        *binding = CredentialBinding {
+            pid,
+            credentials: Credentials {
+                uid: INIT_UID,
+                gid: INIT_GID,
+                capabilities: CAP_FILE_WRITE,
+            },
+            generation: session.generation,
+        };
+        true
+    })
+}
+
 #[cfg(target_arch = "aarch64")]
 pub fn clear_process_credentials(pid: u64) {
     with_session(|session| {

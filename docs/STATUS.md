@@ -73,20 +73,26 @@ Last updated: 2026-08-25.
   fails closed off CPU0, copied UDPv4/v6 is qualified, and stateful AP TCP TX
   remains fail-closed and pending. The AP UDP completion wait is a bounded EL1
   `WFE` loop, not a scheduler-idle proof.
-  A ninth fixture opens the real mode-0644 persistent `/boot-count.txt` on AP1
-  and invokes syscall 97 `fsync`. An eight-slot copied-request queue lets CPU0
-  exclusively submit virtio-blk operations; low-level submission fails closed
-  off CPU0. Two passing Pi/TCG runs each report one AP request, one CPU0
-  completion, one successful FLUSH, status 65, and exact frame balance. The
-  intervening repeat failed earlier in the unchanged EL1 exit-group rendezvous
-  and never reached block initialization. Queue implementations for 512-byte
-  and 4 KiB read/write pass compile/structural gates but lack guest runtime.
-  The AP FLUSH wait is bounded EL1 `WFE`, not scheduler-idle proof; production
-  service-point contention is still open.
+  A ninth fixture creates a private mode-0600 uid/gid-1000 inode and gives its
+  immutable AP1 probe the minimum file-write capability before login. Through
+  normal VFS/MakFS4 calls, AP1 writes and `fsync`s 4 KiB, closes, reopens, reads
+  and byte-verifies 4 KiB; the kernel then removes the fixture. An eight-slot
+  copied-request queue lets CPU0 exclusively submit virtio-blk operations;
+  low-level submission fails closed off CPU0. CPU0's production 100 Hz timer
+  bottom half services the queue and defers one tick if it interrupted direct
+  CPU0 I/O with the owner lock held. The passing combined Pi/TCG gate reports
+  33 requests/completions: 18 reads, 10 writes, 5 flushes, and all 33 timer
+  serviced, with status 65 and exact frame balance. Two initial runs with an
+  unnecessary fixed five-guest-second CPU0 evidence window passed the block
+  marker but exhausted the unchanged 90-second Pi/TCG harness window before
+  the later input readiness marker; reducing that evidence window to one guest
+  second retained 100 timer opportunities and every counter requirement, then
+  passed block, network, input, and boot. The AP request wait is bounded EL1
+  `WFE`, not scheduler-idle proof.
   The current AArch64 release image/artifact check, full `make check` and
   `make unit`, and both SMP structural guards pass. General desktop/Firefox AP
-  scheduling remains gated pending stateful TCP TX, block read/write and
-  production servicing, and GPU service affinity/contention proof, so the
+  scheduling remains gated pending stateful TCP TX and GPU service
+  affinity/contention proof, plus migration and load balancing, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
@@ -482,10 +488,11 @@ Last updated: 2026-08-25.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
   state are CPU-indexed; multicore userspace still needs AP run queues,
-  stateful TCP/block-read-write/GPU service qualification, forced migration,
-  and load balancing before the desktop gate can open. CPU0-only virtio input,
-  virtio-net TX/RX, and virtio-blk submission now have focused AP runtime
-  evidence for keyboard wake, copied UDPv4 DNS send/receive, and `fsync` FLUSH.
+  stateful TCP/GPU service qualification, forced migration, and load balancing
+  before the desktop gate can open. CPU0-only virtio input, virtio-net TX/RX,
+  and virtio-blk submission now have focused AP runtime evidence for keyboard
+  wake, copied UDPv4 DNS send/receive, and timer-serviced 4 KiB filesystem
+  read/write plus `fsync`/FLUSH.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID
@@ -680,7 +687,12 @@ Last updated: 2026-08-25.
   later block-service image passed twice with a real AP1 `fsync`/CPU0 FLUSH.
   One intervening run failed in the earlier unchanged EL1 exit-group
   rendezvous and never reached block initialization; the exact immediate
-  repeat passed block, network, input, and boot completion.
+  repeat passed block, network, input, and boot completion. The subsequent
+  production timer-service gate completed 33 AP filesystem requests (18 reads,
+  10 writes, 5 flushes). Its first two five-guest-second evidence runs reached
+  the block marker but consumed the focused harness window before the later
+  input readiness marker; a one-guest-second window retained exact timer-owner
+  counter proof and passed the complete unchanged 90-second combined gate.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,

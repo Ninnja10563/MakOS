@@ -81,6 +81,10 @@ static SMP_BLOCK_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-block-probe.elf"
 ));
+static SMP_BLOCK_OWNER_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-block-owner-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -1412,6 +1416,14 @@ pub fn run_smp_network_rx_self_test() {
 }
 
 pub fn run_smp_block_io_self_test() {
+    let probe_inode = crate::makfs4_volume::create_inode(
+        1,
+        b".smp-block-io",
+        0o100600,
+        crate::security::INIT_UID,
+        crate::security::INIT_GID,
+    )
+    .unwrap_or_else(|_| crate::fatal("AArch64 SMP block fixture inode create failed"));
     let free_before = crate::mm::free_frames();
     reset_scheduler();
     SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
@@ -1426,20 +1438,45 @@ pub fn run_smp_block_io_self_test() {
         .0;
     let sentinel = spawn_process(
         0,
-        SMP_CONCURRENT_EXIT_PROBE_ELF,
-        66,
+        SMP_BLOCK_OWNER_PROBE_ELF,
+        0,
         ProcessRole::SmpProbe,
     )
     .unwrap_or_else(|| crate::fatal("AArch64 SMP block sentinel spawn failed"))
     .0;
+    if !crate::security::register_smp_block_probe(waiter) {
+        crate::fatal("AArch64 SMP block probe credential binding failed");
+    }
     SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
     SMP_PROBE_AFFINITY[1].store(waiter, Ordering::Release);
     crate::arch::enable_smp_probe_scheduler();
     notify_idle_cpus();
 
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP block CPU0 sentinel absent"));
+        if process.pid != sentinel {
+            crate::fatal("AArch64 SMP block CPU0 affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == sentinel)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP block CPU0 context absent"))
+            .context
+    });
+    smp_probe_enter(sentinel);
+    crate::arch::switch_address_space(context.ttbr0);
+    let sentinel_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if sentinel_status != 66 {
+        crate::fatal("AArch64 SMP block CPU0 sentinel status invalid");
+    }
+
     let completion_deadline = crate::arch::counter_deadline_millis(20_000);
     loop {
-        crate::aarch64_virtio_blk::service_requests();
         let complete = with_state(|state| {
             state.table.get(waiter).is_some_and(|info| {
                 info.state == makos_process_table::ProcessState::Zombie
@@ -1466,9 +1503,6 @@ pub fn run_smp_block_io_self_test() {
             crate::fatal("AArch64 SMP block waiter reap failed");
         };
         reaped[0] = (waiter, resource, exit_status);
-        if state.table.terminate(sentinel, 66).is_none() {
-            crate::fatal("AArch64 SMP block sentinel terminate failed");
-        }
         let WaitResult::Reaped {
             resource,
             exit_status,
@@ -1488,22 +1522,38 @@ pub fn run_smp_block_io_self_test() {
         cleanup_reaped(pid, resource, status);
     }
 
-    let (owner_completions, ap_requests, flush_completions) =
+    let (
+        owner_completions,
+        ap_requests,
+        read_completions,
+        write_completions,
+        flush_completions,
+        timer_completions,
+    ) =
         crate::aarch64_virtio_blk::service_affinity_evidence();
+    if crate::makfs4_volume::remove_inode(probe_inode).is_err() {
+        crate::fatal("AArch64 SMP block fixture inode cleanup failed");
+    }
     if reaped[0].2 != 65
         || reaped[1].2 != 66
         || owner_completions == 0
         || owner_completions != ap_requests
-        || flush_completions != 1
+        || read_completions == 0
+        || write_completions == 0
+        || flush_completions == 0
+        || timer_completions != owner_completions
         || crate::mm::free_frames() != free_before
     {
         crate::fatal("AArch64 SMP block userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0 device=virtio-blk request=fsync ring_activity=real mmio_owner=cpu0 transport=bounded-copy-queue owner_completions={} ap_requests={} flush_completions={} wait=bounded-el1-wfe status=65 read_write_proxy=structural free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        "MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0 device=virtio-blk requests=read4k,write4k,fsync ring_activity=real mmio_owner=cpu0 transport=bounded-copy-queue service_point=cpu0-timer-bottom-half owner_completions={} ap_requests={} read_completions={} write_completions={} flush_completions={} timer_completions={} wait=bounded-el1-wfe status=65 file=/home/user/.smp-block-io lifecycle=create,write,fsync,reopen,read,verify,remove free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
         owner_completions,
         ap_requests,
+        read_completions,
+        write_completions,
         flush_completions,
+        timer_completions,
     );
     reset_scheduler();
 }

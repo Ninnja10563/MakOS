@@ -5554,6 +5554,13 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
         return;
     }
     if timer {
+        if cpu_index() == 0 {
+            // AP block calls publish copied requests before sleeping in EL1.
+            // The CPU0 timer is the production owner service point. The
+            // driver defers a tick if this IRQ interrupted a direct CPU0
+            // request, avoiding recursive acquisition of the device lock.
+            crate::aarch64_virtio_blk::service_requests_from_timer();
+        }
         if kind == 9 {
             // Socket/net state uses non-recursive locks. Only run the RX
             // bottom half when the IRQ interrupted EL0; running it over an

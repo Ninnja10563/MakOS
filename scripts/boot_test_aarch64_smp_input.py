@@ -149,10 +149,17 @@ def main() -> int:
                     b"smp_input_probe=1",
                     b"MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices=2",
                     b"MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0",
-                    b"device=virtio-blk request=fsync ring_activity=real",
-                    b"mmio_owner=cpu0 transport=bounded-copy-queue owner_completions=",
-                    b"ap_requests=1 flush_completions=1 wait=bounded-el1-wfe status=65",
-                    b"read_write_proxy=structural free_balance=1",
+                    b"device=virtio-blk requests=read4k,write4k,fsync ring_activity=real",
+                    b"mmio_owner=cpu0 transport=bounded-copy-queue service_point=cpu0-timer-bottom-half",
+                    b"owner_completions=",
+                    b"ap_requests=",
+                    b"read_completions=",
+                    b"write_completions=",
+                    b"flush_completions=",
+                    b"timer_completions=",
+                    b"wait=bounded-el1-wfe status=65",
+                    b"file=/home/user/.smp-block-io lifecycle=create,write,fsync,reopen,read,verify,remove",
+                    b"free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
                     b"MAKOS_AARCH64_SMP_NETWORK_RX_OK waiter_cpu=1 poller_cpu=0",
                     b"device=virtio-net response=dns ring_activity=real",
                     b"rx_mmio_owner=cpu0 contention=ap-deferred owner_frames=",
@@ -202,7 +209,8 @@ def main() -> int:
         "MAKOS_AARCH64_SMP_INPUT_RUNTIME_OK "
         f"accel={accel} waiter_cpu=1 poller_cpu=0 device=virtio-keyboard "
         "event=ctrl-k mmio_owner=cpu0 contention=ap-deferred "
-        "block=cpu0-owned-fsync,ap-idle-input wake=device-ring,sgi "
+        "block=cpu0-owned-read4k-write4k-fsync,timer-serviced,ap-idle-input "
+        "wake=device-ring,sgi "
         "network=cpu0-owned-udp-tx,dns-rx-wake "
         "free_balance=1"
     )

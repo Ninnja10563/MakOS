@@ -186,13 +186,16 @@ is not. The UDP completion wait is bounded in EL1; the receive phase separately
 proves AP scheduler idle/wake.
 
 The focused image also runs an AP1 block-service phase before networking. The
-guest opens persistent `/boot-count.txt`, calls `fsync`, and requires CPU0 to
-complete the actual virtio-blk FLUSH through an eight-slot copied-request queue.
-The marker requires one AP request, one owner completion, one successful flush,
-status 65, and balanced frames. Low-level ring submission fails closed off CPU0.
-The queue also bounds 512-byte/4 KiB reads and writes, but those paths currently
-have structural coverage only. The AP's request wait is bounded EL1 `WFE`, not a
-scheduler idle/wake result, and general desktop SMP remains closed.
+kernel creates a private uid/gid-1000 fixture inode; an immutable minimally
+authorized probe uses normal VFS/MakFS4 calls to write and `fsync` 4 KiB, close,
+reopen, read and verify 4 KiB, and finally remove the inode. Every AP block
+operation crosses an eight-slot copied-request queue. CPU0's 100 Hz timer bottom
+half exclusively submits the real virtio-blk requests and defers a tick instead
+of recursively taking an owner lock interrupted during direct CPU0 I/O. Current
+Pi/TCG evidence is 33 requests/completions: 18 reads, 10 writes, 5 flushes, and
+33 timer-service completions, with status 65 and balanced frames. Low-level ring
+submission fails closed off CPU0. The AP request wait is bounded EL1 `WFE`, not
+a scheduler idle/wake result, and general desktop SMP remains closed.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

@@ -12,10 +12,12 @@ TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
 SOCKET = (ROOT / "kernel/src/aarch64_socket.rs").read_text()
 NET = (ROOT / "kernel/src/aarch64_virtio_net.rs").read_text()
 BLOCK = (ROOT / "kernel/src/aarch64_virtio_blk.rs").read_text()
+SECURITY = (ROOT / "kernel/src/security.rs").read_text()
 MAIN = (ROOT / "kernel/src/main.rs").read_text()
 BUILD_RS = (ROOT / "kernel/build.rs").read_text()
 NETWORK_PROBE = (ROOT / "user/aarch64_smp_network_rx_probe.S").read_text()
 BLOCK_PROBE = (ROOT / "user/aarch64_smp_block_probe.S").read_text()
+BLOCK_OWNER_PROBE = (ROOT / "user/aarch64_smp_block_owner_probe.S").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
@@ -52,6 +54,7 @@ for token in (
     "pub(crate) fn send_scheduler_ipi()",
     "pub(crate) fn service_input_on_owner_cpu()",
     "pub(crate) fn service_network_rx_on_owner_cpu()",
+    "crate::aarch64_virtio_blk::service_requests_from_timer();",
     "stop_remote_group_member_from_irq(frame)",
     "stop_remote_group_member_on_el0_return(frame)",
 ):
@@ -80,10 +83,15 @@ assert "AArch64 virtio-blk request attempted from non-owner CPU" in BLOCK
 for token in (
     "SERVICE_SLOTS",
     "fn queue_request(",
-    "pub fn service_requests()",
+    "pub fn service_requests_from_timer()",
+    "fn service_requests(timer_service: bool)",
     "OWNER_COMPLETIONS",
     "NONOWNER_REQUESTS",
+    "OWNER_READ_COMPLETIONS",
+    "OWNER_WRITE_COMPLETIONS",
     "OWNER_FLUSH_COMPLETIONS",
+    "TIMER_SERVICE_COMPLETIONS",
+    "if STATE.lock.load(Ordering::Acquire)",
     "match (kind, input.as_ref(), output.as_ref())",
     "matches!(length, 512 | SERVICE_DATA_BYTES)",
 ):
@@ -147,6 +155,10 @@ for token in (
     "pub fn run_smp_network_rx_self_test()",
     "pub fn run_smp_block_io_self_test()",
     "MAKOS_AARCH64_SMP_BLOCK_OK",
+    "register_smp_block_probe(waiter)",
+    "create_inode(",
+    "remove_inode(probe_inode)",
+    "service_point=cpu0-timer-bottom-half",
     "MAKOS_AARCH64_SMP_NETWORK_RX_READY",
     "MAKOS_AARCH64_SMP_NETWORK_RX_OK",
     "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
@@ -170,14 +182,26 @@ for token in (
     "aarch64-smp-network-rx-probe.elf",
     "aarch64_smp_block_probe.S",
     "aarch64-smp-block-probe.elf",
+    "aarch64_smp_block_owner_probe.S",
+    "aarch64-smp-block-owner-probe.elf",
 ):
     assert token in BUILD_RS, token
 assert "run_smp_network_rx_self_test();" in MAIN
 assert "run_smp_block_io_self_test();" in MAIN
 for token in ("mov x8, #47", "mov x8, #49", "mov x8, #50", "mov x0, #63"):
     assert token in NETWORK_PROBE, token
-for token in ('"/boot-count.txt"', "mov x8, #97", "mov x0, #65"):
+for token in (
+    '"/home/user/.smp-block-io"',
+    "mov x8, #17",
+    "mov x8, #97",
+    "mov x8, #12",
+    "mov x0, #65",
+):
     assert token in BLOCK_PROBE, token
+for token in ("add x19, x0, #100", "mov x0, #66"):
+    assert token in BLOCK_OWNER_PROBE, token
+for token in ("pub(crate) fn register_smp_block_probe", "capabilities: CAP_FILE_WRITE"):
+    assert token in SECURITY, token
 
 # Any CPU0 compatibility wrapper here would silently mutate CPU0 ownership
 # when same syscall/exception path executes on an AP.
@@ -207,9 +231,13 @@ for token in (
     "tx_mmio_owner=cpu0 tx_transport=bounded-copy-queue owner_transmits=",
     "tcp_ap_tx=fail-closed free_balance=1",
     "MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0",
-    "device=virtio-blk request=fsync ring_activity=real",
-    "mmio_owner=cpu0 transport=bounded-copy-queue owner_completions=",
-    "ap_requests=1 flush_completions=1 wait=bounded-el1-wfe status=65",
+    "device=virtio-blk requests=read4k,write4k,fsync ring_activity=real",
+    "mmio_owner=cpu0 transport=bounded-copy-queue service_point=cpu0-timer-bottom-half",
+    "read_completions=",
+    "write_completions=",
+    "flush_completions=",
+    "timer_completions=",
+    "wait=bounded-el1-wfe status=65",
 ):
     assert token in INPUT_RUNTIME, token
 

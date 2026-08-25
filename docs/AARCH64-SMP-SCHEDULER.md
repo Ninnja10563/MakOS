@@ -114,16 +114,19 @@ remains fail-closed and unqualified. The AP waits for its UDP completion in a
 bounded EL1 `WFE` loop, so only the following receive phase proves scheduler
 block/idle/wake behavior.
 
-A ninth opt-in fixture qualifies one real virtio-blk operation. AP1 opens the
-world-readable persistent `/boot-count.txt`, invokes syscall 97 `fsync`, and
-copies a FLUSH request into an eight-slot service queue. CPU0 alone submits the
-virtio request and returns the result; AP1 closes the descriptor and exits 65.
-Runtime requires one AP request, one CPU0 completion, one successful FLUSH, and
-exact frame balance. The same queue implements bounded 512-byte and 4 KiB read
-and write copying, and low-level ring submission fails closed off CPU0, but
-read/write are structural evidence only. The request wait is a bounded EL1
-`WFE`, not scheduler block/idle/wake evidence, and production CPU0 service-point
-contention remains open.
+A ninth opt-in fixture qualifies the production virtio-blk owner service. The
+kernel creates a private mode-0600 uid/gid-1000 fixture inode and binds the
+immutable AP1 probe to the minimum file-write capability while no login session
+exists. AP1 uses normal VFS/MakFS4 syscalls to write and `fsync` 4 KiB, close,
+reopen, read and byte-verify 4 KiB, then the kernel removes the fixture. Every
+AP read/write/FLUSH is copied through an eight-slot queue. CPU0's ordinary 100
+Hz timer bottom half alone submits requests; if the IRQ interrupted a direct
+CPU0 block operation, the service observes the owner lock and defers one tick
+instead of recursing. Low-level ring submission still fails closed off CPU0.
+Pi/TCG runtime reports 33 requests/completions: 18 reads, 10 writes and 5
+flushes, all 33 serviced by the timer, status 65, exact content, inode cleanup,
+and frame balance. The AP request wait remains bounded EL1 `WFE`, not scheduler
+block/idle/wake evidence.
 
 The offline scheduler foundation adds:
 
@@ -161,10 +164,10 @@ safe general process migration.
   servicing pass the bounded probe. Virtio input now has exclusive CPU0 MMIO
   ownership plus measured AP deferral. Virtio-net now has CPU0-only low-level
   TX/RX ownership, copied AP UDPv4/v6 service, and a real AP DNS receive wake.
-  Virtio-blk now has CPU0-only ring submission and a real AP `fsync`/FLUSH
-  service proof; AP read/write and production service-point contention remain
-  structural. Stateful AP TCP TX and GPU service ownership/contention remain to
-  be qualified.
+  Virtio-blk now has CPU0-only ring submission and a production timer-bottom-
+  half service proof for real AP 4 KiB reads, 4 KiB writes, and `fsync`/FLUSH
+  through VFS/MakFS4. Stateful AP TCP TX and GPU service ownership/contention
+  remain to be qualified.
 - Ready publication needs an idle-CPU kick (`SEV`/SGI) after the process lock's
   Release unlock; idle selection must consume after Acquire lock acquisition.
 
@@ -204,9 +207,9 @@ a GICv2 SGI only after publishing its enabled state.
      TX/RX ring service are explicitly CPU0-owned and guarded against AP entry.
      AP UDPv4/v6 uses a bounded copied-request service. Stateful TCP TX and GPU
      paths remain pending equivalent qualification. Virtio-blk ring submission
-     is also CPU0-only through a bounded copied-request service; a real AP FLUSH
-     passes, while AP read/write runtime and production servicing remain
-     pending.
+     is also CPU0-only through a bounded copied-request service. CPU0's timer
+     bottom half now passes real AP VFS/MakFS4 read, write, and FLUSH traffic,
+     while recursively interrupted CPU0 ownership defers one tick.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one

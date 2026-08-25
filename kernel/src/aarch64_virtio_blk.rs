@@ -98,7 +98,10 @@ static STATE: LockedState = LockedState {
 static SOURCE_WRITES_FROZEN: AtomicBool = AtomicBool::new(false);
 static NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static OWNER_READ_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static OWNER_WRITE_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 static OWNER_FLUSH_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TIMER_SERVICE_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 struct ServiceRequest {
@@ -387,9 +390,20 @@ fn queue_request(
     result
 }
 
-pub fn service_requests() -> usize {
+pub fn service_requests_from_timer() -> usize {
+    service_requests(true)
+}
+
+fn service_requests(timer_service: bool) -> usize {
     if crate::arch::cpu_index() != 0 {
         crate::fatal("AArch64 block service attempted from non-owner CPU");
+    }
+    // A CPU0 timer may interrupt an in-flight direct block operation. No AP
+    // can own this lock because all non-owner calls queue before reaching it,
+    // so a locked state here is necessarily recursive CPU0 entry. Defer until
+    // the next tick instead of spinning inside the interrupt.
+    if STATE.lock.load(Ordering::Acquire) {
+        return 0;
     }
     let mut completed = 0usize;
     for slot in &SERVICE {
@@ -427,13 +441,27 @@ pub fn service_requests() -> usize {
             slot.result.get().write(result);
         }
         OWNER_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
-        if result && request.kind == REQUEST_FLUSH {
-            OWNER_FLUSH_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+        if result {
+            match request.kind {
+                REQUEST_READ => {
+                    OWNER_READ_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                }
+                REQUEST_WRITE => {
+                    OWNER_WRITE_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                }
+                REQUEST_FLUSH => {
+                    OWNER_FLUSH_COMPLETIONS.fetch_add(1, Ordering::AcqRel);
+                }
+                _ => {}
+            }
         }
         slot.state.store(SLOT_DONE, Ordering::Release);
         completed += 1;
     }
     if completed != 0 {
+        if timer_service {
+            TIMER_SERVICE_COMPLETIONS.fetch_add(completed as u64, Ordering::AcqRel);
+        }
         unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
     }
     completed
@@ -442,14 +470,20 @@ pub fn service_requests() -> usize {
 pub fn reset_service_affinity_evidence() {
     NONOWNER_REQUESTS.store(0, Ordering::Release);
     OWNER_COMPLETIONS.store(0, Ordering::Release);
+    OWNER_READ_COMPLETIONS.store(0, Ordering::Release);
+    OWNER_WRITE_COMPLETIONS.store(0, Ordering::Release);
     OWNER_FLUSH_COMPLETIONS.store(0, Ordering::Release);
+    TIMER_SERVICE_COMPLETIONS.store(0, Ordering::Release);
 }
 
-pub fn service_affinity_evidence() -> (u64, u64, u64) {
+pub fn service_affinity_evidence() -> (u64, u64, u64, u64, u64, u64) {
     (
         OWNER_COMPLETIONS.load(Ordering::Acquire),
         NONOWNER_REQUESTS.load(Ordering::Acquire),
+        OWNER_READ_COMPLETIONS.load(Ordering::Acquire),
+        OWNER_WRITE_COMPLETIONS.load(Ordering::Acquire),
         OWNER_FLUSH_COMPLETIONS.load(Ordering::Acquire),
+        TIMER_SERVICE_COMPLETIONS.load(Ordering::Acquire),
     )
 }
 
