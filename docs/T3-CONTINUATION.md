@@ -27,8 +27,7 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for the current verified source
-  (exact pushed commit recorded after the final regression commit): PID 139418,
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `91f8326`: PID 139418,
   VNC `127.0.0.1:5901`, session `build/makos-pi-visible-7HlrvV`, private data
   clone `build/makos-pi-visible-7HlrvV/data.img`, private variables
   `build/makos-pi-visible-7HlrvV/vars.fd`, QMP
