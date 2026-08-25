@@ -38,6 +38,8 @@ const GICD_ISENABLER0: u64 = 0x100;
 const GICD_ICENABLER0: u64 = 0x180;
 const GICD_ICPENDR0: u64 = 0x280;
 const GICD_IPRIORITYR: u64 = 0x400;
+const GICD_ITARGETSR: u64 = 0x800;
+const GICD_ICFGR: u64 = 0xc00;
 const GICD_ICFGR1: u64 = 0xc04;
 const GICD_SGIR: u64 = 0xf00;
 const SMP_SCHEDULER_SGI: u32 = 1;
@@ -99,6 +101,9 @@ static FIREFOX_FONT_IO_TRACES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_MUTATION_TRACES: AtomicU64 = AtomicU64::new(0);
 static INPUT_SERVICE_OWNER_ACTIVITY: AtomicU64 = AtomicU64::new(0);
 static INPUT_SERVICE_NONOWNER_DEFERRALS: AtomicU64 = AtomicU64::new(0);
+static INPUT_IRQ_DIRECT_DISPATCHES: AtomicU64 = AtomicU64::new(0);
+static INPUT_IRQ_EL1_DEFERRALS: AtomicU64 = AtomicU64::new(0);
+static INPUT_IRQ_REPORTED: AtomicBool = AtomicBool::new(false);
 static NETWORK_RX_OWNER_FRAMES: AtomicU64 = AtomicU64::new(0);
 static NETWORK_RX_NONOWNER_DEFERRALS: AtomicU64 = AtomicU64::new(0);
 const FIREFOX_FILE_TRACE_LIMIT: u64 = 8;
@@ -656,6 +661,64 @@ pub(crate) fn input_service_affinity_evidence() -> (u64, u64) {
         INPUT_SERVICE_OWNER_ACTIVITY.load(Ordering::Acquire),
         INPUT_SERVICE_NONOWNER_DEFERRALS.load(Ordering::Acquire),
     )
+}
+
+/// Configure one QEMU-virt virtio-mmio SPI as Group 1, edge-rising, and route
+/// it exclusively to CPU0, the owner of the input rings and compositor state.
+pub(crate) fn enable_virtio_input_interrupt(interrupt_id: u32) {
+    let distributor = GIC_DISTRIBUTOR_BASE.load(Ordering::Acquire);
+    if distributor == 0 || interrupt_id < 32 {
+        crate::fatal("AArch64 virtio-input IRQ registration before GIC");
+    }
+    let interrupt_count =
+        ((unsafe { mmio_read32(distributor + GICD_TYPER) } & 0x1f) + 1) * 32;
+    if interrupt_id >= interrupt_count {
+        crate::fatal("AArch64 virtio-input INTID exceeds GIC capacity");
+    }
+    let bank_offset = u64::from(interrupt_id / 32) * 4;
+    let bit = 1u32 << (interrupt_id % 32);
+    let priority_register = distributor + GICD_IPRIORITYR + u64::from(interrupt_id & !3);
+    let byte_shift = (interrupt_id & 3) * 8;
+    let target_register = distributor + GICD_ITARGETSR + u64::from(interrupt_id & !3);
+    let config_register = distributor + GICD_ICFGR + u64::from(interrupt_id / 16) * 4;
+    let config_shift = (interrupt_id % 16) * 2;
+    unsafe {
+        mmio_write32(distributor + GICD_ICENABLER0 + bank_offset, bit);
+        mmio_write32(distributor + GICD_ICPENDR0 + bank_offset, bit);
+        let group_register = distributor + GICD_IGROUPR0 + bank_offset;
+        mmio_write32(group_register, mmio_read32(group_register) | bit);
+        let priority = (mmio_read32(priority_register) & !(0xff << byte_shift))
+            | (0x80 << byte_shift);
+        mmio_write32(priority_register, priority);
+        let target = (mmio_read32(target_register) & !(0xff << byte_shift))
+            | (1 << byte_shift);
+        mmio_write32(target_register, target);
+        let config = (mmio_read32(config_register) & !(0b11 << config_shift))
+            | (0b10 << config_shift);
+        mmio_write32(config_register, config);
+        mmio_write32(distributor + GICD_ISENABLER0 + bank_offset, bit);
+        asm!("dsb sy", "isb", options(nostack));
+    }
+}
+
+pub(crate) fn reset_input_irq_evidence() {
+    INPUT_IRQ_DIRECT_DISPATCHES.store(0, Ordering::Release);
+    INPUT_IRQ_EL1_DEFERRALS.store(0, Ordering::Release);
+    INPUT_IRQ_REPORTED.store(false, Ordering::Release);
+}
+
+fn record_input_irq(interrupt_id: u32, direct: bool, activity: bool) {
+    if direct {
+        INPUT_IRQ_DIRECT_DISPATCHES.fetch_add(1, Ordering::AcqRel);
+        if activity && !INPUT_IRQ_REPORTED.swap(true, Ordering::AcqRel) {
+            crate::serial_println!(
+                "MAKOS_AARCH64_INPUT_IRQ_OK intid={} cpu=0 entry=lower-el dispatch=direct source=virtio-mmio timer_fallback=100hz",
+                interrupt_id,
+            );
+        }
+    } else {
+        INPUT_IRQ_EL1_DEFERRALS.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 /// Virtio-net RX queue consumption and socket demultiplexing are CPU0-owned.
@@ -5605,6 +5668,7 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
     }
     let timer = intid == TIMER_INTID.load(Ordering::Acquire);
     let scheduler_sgi = intid == SMP_SCHEDULER_SGI;
+    let input = crate::aarch64_virtio_input::owns_interrupt(intid);
     if timer {
         let interval = TIMER_INTERVAL.load(Ordering::Acquire);
         program_virtual_timer(read_virtual_counter().saturating_add(interval));
@@ -5613,6 +5677,21 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
         if cpu_index() == 0 {
             TIMER_TICKS.fetch_add(1, Ordering::AcqRel);
         }
+    } else if input {
+        if cpu_index() != 0 {
+            crate::fatal("AArch64 virtio-input SPI routed away from CPU0");
+        }
+        // Only the lower-EL vector is guaranteed not to have interrupted a
+        // syscall holding graphics or scheduler locks. EL1 entries clear the
+        // transport edge and leave ring draining to the 100 Hz recovery poll.
+        let direct = kind == 9;
+        let activity = if direct {
+            service_input_on_owner_cpu()
+        } else {
+            crate::aarch64_virtio_input::acknowledge_interrupt(intid);
+            false
+        };
+        record_input_irq(intid, direct, activity);
     } else if intid < 1020 && !scheduler_sgi {
         UNEXPECTED_IRQS.fetch_add(1, Ordering::AcqRel);
     }
@@ -5644,10 +5723,8 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
             // in-flight socket syscall could spin forever on its own lock.
             if cpu_index() == 0 {
                 service_network_rx_on_owner_cpu();
-                // Input is timer-polled hardware too. Poll before scheduling
-                // so CPU-bound EL0 code cannot delay key/button delivery until
-                // its next unrelated syscall; queued keys can select Firefox's
-                // blocked watcher in this same 100 Hz preemption.
+                // Retain a 100 Hz recovery drain for an edge acknowledged while
+                // it interrupted EL1, or for a transport edge lost in firmware.
                 service_input_on_owner_cpu();
             }
             crate::aarch64_process::preempt_from_timer(frame);

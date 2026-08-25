@@ -65,6 +65,17 @@ watcher TID on AP1-3 plus the group leader on CPU0 before full status-42 reap.
 Its final run selected watcher TID 8 on AP2. This is deterministic wake and
 affinity evidence, not macOS/HVF Firefox latency qualification.
 
+Input delivery now reaches that priority path through the hardware interrupt
+controller rather than waiting for the next timer tick. QEMU `virt` maps
+virtio-mmio slot `n` to GICv2 INTID `48+n`; the discovered keyboard/tablet at
+slots 29/30 therefore use INTIDs 77/78. CPU0 programs each as Group 1,
+edge-rising, and CPU0-targeted. A lower-EL entry safely drains the queue and
+publishes its wake before EOI. An EL1 entry acknowledges only the transport
+edge to avoid recursively acquiring a syscall-held lock, then relies on the
+unchanged 100 Hz recovery drain. Focused Pi/TCG QMP Ctrl-A records direct
+keyboard INTID 78 delivery before exact surface 7/TID 8 wake and status-42
+reap. This qualifies interrupt-driven input on QEMU, not Firefox timing.
+
 Production thread affinity is now explicit kernel state rather than an
 adapter-reported constant. Native syscall 148 gets or replaces the mask of the
 caller or a same-thread-group TID. Masks must be nonempty subsets of the four
@@ -333,10 +344,13 @@ issue a GICv2 SGI after their Release stores.
    - Each AP enables its banked GICv2 virtual-timer PPI and programs
      `CNTV_CVAL_EL0` before EL0 entry.
    - CPU0 alone advances global monotonic ticks and services deadlines/device
-     polling. AP timer IRQs only preempt/select; otherwise four timer streams
+     recovery polling. AP timer IRQs only preempt/select; otherwise four timer streams
      would make wall time advance fourfold.
-   - GICC acknowledge/EOI is per PE. Virtio-input MMIO and virtio-net low-level
-     TX/RX ring service are explicitly CPU0-owned and guarded against AP entry.
+   - GICC acknowledge/EOI is per PE. Virtio-input SPIs are edge-rising and
+     CPU0-targeted; lower-EL entries drain directly, EL1 entries acknowledge
+     and defer, and the 100 Hz poll remains recovery. Virtio-input MMIO and
+     virtio-net low-level TX/RX ring service are explicitly CPU0-owned and
+     guarded against AP entry.
      AP UDPv4/v6 and TCPv4 use bounded copied-request services; TCPv6 still
      needs equivalent guest runtime qualification. Virtio-blk ring submission is also
      CPU0-only through a bounded copied-request service. CPU0's timer bottom

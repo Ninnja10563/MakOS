@@ -1830,9 +1830,9 @@ fn compose_key_feedback(state: &mut State) {
     compose(state);
 }
 
-/// Executes CPU0-owned blocking compositor work from the timer bottom half
-/// when its IRQ interrupted EL0. Keyboard/tablet IRQ handlers only publish
-/// logical input and never enter this service directly.
+/// Executes CPU0-owned blocking compositor work after safe lower-EL input/timer
+/// IRQ dispatch. An input IRQ that interrupted EL1 only acknowledges its edge;
+/// the retained timer recovery poll reaches this service after returning safe.
 #[cfg(target_arch = "aarch64")]
 pub fn service_deferred_actions() {
     if !GRAPHICS.ready.load(Ordering::Acquire) {

@@ -93,6 +93,34 @@ assert ARCH.count("crate::aarch64_virtio_input::poll()") == 1
 assert "crate::aarch64_virtio_input::poll()" not in PROCESS
 assert "crate::aarch64_virtio_input::poll()" not in TTY
 assert "AArch64 virtio-input poll attempted from non-owner CPU" in INPUT
+for token in (
+    "const MMIO_GIC_INTID_BASE: u32 = 48;",
+    "interrupt_id: MMIO_GIC_INTID_BASE + slot as u32",
+    "pub(crate) fn owns_interrupt(interrupt_id: u32)",
+    "pub(crate) fn acknowledge_interrupt(interrupt_id: u32)",
+    "crate::arch::enable_virtio_input_interrupt(device.interrupt_id);",
+    "delivery=gicv2-spi timer_fallback=100hz",
+):
+    assert token in INPUT, token
+for token in (
+    "const GICD_ITARGETSR: u64 = 0x800;",
+    "const GICD_ICFGR: u64 = 0xc00;",
+    "pub(crate) fn enable_virtio_input_interrupt(interrupt_id: u32)",
+    "GICD_IGROUPR0 + bank_offset",
+    "GICD_ISENABLER0 + bank_offset",
+    "0b10 << config_shift",
+    "AArch64 virtio-input SPI routed away from CPU0",
+    "let direct = kind == 9;",
+    "crate::aarch64_virtio_input::acknowledge_interrupt(intid);",
+    "MAKOS_AARCH64_INPUT_IRQ_OK",
+):
+    assert token in ARCH, token
+for token in (
+    "INPUT_IRQ_MARKER",
+    "input_irq_intid not in (77, 78)",
+    "delivery=gicv2-spi",
+):
+    assert token in PRODUCTION_RUNTIME, token
 assert ARCH.count("crate::aarch64_socket::pump()") == 1
 assert "crate::aarch64_socket::pump()" not in PROCESS
 assert "AArch64 network RX pump attempted from non-owner CPU" in SOCKET

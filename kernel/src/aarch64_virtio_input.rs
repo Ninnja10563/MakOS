@@ -3,6 +3,9 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering, c
 const MMIO_BASE: u64 = 0x0a00_0000;
 const MMIO_STRIDE: u64 = 0x200;
 const MMIO_SLOTS: usize = 32;
+// QEMU virt connects virtio-mmio slot n to SPI 16+n. GIC INTIDs add the
+// architectural SPI base (32), so slot n is INTID 48+n.
+const MMIO_GIC_INTID_BASE: u32 = 48;
 const MAGIC: u32 = 0x7472_6976;
 const DEVICE_INPUT: u32 = 18;
 const VERSION_MODERN: u32 = 2;
@@ -92,6 +95,7 @@ static SURFACE_KEY_QUEUED: AtomicBool = AtomicBool::new(false);
 #[derive(Clone, Copy)]
 struct InputDevice {
     base: u64,
+    interrupt_id: u32,
     queue_frame: u64,
     queue_size: u16,
     last_used: u16,
@@ -103,6 +107,7 @@ struct InputDevice {
 impl InputDevice {
     const EMPTY: Self = Self {
         base: 0,
+        interrupt_id: 0,
         queue_frame: 0,
         queue_size: 0,
         last_used: 0,
@@ -198,7 +203,7 @@ pub fn init() {
             crate::fatal("too many AArch64 virtio-input devices");
         }
         crate::serial_println!("virtio-input probe base={:#x} slot={}", base, slot);
-        let device = configure(base);
+        let device = configure(base, slot);
         unsafe {
             (&raw mut DEVICES)
                 .cast::<InputDevice>()
@@ -211,11 +216,50 @@ pub fn init() {
         crate::fatal("AArch64 virtio-input device absent");
     }
     DEVICE_COUNT.store(count as u8, Ordering::Release);
+    for index in 0..count {
+        let device = unsafe { &*(&raw const DEVICES).cast::<InputDevice>().add(index) };
+        // Drop any configuration-time edge before unmasking the SPI. Event
+        // descriptors are already published, so every subsequent edge can be
+        // drained without racing partial device construction.
+        acknowledge_device_interrupt(device);
+        crate::arch::enable_virtio_input_interrupt(device.interrupt_id);
+        crate::serial_println!(
+            "MAKOS_AARCH64_INPUT_IRQ_ROUTE_OK intid={} target_cpu=0 trigger=edge-rising transport=virtio-mmio",
+            device.interrupt_id,
+        );
+    }
     crate::serial_println!(
-        "MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices={} eventq={} polling=single-consumer event_drain=1 notify=batched pointer_motion=coalesced pointer_edges=preserved keyboard_syn=ignored absolute_pointer=1 keyboard=1",
+        "MAKOS_AARCH64_INPUT_OK transport=virtio-mmio devices={} eventq={} polling=single-consumer event_drain=1 notify=batched pointer_motion=coalesced pointer_edges=preserved keyboard_syn=ignored absolute_pointer=1 keyboard=1 delivery=gicv2-spi timer_fallback=100hz",
         count,
         QUEUE_SIZE,
     );
+}
+
+pub(crate) fn owns_interrupt(interrupt_id: u32) -> bool {
+    let count = usize::from(DEVICE_COUNT.load(Ordering::Acquire));
+    (0..count).any(|index| {
+        let device = unsafe { &*(&raw const DEVICES).cast::<InputDevice>().add(index) };
+        device.interrupt_id == interrupt_id
+    })
+}
+
+/// Acknowledge a device edge without entering graphics/scheduler locks.
+///
+/// IRQs that interrupt EL1 can arrive while a syscall owns one of those locks.
+/// Clearing the transport status here prevents an interrupt storm; CPU0's
+/// retained timer fallback drains the used ring on the next safe tick.
+pub(crate) fn acknowledge_interrupt(interrupt_id: u32) {
+    if crate::arch::cpu_index() != 0 {
+        crate::fatal("AArch64 virtio-input IRQ reached non-owner CPU");
+    }
+    let count = usize::from(DEVICE_COUNT.load(Ordering::Acquire));
+    let Some(device) = (0..count).find_map(|index| {
+        let device = unsafe { &*(&raw const DEVICES).cast::<InputDevice>().add(index) };
+        (device.interrupt_id == interrupt_id).then_some(device)
+    }) else {
+        crate::fatal("AArch64 virtio-input IRQ has no registered device");
+    };
+    acknowledge_device_interrupt(device);
 }
 
 pub fn poll() -> bool {
@@ -264,7 +308,7 @@ pub fn inject_key(byte: u8) {
     push_key(byte);
 }
 
-fn configure(base: u64) -> InputDevice {
+fn configure(base: u64, slot: usize) -> InputDevice {
     crate::serial_println!("virtio-input config base={:#x} stage=reset", base);
     write32(base + REG_STATUS, 0);
     for _ in 0..100_000 {
@@ -329,6 +373,7 @@ fn configure(base: u64) -> InputDevice {
 
     InputDevice {
         base,
+        interrupt_id: MMIO_GIC_INTID_BASE + slot as u32,
         queue_frame: frame,
         queue_size: QUEUE_SIZE,
         last_used: 0,
@@ -373,12 +418,16 @@ fn poll_device(device: &mut InputDevice) -> bool {
         memory_barrier();
         write32(device.base + REG_QUEUE_NOTIFY, 0);
     }
+    acknowledge_device_interrupt(device);
+    pointer.dispatch();
+    requeued
+}
+
+fn acknowledge_device_interrupt(device: &InputDevice) {
     let interrupt = read32(device.base + REG_INTERRUPT_STATUS);
     if interrupt != 0 {
         write32(device.base + REG_INTERRUPT_ACK, interrupt);
     }
-    pointer.dispatch();
-    requeued
 }
 
 fn handle_event(

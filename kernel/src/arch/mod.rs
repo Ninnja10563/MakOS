@@ -7,9 +7,9 @@ mod x86_64;
 pub(crate) use aarch64::{
     ExceptionFrame, UserContext, counter_deadline_expired, counter_deadline_millis, cpu_index,
     disable_smp_probe_scheduler, enable_production_userspace_scheduler,
-    enable_smp_probe_scheduler, enter_user_context,
+    enable_smp_probe_scheduler, enable_virtio_input_interrupt, enter_user_context,
     idle_secondary_after_smp_probe, input_service_affinity_evidence,
-    network_rx_affinity_evidence, reset_input_service_affinity_evidence,
+    network_rx_affinity_evidence, reset_input_irq_evidence, reset_input_service_affinity_evidence,
     reset_network_rx_affinity_evidence, return_to_kernel, send_scheduler_ipi,
     service_input_on_owner_cpu, service_network_rx_on_owner_cpu, smp_probe_scheduler_enabled,
     start_scheduler_timer, stop_scheduler_timer, user_range_readable, user_range_writable,

@@ -83,18 +83,25 @@ after the complete pthread/typed-IPC workload. Target syscall 148/feature bit
 forces and reads back three worker migrations through singleton AP masks, then
 restores mask `0xe` before all joins. The stale deadline no longer
 acts as a priority time slice, fixing observed fork-child starvation. Full
-`make unit check` passes. This is functional Pi/TCG evidence only; strict
-Firefox timing still needs the unchanged idle macOS/HVF gate.
+`make unit check` passes. Input delivery now uses genuine QEMU `virt` GICv2
+SPIs: slots 29/30 map to INTIDs 77/78, are edge-rising and CPU0-targeted, and
+lower-EL IRQs drain directly before EOI. EL1 IRQs acknowledge/defer to the
+unchanged 100 Hz recovery poll. The latest focused run proves QMP Ctrl-A on
+keyboard INTID 78, direct lower-EL dispatch, target TID 8 on AP1, one wake and
+three skips, `cpu_mask=0xe`, dispatches `9557,10824,9509`, `overlap_mask=0xa`
+with TIDs 5/6, and status 42. Focused cursor regression also passes seven
+positions with zero changed scanout pixels. This is functional Pi/TCG evidence
+only; strict Firefox timing still needs the unchanged idle macOS/HVF gate.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 651079, user
-service `makos-visible-firefox-exact-input-final.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 660636, user
+service `makos-visible-firefox-input-irq-final2.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-firefox-exact-input-final-4JLnogUm/qmp.sock`. Its
+`build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`aa9c7e3d0b524a38ba5fb34fedf695cb2dd35b1e6c4c9589ec3f942fd947013f`;
+`c3475a56970c86fddf191d8050a6bdb0f6b7e7868d728aa1b190c2770c567635`;
 the inspected 800x600 login PNG is
-`ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
+`133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
 Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 

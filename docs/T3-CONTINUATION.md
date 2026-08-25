@@ -27,21 +27,28 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG exact-handle Firefox-input milestone: PID
-  651079, user service `makos-visible-firefox-exact-input-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG interrupt-driven Firefox-input milestone:
+  PID 660636, user service `makos-visible-firefox-input-irq-final2.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm`, private read-only boot
+  `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
   `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and capture `login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `aa9c7e3d0b524a38ba5fb34fedf695cb2dd35b1e6c4c9589ec3f942fd947013f`.
+  `c3475a56970c86fddf191d8050a6bdb0f6b7e7868d728aa1b190c2770c567635`.
   It is the sole QEMU process and reports four online PEs,
-  `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
-  `userspace_scheduler_cpus=4`, with no fatal/panic. The visually inspected
+  both GICv2 input routes (INTIDs 77/78), `MAKOS_LOGIN_UI_OK`,
+  `MAKOS_AARCH64_BOOT_OK`, and post-desktop `userspace_scheduler_cpus=4`, with
+  no fatal/panic. The visually inspected
   800x600 login PNG has SHA-256
-  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
+  `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 630079 and
+  testing; use QMP `quit` before any later runtime gate. Prior PID 659568 and
+  session `build/makos-pi-visible-firefox-input-irq-final-kecJty1A` were
+  stopped cleanly through QMP before the focused cursor regression; their
+  files remain. Prior PID 651079 and
+  session `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm` were
+  stopped cleanly through QMP before the interrupt-driven runtime; their files
+  remain. Prior PID 630079 and
   session `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`
   were stopped cleanly through QMP before the exact-handle runtime; their files
   remain. Prior PID 624159 and
@@ -441,7 +448,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 651079 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 660636 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
@@ -462,7 +469,10 @@ Preserve existing files and changes.
   `cursor=virtio-gpu-plane move=cursorq scanout_damage=none host-cursor=hidden`
 - Focused cursor runtime harness: `scripts/boot_test_aarch64_cursor.py`
 - Make target: `test-aarch64-cursor-runtime`
-- Focused cursor runtime passes on current image after 100 Hz timer input polling: seven QMP positions, zero changed scanout pixels, virtio-GPU cursor plane, host cursor hidden.
+- Focused cursor runtime passes on the interrupt-driven input image: seven QMP
+  positions, zero changed scanout pixels, virtio-GPU cursor plane, and hidden
+  host cursor (`accel=tcg` on this Pi). The 100 Hz input poll remains only as
+  the safe recovery path described above.
 - Fresh 2026-08-25 cursor rerun passes:
   `MAKOS_AARCH64_CURSOR_RUNTIME_OK accel=hvf positions=7 changed_scanout_pixels=0 backend=virtio-gpu-plane host_cursor=hidden`.
 - Clean integrated data image:
@@ -514,6 +524,20 @@ Preserve existing files and changes.
   `cpu_mask=0xe` and live/final `overlap_mask=0x6` for TIDs 5/6. Release
   artifact checks, structural guard, focused runtime, and full
   `make unit check` pass. This does not qualify strict Firefox timing.
+- 2026-08-26 AArch64 keyboard/tablet delivery is now genuinely
+  interrupt-driven on QEMU `virt`. MakOS derives each virtio-mmio GIC INTID as
+  `48 + slot`, configures the shared SPI bank as Group 1/edge-rising, targets
+  it only at CPU0, and drains input immediately when the exception interrupted
+  EL0. An IRQ that interrupted EL1 acknowledges transport status without
+  recursively taking syscall locks; the unchanged 100 Hz owner poll remains a
+  recovery drain. The focused production Firefox-role runtime observes QMP
+  Ctrl-A on keyboard INTID 78 through `entry=lower-el dispatch=direct`, selects
+  exact surface 7/TID 8 on AP1, wakes one surface waiter while skipping three,
+  runs all AP workers (`cpu_mask=0xe`, dispatches `9557,10824,9509`), records
+  simultaneous TIDs 5/6 on AP1/AP3 (`overlap_mask=0xa`), and reaps status 42.
+  The release image/artifact check, structural guards, and full
+  `make unit check` pass. This is Pi/TCG functional evidence, not a substitute
+  for the unchanged idle-macOS/HVF strict Firefox gate.
 - The Raspberry Pi was idle when the unchanged Firefox Make target was retried,
   but preflight stopped before QEMU launch: this host does not contain exact
   `build/makos-integrated-a9c604254f094de2.img` or the staged Firefox package,

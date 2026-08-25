@@ -25,6 +25,7 @@ make test-x86_64-gpt
 make run-x86_64-gpt
 make test-x86_64-install
 make test-aarch64-cursor-runtime
+make test-aarch64-production-smp-runtime
 make test-aarch64-firefox-runtime
 make test-aarch64-ipv6-runtime
 make test-aarch64
@@ -91,6 +92,15 @@ different guest APs simultaneously. Missing, single-CPU, stale-group, or
 duplicate-TID evidence fails the run. This adds SMP proof without changing the
 existing paint, Ctrl-A, first-input, navigation, interaction, resource, or
 survival thresholds.
+Focused `test-aarch64-production-smp-runtime` uses the release image and an
+upstream-musl Firefox-role pthread fixture, not the packaged Firefox browser.
+Its QMP Ctrl-A phase requires a genuine CPU0-targeted GICv2 virtio-input SPI,
+direct lower-EL dispatch, exact-handle selection, one target wake with unrelated
+waiters retained, AP watcher execution, CPU0 leader handoff, live multi-AP
+worker overlap, and status-42 reap. The 100 Hz input poll remains a recovery
+path and cannot satisfy the required `MAKOS_AARCH64_INPUT_IRQ_OK` marker. Pi/TCG
+results are functional evidence only; strict Firefox timings still require the
+integrated package on idle macOS/HVF.
 Focused `test-aarch64-ipv6-runtime` runs the full two-boot workload and adds
 post-login proof for validated RA/SLAAC, AF_INET6 sockaddr ABI, NDP resolution,
 and checksum-valid UDPv6 transmit. QEMU user networking does not return UDPv6

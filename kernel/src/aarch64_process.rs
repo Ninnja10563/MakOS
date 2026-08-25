@@ -3019,8 +3019,8 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             crate::arch::enable_interrupts();
             unsafe { asm!("wfi", options(nomem, nostack)) };
             crate::arch::disable_interrupts();
-            // Virtio input/net currently use timer-polled bottom halves. Keep
-            // them live during idle wait, then hand scheduler any task they
+            // Keep the input recovery drain and timer-polled network bottom
+            // half live during idle wait, then hand scheduler any task they
             // wake instead of monopolizing EL1 until this task's deadline.
             crate::arch::service_network_rx_on_owner_cpu();
             crate::arch::service_input_on_owner_cpu();
@@ -3757,6 +3757,7 @@ fn record_smp_load_dispatch(state: &SchedulerState, pid: u64, cpu: usize) {
 }
 
 fn reset_production_worker_evidence() {
+    crate::arch::reset_input_irq_evidence();
     FIREFOX_INPUT_WATCHER_TID.store(0, Ordering::Release);
     SURFACE_PRIORITY_TID.store(0, Ordering::Release);
     SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);

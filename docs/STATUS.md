@@ -4,6 +4,20 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 virtio keyboard/tablet input now uses genuine QEMU `virt`
+  GICv2 interrupts in the normal path. Device slot `n` derives INTID `48+n`;
+  discovered slots 29/30 configure shared Group 1, edge-rising SPIs 77/78 and
+  target CPU0 exclusively. Lower-EL IRQ entry drains input and publishes
+  exact-handle wakes before EOI. EL1 entry acknowledges the transport without
+  recursively taking syscall-held locks, leaving the unchanged 100 Hz owner
+  poll as a recovery drain. The focused upstream-musl Firefox-role Pi/TCG
+  runtime proves QMP Ctrl-A on keyboard INTID 78, direct lower-EL dispatch,
+  exact surface 7/TID 8 execution on AP1, one waiter woken/three skipped,
+  all three AP workers (`9557,10824,9509` dispatches), simultaneous AP1/AP3
+  TIDs 5/6, and status-42 reap. Structural guards, release artifact validation,
+  and full `make unit check` pass. The audit remains Partial and unchanged
+  strict Firefox timing still requires the missing integrated image on an idle
+  macOS/HVF host.
 - 2026-08-26 AArch64 surface-event blocking is now handle-specific instead of
   a global input thundering herd. Each blocked task records its surface handle;
   the wake path snapshots scheduler state, checks queue/owner state outside the
@@ -146,6 +160,16 @@ Last updated: 2026-08-26.
   `input_idle_mask=0x2`/`input_resume_mask=0x2`, status 61, exact frame balance,
   and subsequent boot completion. The ordinary image never arms the
   external-input wait.
+  Ordinary AArch64 keyboard/tablet delivery is no longer timer-polled in the
+  normal case. QEMU `virt` slot `n` maps to GICv2 INTID `48+n`; MakOS programs
+  discovered input INTIDs 77/78 as Group 1 edge-rising SPIs targeted only at
+  CPU0. A lower-EL IRQ drains both used rings and publishes exact-handle wakes
+  before EOI. If the IRQ interrupted EL1, it acknowledges transport status
+  without recursively entering graphics/scheduler locks; the retained 100 Hz
+  owner poll drains that queue on the next safe tick. The Firefox-role focused
+  Pi/TCG run proves QMP Ctrl-A arrived directly on keyboard INTID 78, woke only
+  surface 7/TID 8 on AP1, skipped three unrelated waiters, and reaped status
+  42. This is functional Pi evidence, not macOS/HVF latency qualification.
   The same opt-in image first runs a real virtio-net UDP/DNS fixture. AP1 copies
   its UDPv4 request into a bounded eight-slot service queue; CPU0 alone mutates
   the transmit ring and completes the request. AP1 then blocks in receive and
@@ -337,12 +361,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  exact-handle Firefox-input milestone is PID 651079 under the user service
-  `makos-visible-firefox-exact-input-final.service`, with
+  interrupt-driven Firefox-input milestone is PID 660636 under the user service
+  `makos-visible-firefox-input-irq-final2.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm`; its boot clone
+  `build/makos-pi-visible-firefox-input-irq-final2-CShq1yHn`; its boot clone
   exactly matches the current release image SHA-256
-  `aa9c7e3d0b524a38ba5fb34fedf695cb2dd35b1e6c4c9589ec3f942fd947013f`.
+  `c3475a56970c86fddf191d8050a6bdb0f6b7e7868d728aa1b190c2770c567635`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

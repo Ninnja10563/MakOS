@@ -41,6 +41,7 @@ TARGET_WAKE_MARKER = (
 WATCHER_AP_MARKER = b"MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK"
 LEADER_DISPATCH_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK"
 INPUT_PRIORITY_MARKER = b"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK"
+INPUT_IRQ_MARKER = b"MAKOS_AARCH64_INPUT_IRQ_OK"
 AFFINITY_MARKER = (
     b"affinity=explicit singleton=0x2,0x4,0x8 restored=0xe "
     b"get=kernel-owned migrations=forced:3"
@@ -89,6 +90,7 @@ def main() -> int:
     watcher_cpu = 0
     surface_woken = 0
     surface_skipped = 0
+    input_irq_intid = 0
 
     with tempfile.TemporaryDirectory(
         prefix="makos-production-smp-focused-", dir=output_root
@@ -185,6 +187,7 @@ def main() -> int:
                     selector, process, output, HANDLE_WAITERS_MARKER, 30
                 )
                 common.send_key(stream, "ctrl-a")
+                common.wait_for_output(selector, process, output, INPUT_IRQ_MARKER, 30)
                 common.wait_for_output(
                     selector, process, output, TARGET_SELECTION_MARKER, 30
                 )
@@ -264,12 +267,19 @@ def main() -> int:
                     r"surface_skipped=(\d+) selection=queued-handle",
                     decoded,
                 )
+                input_irq_matches = re.findall(
+                    r"MAKOS_AARCH64_INPUT_IRQ_OK intid=(\d+) cpu=0 "
+                    r"entry=lower-el dispatch=direct source=virtio-mmio "
+                    r"timer_fallback=100hz",
+                    decoded,
+                )
                 if (
                     not watcher_matches
                     or not priority_matches
                     or not leader_matches
                     or not target_matches
                     or not target_wake_matches
+                    or not input_irq_matches
                 ):
                     raise AssertionError("production input-priority fields were malformed")
                 overlap_group, marker_mask, mt1, mt2, mt3 = overlap_matches[-1]
@@ -280,6 +290,7 @@ def main() -> int:
                 leader_tid = leader_matches[-1]
                 target_tid, target_handle = target_matches[-1]
                 surface_woken, surface_skipped = map(int, target_wake_matches[-1])
+                input_irq_intid = int(input_irq_matches[-1])
                 watcher_tid = int(priority_tid)
                 watcher_cpu = int(priority_cpu)
                 if (
@@ -288,6 +299,7 @@ def main() -> int:
                     or int(target_handle) != 7
                     or surface_woken != 1
                     or surface_skipped < 1
+                    or input_irq_intid not in (77, 78)
                     or leader_tid != process_matches[-1]
                     or watcher_tid == int(leader_tid)
                     or watcher_cpu not in (1, 2, 3)
@@ -354,6 +366,7 @@ def main() -> int:
         f"input_watcher_tid={watcher_tid} input_watcher_cpu={watcher_cpu} "
         "fixture=upstream-musl-pthread role=firefox leader_cpu=0 "
         "input_priority=watcher-ap,leader-cpu0 key=ctrl-a routing=exact-handle "
+        f"input_irq_intid={input_irq_intid} delivery=gicv2-spi "
         f"surface_woken={surface_woken} surface_skipped={surface_skipped} "
         "decoy=blocked-until-destroy "
         "device_mmio_owner=cpu0 ownership=exclusive concurrent=1 block=ap-idle status=42"

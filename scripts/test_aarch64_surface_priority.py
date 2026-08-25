@@ -99,6 +99,10 @@ assert "service_input_on_owner_cpu();" in timer_irq
 assert timer_irq.index("service_input_on_owner_cpu();") < timer_irq.index(
     "crate::aarch64_process::preempt_from_timer(frame);"
 )
+assert "let input = crate::aarch64_virtio_input::owns_interrupt(intid);" in timer_irq
+assert "let direct = kind == 9;" in timer_irq
+assert "record_input_irq(intid, direct, activity);" in timer_irq
+assert "MAKOS_AARCH64_INPUT_IRQ_OK" in ARCH
 assert "ProcessState::Ready" in select and "state.table.activate_on(cpu, tid)" in select
 assert "ProcessState::Running if tid == prior_pid => Some(info)" in select
 assert "ProcessState::Blocked => None" in select
@@ -145,6 +149,6 @@ print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_TEST_OK "
     "trigger=queued-key target=firefox-input-watcher wait=exact-handle decoy=not-woken blocked,active=retain-hint fallback=process-leader "
     "ready=next-schedule boost=one-shot,stale-deadline handoff=watcher-ap,leader-cpu0,futex-refresh "
-    "timer_poll=100hz owner=cpu0 expiry=ticks "
+    "delivery=gicv2-spi recovery_poll=100hz owner=cpu0 expiry=ticks "
     "fallback=round-robin pointer=unchanged"
 )
