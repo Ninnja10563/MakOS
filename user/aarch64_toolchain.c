@@ -325,10 +325,11 @@ static size_t assemble(const char *source, size_t source_length,
  * Expressions contain the integer parameter, unsigned 16-bit constants,
  * parentheses, left-associative *, +, and -, address-of and dereference of
  * bounded local pointers or the pointer parameter, checked fixed-array
- * indexing, constant-element pointer addition in pointer initializers/calls
- * and parenthesized dereferences, and a bounded one- or two-argument external
- * call with array-to-pointer decay.  Functions take one or two typed integer
- * or pointer parameters in AAPCS64 x0/x1.  The output follows AAPCS64,
+ * indexing, constant- or scalar-variable-element pointer addition in pointer
+ * initializers/calls and parenthesized dereferences, signed relational
+ * conditions, and a bounded one- or two-argument external call with
+ * array-to-pointer decay.  Functions take one or two typed integer or pointer
+ * parameters in AAPCS64 x0/x1.  The output follows AAPCS64,
  * including a non-leaf save frame, and is wrapped in a genuine ELF64 ET_REL
  * object by emit_object(). Unsupported syntax fails closed.
  */
@@ -539,14 +540,17 @@ static int c_number(struct c_compiler *compiler, uint32_t *value) {
 
 /*
  * Parse the intentionally bounded pointer-expression grammar
- * `pointer-or-array` or `pointer-or-array + constant`.  The returned offset is
- * in int elements, not bytes.  A zero bound means the pointer parameter has no
- * compile-time extent; known local arrays and derived pointers fail closed on
- * one-past-end or larger offsets.
+ * `pointer-or-array`, `pointer-or-array + constant`, or
+ * `pointer-or-array + scalar`.  Offsets are in int elements, not bytes.  A
+ * register value of 31 denotes an immediate offset.  A zero bound means the
+ * pointer parameter has no compile-time extent; known local arrays and derived
+ * pointers fail closed on one-past-end constants and on variable offsets whose
+ * safety cannot be proven.
  */
 static int c_pointer_expression(struct c_compiler *compiler,
                                 uint32_t *base_register,
                                 uint32_t *element_offset,
+                                uint32_t *offset_register,
                                 uint32_t *remaining_bound) {
     char identifier[MAX_LABEL_BYTES] = {0};
     size_t identifier_length = 0;
@@ -556,26 +560,50 @@ static int c_pointer_expression(struct c_compiler *compiler,
                         base_register, &bound))
         return 0;
     *element_offset = 0;
+    *offset_register = 31;
     c_space(compiler);
     if (compiler->cursor < compiler->source_length &&
         compiler->source[compiler->cursor] == '+') {
         ++compiler->cursor;
-        if (!c_number(compiler, element_offset) ||
-            *element_offset >= MAX_C_STACK_SLOTS)
-            return 0;
+        size_t saved = compiler->cursor;
+        if (c_number(compiler, element_offset)) {
+            if (*element_offset >= MAX_C_STACK_SLOTS) return 0;
+        } else {
+            compiler->cursor = saved;
+            char offset_name[MAX_LABEL_BYTES] = {0};
+            size_t offset_name_length = 0;
+            struct c_local *offset_local = 0;
+            if (!c_identifier(compiler, offset_name, &offset_name_length) ||
+                !c_variable_register(compiler, offset_name,
+                                     offset_name_length, offset_register,
+                                     &offset_local, 0) ||
+                (offset_local &&
+                 (offset_local->pointer || offset_local->address_taken)) ||
+                bound != 0)
+                return 0;
+        }
     }
-    if (bound != 0 && *element_offset >= bound) return 0;
+    if (*offset_register == 31 && bound != 0 && *element_offset >= bound)
+        return 0;
     if (remaining_bound)
-        *remaining_bound = bound == 0 ? 0 : bound - *element_offset;
+        *remaining_bound = *offset_register != 31 || bound == 0
+                               ? 0
+                               : bound - *element_offset;
     return 1;
 }
 
 static int c_emit_pointer_value(struct c_compiler *compiler,
                                 uint32_t destination, uint32_t base,
-                                uint32_t element_offset) {
+                                uint32_t element_offset,
+                                uint32_t offset_register) {
     if (destination > 31 || base > 31 ||
-        element_offset >= MAX_C_STACK_SLOTS)
+        element_offset >= MAX_C_STACK_SLOTS || offset_register > 31)
         return 0;
+    if (offset_register != 31)
+        return element_offset == 0 &&
+               c_emit(compiler, UINT32_C(0x8b20c800) |
+                                 (offset_register << 16) | (base << 5) |
+                                 destination);
     if (element_offset == 0)
         return c_emit(compiler, UINT32_C(0xaa0003e0) |
                                 (base << 16) | destination);
@@ -610,14 +638,15 @@ static int c_call_argument(struct c_compiler *compiler,
         }
     }
     compiler->cursor = saved;
-    uint32_t pointer_register = 0, element_offset = 0;
-    if (c_pointer_expression(compiler, &pointer_register, &element_offset, 0)) {
+    uint32_t pointer_register = 0, element_offset = 0, offset_register = 31;
+    if (c_pointer_expression(compiler, &pointer_register, &element_offset,
+                             &offset_register, 0)) {
         c_space(compiler);
         if (compiler->cursor < compiler->source_length &&
             (compiler->source[compiler->cursor] == ')' ||
              compiler->source[compiler->cursor] == ',') &&
             c_emit_pointer_value(compiler, destination, pointer_register,
-                                 element_offset))
+                                 element_offset, offset_register))
             return 1;
     }
     compiler->cursor = saved;
@@ -631,9 +660,10 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         compiler->source[compiler->cursor] == '*') {
         ++compiler->cursor;
         uint32_t pointer_register = 0, element_offset = 0;
+        uint32_t offset_register = 31;
         if (c_punct(compiler, '(')) {
             if (!c_pointer_expression(compiler, &pointer_register,
-                                      &element_offset, 0) ||
+                                      &element_offset, &offset_register, 0) ||
                 !c_punct(compiler, ')'))
                 return 0;
         } else {
@@ -645,6 +675,13 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
                                     pointer_name_length,
                                     &pointer_register))
                 return 0;
+        }
+        if (offset_register != 31) {
+            if (!c_emit_pointer_value(compiler, 8, pointer_register,
+                                      element_offset, offset_register))
+                return 0;
+            pointer_register = 8;
+            element_offset = 0;
         }
         return c_emit(compiler, UINT32_C(0xb9400000) |
                                 (element_offset << 10) |
@@ -747,13 +784,24 @@ static int c_additive(struct c_compiler *compiler, uint32_t destination) {
 static int c_comparison(struct c_compiler *compiler,
                         uint32_t *false_condition) {
     c_space(compiler);
-    if (compiler->cursor + 2 > compiler->source_length) return 0;
+    if (compiler->cursor == compiler->source_length) return 0;
     char first = compiler->source[compiler->cursor];
-    if (compiler->source[compiler->cursor + 1] != '=' ||
-        (first != '=' && first != '!'))
+    char second = compiler->cursor + 1 < compiler->source_length
+                      ? compiler->source[compiler->cursor + 1]
+                      : 0;
+    if (first == '=' || first == '!') {
+        if (second != '=') return 0;
+        *false_condition = first == '=' ? 1 : 0; /* B.NE or B.EQ. */
+        compiler->cursor += 2;
+    } else if (first == '<') {
+        *false_condition = second == '=' ? 12 : 10; /* B.GT or B.GE. */
+        compiler->cursor += second == '=' ? 2 : 1;
+    } else if (first == '>') {
+        *false_condition = second == '=' ? 11 : 13; /* B.LT or B.LE. */
+        compiler->cursor += second == '=' ? 2 : 1;
+    } else {
         return 0;
-    *false_condition = first == '=' ? 1 : 0; /* B.NE or B.EQ. */
-    compiler->cursor += 2;
+    }
     return 1;
 }
 
@@ -873,11 +921,14 @@ static int c_declaration(struct c_compiler *compiler) {
         } else {
             compiler->cursor = saved;
             uint32_t pointer_register = 0, element_offset = 0;
+            uint32_t offset_register = 31;
             if (!c_pointer_expression(compiler, &pointer_register,
                                       &element_offset,
+                                      &offset_register,
                                       &local.pointer_bound) ||
                 !c_emit_pointer_value(compiler, register_index,
-                                      pointer_register, element_offset))
+                                      pointer_register, element_offset,
+                                      offset_register))
                 return 0;
         }
         if (!c_punct(compiler, ';')) return 0;
@@ -908,9 +959,10 @@ static int c_assignment(struct c_compiler *compiler) {
         compiler->source[compiler->cursor] == '*') {
         ++compiler->cursor;
         uint32_t pointer_register = 0, element_offset = 0;
+        uint32_t offset_register = 31;
         if (c_punct(compiler, '(')) {
             if (!c_pointer_expression(compiler, &pointer_register,
-                                      &element_offset, 0) ||
+                                      &element_offset, &offset_register, 0) ||
                 !c_punct(compiler, ')'))
                 return 0;
         } else {
@@ -926,6 +978,13 @@ static int c_assignment(struct c_compiler *compiler) {
         if (!c_punct(compiler, '=') ||
             !c_additive(compiler, 0) || !c_punct(compiler, ';'))
             return 0;
+        if (offset_register != 31) {
+            if (!c_emit_pointer_value(compiler, 8, pointer_register,
+                                      element_offset, offset_register))
+                return 0;
+            pointer_register = 8;
+            element_offset = 0;
+        }
         return c_emit(compiler, UINT32_C(0xb9000000) |
                                 (element_offset << 10) |
                                 (pointer_register << 5));
@@ -1716,17 +1775,17 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char program_source[] =
         "int answer(int value) {\n"
         "    int values[3] = { (value * 3) - 20, 40, 0 };\n"
-        "    if (values[0] == 40) {\n"
+        "    if (values[0] >= 40) {\n"
         "        return adjust(values + 1, 1);\n"
         "    }\n"
         "    return 86;\n"
         "}\n"
         "int adjust(int *pointer, int delta) {\n"
-        "    int *next = pointer + 1;\n"
+        "    int *next = pointer + delta;\n"
         "    pointer[0] = pointer[0] + delta;\n"
         "    int count = 0;\n"
-        "    while (count != 1) {\n"
-        "        *(pointer + 1) = pointer[0] + delta;\n"
+        "    while (count < delta) {\n"
+        "        *(pointer + delta) = pointer[0] + count + 1;\n"
         "        count = count + 1;\n"
         "    }\n"
         "    return *next;\n"
@@ -1751,6 +1810,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int answer(int value) { int values[2] = { value, 0 }; return values[2]; }\n";
     static const char malformed_pointer_add_source[] =
         "int answer(int value) { int values[2] = { value, 0 }; int *outside = values + 2; return *outside; }\n";
+    static const char malformed_bounded_variable_add_source[] =
+        "int answer(int value) { int values[2] = { value, 0 }; int offset = 1; int *unknown = values + offset; return *unknown; }\n";
     static const char malformed_duplicate_function_source[] =
         "int answer(int value) { return value; } int answer(int value) { return value; }\n";
     static const char malformed_duplicate_parameter_source[] =
@@ -1759,6 +1820,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int adjust(int first, int second, int third) { return first; }\n";
     static const char malformed_too_many_arguments_source[] =
         "int answer(int value) { return adjust(value, value, value); }\n";
+    static const char relational_greater_source[] =
+        "int greater(int value) { if (value > 5) { return 42; } return 0; }\n";
+    static const char relational_at_most_source[] =
+        "int at_most(int value) { if (value <= 5) { return 42; } return 0; }\n";
+    static const char signed_pointer_offset_source[] =
+        "int previous(int *pointer, int offset) { int *item = pointer + offset; return *item; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
         "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
@@ -1767,12 +1834,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
         "c_source=/home/user/generated-program.c translation_unit_functions=2 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,address-of,address-expression,dereference,if,equality,inequality,while,call,return "
-        "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add branch_results=42,86 "
+        "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+        "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
-        "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42,42:44,1:2 pointer_offset_call=1 code_bytes=76,140,140 "
-        "object_bytes=688,888 intra_object_call=1 linked_bytes=356 output_bytes=815 "
-        "persisted_reopened=1 malformed_c_denied=14 "
+        "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
+        "code_bytes=76,140,152 object_bytes=688,904 intra_object_call=1 linked_bytes=368 output_bytes=815 "
+        "persisted_reopened=1 malformed_c_denied=15 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -1866,6 +1933,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
     malformed_function_length = 0;
+    if (compile_c(malformed_bounded_variable_add_source,
+                  sizeof(malformed_bounded_variable_add_source) - 1,
+                  malformed_code, sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
+    malformed_function_length = 0;
     if (compile_c(malformed_duplicate_parameter_source,
                   sizeof(malformed_duplicate_parameter_source) - 1,
                   malformed_code, sizeof(malformed_code), malformed_function,
@@ -1898,7 +1971,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         (const char *)program_input, program_source_length, program_code,
         sizeof(program_code), program_definitions, &program_definition_count,
         program_relocations, &program_relocation_count);
-    if (main_code_length != 76 || program_code_length != 280 ||
+    if (main_code_length != 76 || program_code_length != 292 ||
         program_definition_count != 2 ||
         !same_name(program_definitions[0].name,
                    program_definitions[0].length, "answer", 6) ||
@@ -1907,13 +1980,52 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         !same_name(program_definitions[1].name,
                    program_definitions[1].length, "adjust", 6) ||
         program_definitions[1].offset != 140 ||
-        program_definitions[1].size != 140 ||
+        program_definitions[1].size != 152 ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
         program_relocation_count != 1 ||
         program_relocations[0].offset != 92 ||
         !same_name(program_relocations[0].name,
                    program_relocations[0].length, "adjust", 6))
         fail(82);
+
+    uint8_t *relational_jit =
+        (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
+    if ((uintptr_t)relational_jit == UINT64_MAX) fail(83);
+    char relational_function[MAX_LABEL_BYTES] = {0};
+    size_t relational_function_length = 0;
+    size_t greater_length = compile_c(
+        relational_greater_source, sizeof(relational_greater_source) - 1,
+        relational_jit, 128, relational_function,
+        &relational_function_length, 0, 0);
+    relational_function_length = 0;
+    size_t at_most_length = compile_c(
+        relational_at_most_source, sizeof(relational_at_most_source) - 1,
+        relational_jit + 128, 128, relational_function,
+        &relational_function_length, 0, 0);
+    relational_function_length = 0;
+    size_t previous_length = compile_c(
+        signed_pointer_offset_source, sizeof(signed_pointer_offset_source) - 1,
+        relational_jit + 256, 128, relational_function,
+        &relational_function_length, 0, 0);
+    if (!greater_length || greater_length > 128 ||
+        !at_most_length || at_most_length > 128 ||
+        !previous_length || previous_length > 128 ||
+        syscall4(SYS_VM_PROTECT, (uintptr_t)relational_jit,
+                 PROT_READ | PROT_WRITE | PROT_EXEC, 0, 0) != 0 ||
+        syscall4(SYS_VM_PROTECT, (uintptr_t)relational_jit,
+                 PROT_READ | PROT_EXEC, 0, 0) != 1)
+        fail(83);
+    uint64_t (*compiled_greater)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)relational_jit;
+    uint64_t (*compiled_at_most)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)(relational_jit + 128);
+    uint64_t (*compiled_previous)(uint32_t *, uint64_t) =
+        (uint64_t (*)(uint32_t *, uint64_t))(uintptr_t)(relational_jit + 256);
+    uint32_t previous_values[2] = {42, 7};
+    if (compiled_greater(6) != 42 || compiled_greater(5) != 0 ||
+        compiled_at_most(5) != 42 || compiled_at_most(6) != 0 ||
+        compiled_previous(previous_values + 1, UINT32_MAX) != 42)
+        fail(83);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
     if ((uintptr_t)jit == UINT64_MAX) fail(83);
@@ -1943,7 +2055,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         program_object, program_code, program_code_length,
         program_definitions, program_definition_count, program_relocations,
         program_relocation_count);
-    if (main_object_length != 688 || program_object_length != 888 ||
+    if (main_object_length != 688 || program_object_length != 904 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(program_object_path, sizeof(program_object_path) - 1,
@@ -1994,7 +2106,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                    "adjust") ||
         get16(program_object, adjust_symbol + 6) != 1 ||
         get64(program_object, adjust_symbol + 8) != 140 ||
-        get64(program_object, adjust_symbol + 16) != 140)
+        get64(program_object, adjust_symbol + 16) != 152)
         fail(88);
     put16(program_object, adjust_symbol + 6, 0);
     put64(program_object, adjust_symbol + 8, 0);
@@ -2004,7 +2116,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         fail(88);
     put16(program_object, adjust_symbol + 6, 1);
     put64(program_object, adjust_symbol + 8, 140);
-    put64(program_object, adjust_symbol + 16, 140);
+    put64(program_object, adjust_symbol + 16, 152);
     const uint8_t *duplicate_objects[MAX_LINK_OBJECTS] = {
         main_object, program_object, program_object,
     };
@@ -2017,7 +2129,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t linked_length = link_objects(objects, object_lengths, 2, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
-    if (linked_length != 356 || entry_offset != 0) fail(89);
+    if (linked_length != 368 || entry_offset != 0) fail(89);
 
     uint8_t *compiled_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -2032,13 +2144,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 76);
     uint64_t (*compiled_adjust)(uint32_t *, uint64_t) =
         (uint64_t (*)(uint32_t *, uint64_t))(uintptr_t)(compiled_jit + 216);
-    uint32_t forty[2] = {40, 0}, scaled[2] = {40, 0}, zero[2] = {0, 0};
+    uint32_t forty[3] = {40, 0, 0};
+    uint32_t scaled[3] = {40, 0, 0};
+    uint32_t zero[3] = {0, 0, 0};
     if (compiled_answer(20) != 42 || compiled_answer(0) != 86 ||
         compiled_adjust(forty, 1) != 42 ||
-        forty[0] != 41 || forty[1] != 42 ||
+        forty[0] != 41 || forty[1] != 42 || forty[2] != 0 ||
         compiled_adjust(scaled, 2) != 44 ||
-        scaled[0] != 42 || scaled[1] != 44 ||
-        compiled_adjust(zero, 1) != 2 || zero[0] != 1 || zero[1] != 2)
+        scaled[0] != 42 || scaled[1] != 0 || scaled[2] != 44 ||
+        compiled_adjust(zero, 1) != 2 ||
+        zero[0] != 1 || zero[1] != 2 || zero[2] != 0)
         fail(89);
 
     volatile uint8_t image[IMAGE_CAPACITY];

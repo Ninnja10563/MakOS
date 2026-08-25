@@ -140,18 +140,18 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   startup and one two-function C source from MakFS. A bounded source-driven C compiler emits
   AAPCS64 integer/pointer expressions, one or two typed parameters/call arguments
   in x0/x1, register locals, mutable integer parameter/local
-  assignments, equality/inequality control flow, a real backward-branch
+  assignments, signed equality/inequality/ordering control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
   loads and stores, fixed local `int` arrays with checked constant indexing,
-  array decay, bounded constant-element pointer addition with known-bound
-  rejection, typed pointer parameters, non-leaf frames preserving x19-x24,
+  array decay, constant and signed scalar-variable element pointer addition
+  with known-bound fail-closed rejection, typed pointer parameters, non-leaf frames preserving x19-x24,
   same-object two-argument calls that mutate caller-owned array elements, and
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
   loop/memory outcomes execute in EL0.
   The assembler emits `_start`. The guest static
   linker resolves external `_start`→`answer` and same-object `answer`→`adjust`
   across two objects, applies two `R_AARCH64_CALL26` relocations, rejects
-  malformed C, invalid relocation type,
+  malformed C (including unproved variable offsets from known-bounded arrays), invalid relocation type,
   unresolved symbols and duplicate definitions, emits `ET_EXEC`, and executes
   the result twice under Pi/QEMU TCG. Full C/Rust
   compiler semantics, general assembler/linker, build system, debugger, package

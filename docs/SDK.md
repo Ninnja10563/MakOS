@@ -71,15 +71,17 @@ may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
 locals, unsigned 16-bit constants, parentheses, multiplication, addition and
 subtraction, assign expressions to declared integer locals, contain
-an equality/inequality condition in an `if` whose block returns an expression,
+signed `==`, `!=`, `<`, `<=`, `>`, or `>=` conditions in an `if` whose block returns an expression,
 run a bounded assignment-only `while` body, and call one external function with
 one or two arguments. A pointer local may be initialized from `&local` or from
-`pointer-or-array + constant`, and either form may cross the external-call
+`pointer-or-array + constant-or-scalar`, and either form may cross the external-call
 boundary. `*pointer` performs a 32-bit load and `*pointer = expression` a 32-bit
 store through a pointer local or pointer parameter; parenthesized
-`*(pointer + constant)` performs the corresponding scaled access. Pointer
-addition emits a 64-bit address `ADD`, scales the accepted 0..3 element offset
-by four, propagates known local bounds, and rejects known one-past-end results.
+`*(pointer + constant-or-scalar)` performs the corresponding scaled access.
+Constant pointer addition emits a 64-bit address `ADD` and scales an accepted
+0..3 element offset by four. An `int` parameter or non-address-taken scalar
+local may offset an unknown-bound pointer through signed `SXTW #2`; known bounds
+reject one-past-end constants and unproved variable offsets.
 A final unconditional return is required.
 Fixed local `int` arrays may contain one to four exactly initialized elements
 within the same four-slot frame budget. The compiler supports constant indexed
@@ -101,8 +103,16 @@ Unsupported tokens, duplicate parameter names, more than two parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
-This seed has no general pointer arithmetic beyond bounded constant-element
-addition, variable-length/global/multidimensional
+Pointer expressions also accept a scalar `int` parameter or non-address-taken
+scalar local as the element offset when the pointer's bound is unknown. AArch64
+codegen uses `ADD ... SXTW #2`, so positive and negative 32-bit offsets retain C
+signedness. Variable offsets from known-bounded local arrays fail closed because
+this seed cannot yet prove their range. Conditions accept signed `==`, `!=`,
+`<`, `<=`, `>`, and `>=`; focused guest execution covers every relation and a
+`pointer + -1` load.
+
+This seed has no general pointer arithmetic beyond constant/scalar-variable
+element addition, pointer differences, variable-length/global/multidimensional
 arrays, structs,
 nested/general blocks, more than two functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,

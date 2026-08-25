@@ -109,17 +109,20 @@ linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
 translation unit accepts up to two `int` functions, each with one or two typed
 `int`/`int *` parameters, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
-mutable parameter/local assignments, equality and inequality comparisons, one
-equality `if` block containing a return, a bounded `while` body containing one
+mutable parameter/local assignments, signed `==`, `!=`, `<`, `<=`, `>`, and
+`>=` comparisons, one conditional `if` block containing a return, a bounded `while` body containing one
 or more assignments, a one- or two-argument function call, and bounded pointer
-initializers from `&local` or `pointer-or-array + constant`. Address and pointer
+initializers from `&local` or `pointer-or-array + constant-or-scalar`. Address and pointer
 expressions may be passed to the bounded external call. Dereference expressions
 load a 32-bit `int` through a pointer local or pointer parameter;
 `*pointer = expression` stores it back. Parenthesized
-`*(pointer + constant)` supports the same scaled load/store form. Pointer
-addition uses a 64-bit AArch64 `ADD` with the constant scaled by `sizeof(int)`;
-the accepted element offset is 0..3, and known local-array/derived-pointer
-bounds reject one-past-end or larger offsets.
+`*(pointer + constant-or-scalar)` supports the same scaled load/store form.
+Constant addition uses a 64-bit AArch64 `ADD` with a 0..3 element offset scaled
+by `sizeof(int)`. A scalar `int` parameter or non-address-taken scalar local may
+also supply the offset for an unknown-bound pointer; codegen uses signed
+`SXTW #2`, and guest execution proves both positive offsets and `-1`. Known
+local-array/derived-pointer bounds reject one-past-end constants and all
+variable offsets whose range this compiler cannot prove.
 Fixed local `int` arrays accept one to four exactly supplied initializer
 expressions, subject to the shared four-slot frame limit. Constant indices are
 bounded to 0..3 and known local-array indices are checked against the declared
@@ -131,31 +134,33 @@ A final unconditional return is required so every accepted path returns.
 Non-leaf functions preserve FP/LR and x19-x24 in a 96-byte AAPCS64 frame with
 four bounded 32-bit local slots. The
 current `answer` initializes `values[3]` with `(value * 3) - 20`, 40, and zero,
-then calls `adjust(values + 1, 1)` when element zero equals 40; otherwise it
+then calls `adjust(values + 1, 1)` when element zero is at least 40; otherwise it
 returns 86. `adjust(int *pointer, int delta)` accepts its pointer in AAPCS64
 `x0` and delta in `w1`, preserves them in `x23`/`w24`, derives
-`next = pointer + 1`, adds delta to element zero,
-then uses `while (count != 1)` and `*(pointer + 1)` to store
-element-zero-plus-delta into element one and advance the counter. Its return
-reloads through `next`. The compiler emits two 140-byte definitions in a
-single 280-byte `.text` and an 888-byte
+`next = pointer + delta`, adds delta to element zero,
+then uses `while (count < delta)` and `*(pointer + delta)` to store through the
+dynamically derived address and advance the counter. Its return reloads through
+`next`. The compiler emits 140-byte `answer` and 152-byte `adjust` definitions in a
+single 292-byte `.text` and a 904-byte
 `generated-program.o`; the assembler emits 76 code bytes in the 688-byte
 `generated-main.o`. Both genuine ELF64 `ET_REL` files persist/reopen. The C
 object's symbol table defines `answer` at offset zero and `adjust` at offset
 140. The bounded linker discovers definitions and undefined symbols across
 both, applies the external `_start`→`answer` and same-object
-`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 356 code bytes in the
+`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 368 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
 `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
-`adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the direct-call arrays also
-required to become `41:42`, `42:44`, and `1:2`. Invalid
+`adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the three-element direct-call arrays also
+required to become `41:42:0`, `42:0:44`, and `1:2:0`. Separate RX probes cover
+all four signed ordering relations and load 42 through `pointer + -1`. Invalid
 relocation type/addend/site, unresolved `adjust`, and duplicate `answer` inputs
 are denied, as are unsupported division, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
-duplicate functions/parameters, and more than two parameters or call arguments
+unproved variable offset from a known-bounded local array, duplicate
+functions/parameters, and more than two parameters or call arguments
 are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
@@ -169,8 +174,8 @@ make test-aarch64-selfhost-runtime
 ```
 
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
-has no general pointer arithmetic beyond bounded constant-element addition,
-variable-length/global/multidimensional arrays,
+has no general pointer arithmetic beyond constant/scalar-variable element
+addition, no pointer differences, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than two functions per translation unit, general object
 count/relocation repertoire, or build driver. It is not a
