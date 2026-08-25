@@ -36,11 +36,18 @@ Last updated: 2026-08-25.
   `entered_el1_mask=0x2`/`deferred_ack_mask=0x2`, target/ack masks `0x2`, exact
   frame balance, and subsequent login. Scheduler-entry races before target-mask
   publication are folded into the same locked stop/ack contract.
+  A fifth fixture rendezvous-holds two independent processes inside syscall 119
+  on CPU0/AP1, then proves both acquire a separate max-one teardown coordinator
+  and exit with statuses 57/58 (`rendezvous_mask=0x3`,
+  `serialized_acquire_mask=0x3`) without scheduler-lock deadlock. This test
+  exposed the former 64 KiB AP stack overwriting the adjacent kernel-root word;
+  every AP now has a runtime-reported 1 MiB EL1 stack, and the full fixture plus
+  visible login pass with exact frame balance.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
   desktop/Firefox AP scheduling remains gated pending input/device-triggered
-  idle returns, concurrent group-exit serialization, device affinity
+  idle returns, simultaneous same-group exit joining, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
@@ -286,7 +293,7 @@ Last updated: 2026-08-25.
   CPUs online with separate AP stacks.
 - AArch64 QEMU `virt`/HVF SMP: ACPI MPIDRs feed genuine PSCI 0.2+
   `CPU_ON_64` HVC calls. Three secondaries enter EL1 through an identity-mapped
-  assembly trampoline, install private 64 KiB stacks plus shared MMU and
+  assembly trampoline, install private 1 MiB stacks plus shared MMU and
   per-PE VBAR/GICC state, then participate in a coherent parallel-work
   rendezvous. Runtime rejects CPU_ON success without all APs online and counter
   progress during BSP work. APs enter closed-gate, masked-interrupt WFE

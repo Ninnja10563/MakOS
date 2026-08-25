@@ -53,7 +53,11 @@ const EXCEPTION_FRAME_BYTES: usize = 832;
 const BRK_SELF_TEST: u64 = 0x4d4b;
 const MAX_AARCH64_CPUS: usize = 4;
 const SECONDARY_CPU_COUNT: usize = MAX_AARCH64_CPUS - 1;
-const SECONDARY_STACK_BYTES: usize = 64 * 1024;
+// APs execute the same deep syscall/teardown paths as the BSP. The former
+// 64 KiB allocation overflowed during two simultaneous exit_group cleanups
+// and clobbered the kernel-root word immediately below AP1's stack. Match the
+// BSP's 1 MiB kernel stack before enabling broader multicore userspace.
+const SECONDARY_STACK_BYTES: usize = 1024 * 1024;
 const PSCI_VERSION: u64 = 0x8400_0000;
 const PSCI_FEATURES: u64 = 0x8400_000a;
 const PSCI_CPU_ON_64: u64 = 0xc400_0003;

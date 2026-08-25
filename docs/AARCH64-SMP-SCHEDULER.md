@@ -3,7 +3,7 @@
 ## Current verified boundary
 
 QEMU `virt` starts four PEs through PSCI `CPU_ON_64`. Every PE has a
-private 64 KiB EL1 stack, VBAR, GICC interface, logical ID in `TPIDR_EL1`, and
+private 1 MiB EL1 stack, VBAR, GICC interface, logical ID in `TPIDR_EL1`, and
 coherent identity-mapped kernel tables. A boot rendezvous proves all APs make
 parallel EL1 progress. A bounded boot probe then sends a GICv2 SGI, enables each
 AP's banked virtual-timer PPI, and runs four independent EL0 processes at once.
@@ -59,6 +59,22 @@ an early-stop bit to the exact target/ack contract. Runtime requires
 `entered_el1_mask=0x2`, `deferred_ack_mask=0x2`, target/ack masks `0x2`, status
 56, single address-space reap, and exact frame recovery.
 
+A fifth fixture starts two independent EL0 processes on CPU0 and AP1. Both
+rendezvous inside syscall 119 before either may acquire the group-stop
+coordinator. A dedicated atomic coordinator, separate from the process-table
+lock, publishes status before group identity and bounds contention at 20
+seconds. Both callers subsequently acquire it one at a time, exit with their
+own statuses 57 and 58, and reap their distinct roots. Runtime requires
+`rendezvous_mask=0x3`, `serialized_acquire_mask=0x3`, a maximum of one
+coordinator owner, and exact frame recovery.
+
+This concurrent deep teardown initially exposed a real AP kernel-stack
+overflow: the prior 64 KiB AP1 stack grew into the adjacent `KERNEL_ROOT`
+atomic, which QMP physical-memory inspection found cleared. AP stacks now
+match the BSP at 1 MiB, and the boot contract requires
+`stack_bytes=1048576`. This is necessary before general AP syscalls, not merely
+for the fixture.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -86,10 +102,11 @@ safe general process migration.
   runtime coverage.
 - CPU0-initiated `exit_group` now stops and acknowledges both a remote-running
   EL0 sibling and a sibling inside a returning SVC/page-fault EL1 path before
-  reap. Simultaneous unrelated group exits still need serialization without
-  deadlock, and a permanently non-returning EL1 driver path would require a
-  cancellable safe point. Administrative `terminate` correctly continues to
-  reject a task owned by another CPU.
+  reap. Simultaneous unrelated groups now serialize without holding the
+  process-table lock. Simultaneous callers within the same group still need a
+  cooperative join path, and a permanently non-returning EL1 driver path would
+  require a cancellable safe point. Administrative `terminate` correctly
+  continues to reject a task owned by another CPU.
 - AP banked virtual-timer PPI enable/programming and CPU0-only global tick/device
   servicing pass the bounded probe. General AP syscalls still require a complete
   device/service ownership audit.

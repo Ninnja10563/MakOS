@@ -140,6 +140,15 @@ worker, switch to the kernel root, and report
 guards the race where an exception entered scheduling just before publication.
 Normal yield behavior is unchanged outside the armed boot fixture.
 
+A final teardown fixture starts independent status-57 and status-58 processes
+on CPU0/AP1 and rendezvous-blocks both inside syscall 119 before coordinator
+acquisition. It requires `cpu_mask=0x3`, `rendezvous_mask=0x3`, and
+`serialized_acquire_mask=0x3`, proving bounded max-one serialization without
+holding the scheduler lock. All AP kernel stacks are 1 MiB; the boot marker
+must report `stack_bytes=1048576`. The former 64 KiB allocation was insufficient
+for two concurrent full cleanup paths and could overwrite adjacent kernel
+state.
+
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
 data memory type for an ELF entry would fault immediately after
