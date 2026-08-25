@@ -27,17 +27,17 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `e9a54f3`:
-  PID 167910, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-H9ek4J`, private data clone
-  `build/makos-pi-visible-H9ek4J/data.img`, private variables
-  `build/makos-pi-visible-H9ek4J/vars.fd`, QMP
-  `build/makos-pi-visible-H9ek4J/qmp.sock`, serial
-  `build/makos-pi-visible-H9ek4J/serial.log`, and PID file
-  `build/makos-pi-visible-H9ek4J/qemu.pid`. It is the sole QEMU process and
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `d5c0b0b`:
+  PID 177966, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-uy1pn5`, private data clone
+  `build/makos-pi-visible-uy1pn5/data.img`, private variables
+  `build/makos-pi-visible-uy1pn5/vars.fd`, QMP
+  `build/makos-pi-visible-uy1pn5/qmp.sock`, serial
+  `build/makos-pi-visible-uy1pn5/serial.log`, and PID file
+  `build/makos-pi-visible-uy1pn5/qemu.pid`. It is the sole QEMU process and
   passes the four-PE EL0 marker, both remote group-stop markers, the concurrent
   independent-group serialization marker, the simultaneous same-group join
-  marker, `MAKOS_LOGIN_UI_OK`, and
+  marker, ordinary-config `smp_input_probe=0`, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
   before any later runtime gate.
 - A bounded four-PE AArch64 EL0 scheduler proof now passes on Pi/QEMU 10.0.11
@@ -89,8 +89,13 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending input/device-triggered blocking proof plus device affinity
-  and contention gates.
+  remains pending device affinity and contention gates.
+  An opt-in seventh fixture runs after real virtio-input initialization. AP1
+  blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
+  harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
+  ring, and an SGI resumes AP1. Two repeated Pi/TCG passes require matching
+  input idle/resume masks `0x2`, status 61, exact frame balance, and boot
+  completion. Normal `boot/MAKOS.CFG` never arms this external-input wait.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
