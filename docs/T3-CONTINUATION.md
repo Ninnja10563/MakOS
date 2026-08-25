@@ -27,31 +27,40 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG MakBuild-CLI milestone:
-  PID 480589, user service `makos-visible-makbuild-cli-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG `MAKSTATE1` cache milestone:
+  PID 491323, user service `makos-visible-makstate-cache-final4.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7`, private boot clone
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7/boot.img`, private data clone
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7/data.img`, private variables
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7/vars.fd`, QMP
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7/qmp.sock`, serial
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7/serial.log`, PID file
-  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7/qemu.pid`, and QMP framebuffer
-  captures `login.ppm`/`login.png`. Its boot
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP`, private boot clone
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/boot.img`, private sparse
+  data image `build/makos-pi-visible-makstate-cache-final-KHjut1RP/data.img`,
+  private variables
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/vars.fd`, QMP
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/qmp4.sock`, serial
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/serial.log`, PID file
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP/qemu4.pid`, and QMP
+  framebuffer capture `login.png`. Its boot
   clone SHA-256 is
-  `77d9b815c6a989d9e60f74753f6e635ccb61584686aee9012c25682556a4b720`,
+  `5c8436f8f3faf08cbcd217ff4d6313771314f8fdccf01265f4340a773f8c8c1c`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `104,136,60`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
+  counters `99,97,101`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
   `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`; it was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 480589/session
+  `build/makos-pi-visible-makbuild-cli-final-TEqxtQE7` was stopped cleanly
+  through QMP before the focused cache runtime; its private files remain. Three
+  corrected visible-launch attempts in the current session exited before guest
+  execution because the first firmware image was the wrong pflash size and the
+  extracted QEMU module directory was initially absent. They ran no concurrent
+  guest; `final4` uses the 64 MiB no-secboot code image plus the extracted
+  module directory.
   Prior PID 472733/session
   `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK` was
   stopped cleanly through QMP before the MakBuild-CLI runtime; its private
@@ -343,7 +352,14 @@ Preserve existing files and changes.
   the EL0 toolchain's child-owned SysV `argv[1]`. Its `MODE=build` consumes the
   already-persisted MakFS manifest and sources without seeding or overwriting
   them; `selfhost-aarch64` alone selects `MODE=fixture`. Focused Pi/TCG runtime
-  executes and reaps both modes with status 42. The assembler emits 76 bytes of
+  runs the fixture once and six authenticated CLI builds, reaping every
+  toolchain process with status 42. A derived 72-byte `MAKSTATE1` record is
+  committed after object and final-ELF writes. Its non-cryptographic 64-bit
+  FNV-1a manifest/source/object fingerprints are cache keys only; reuse also
+  requires the object to pass ELF parsing and symbol validation. Runtime proves
+  cold `0/3`, warm `3/0`, corrupt-object `2/1`, rewarm `3/0`, edited-source
+  `2/1`, rewarm `3/0`, and corrupt-state full `0/3` hit/miss results. The
+  assembler emits 76 bytes of
   `_start` code in a 688-byte object. The program C translation unit contains
   the 140-byte `answer` and 168-byte `adjust(int *pointer, int delta)` in a
   308-byte `.text` and 976-byte object. A separate library C translation unit
@@ -386,11 +402,12 @@ Preserve existing files and changes.
   an out-of-range BL site, relocation type 282, a nonzero CALL26 addend,
   unresolved `adjust`, an omitted library object, and duplicate `answer` fail closed. Exact source
   passes release artifact checks, `make unit check`, structural guard, focused
-  Pi/QEMU 10.0.11 TCG runtime, and a fresh visible login boot.
+  Pi/QEMU 10.0.11 TCG runtime.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
-  Partial: this is not a full C/Rust compiler/linker, dependency-aware/
-  variable-graph build system, debugger, or substantial in-guest MakOS build.
-- At this handoff PID 480589 is the sole QEMU and no runtime-test harness is
+  Partial: this is not a full C/Rust compiler/linker, transitive dependency/
+  header engine, variable/parallel build system, debugger, or substantial
+  in-guest MakOS build.
+- At this handoff PID 491323 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -485,8 +502,9 @@ Preserve existing files and changes.
    provenance-aware/broader pointer and lvalue expressions,
    variable-length/global/multidimensional arrays, structs and nested/general
    blocks, then lift the function/parameter bounds, add broader relocation/
-   object support, dependency/incremental build rules, variable input graphs,
-   and broader command-line build control before a substantial in-guest build. Preserve real implementation
+   object support, transitive dependency/header discovery, variable/parallel
+   input graphs, and broader command-line build control before a substantial
+   in-guest build. Preserve real implementation
    requirements—no fake/spoofed apps.
 
 ## Operating constraints

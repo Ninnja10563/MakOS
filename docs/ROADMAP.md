@@ -160,6 +160,11 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   supplies all three source/object paths, the output path, and entry symbol;
   four malformed forms fail closed. An authenticated `makbuild <manifest>`
   command passes the validated home path through the kernel-built SysV startup
-  vector and consumes existing MakFS inputs without fixture seeding. Full C/Rust compiler semantics, general
-  assembler/linker, dependency-aware build system, debugger, package
-  delivery, and an in-OS MakOS rebuild remain.
+  vector and consumes existing MakFS inputs without fixture seeding. A
+  state-last 72-byte `MAKSTATE1` cache validates manifest, source, and object
+  fingerprints plus parsed object/symbol structure. Focused Pi/TCG runtime
+  proves cold `0/3`, warm `3/0`, object/source selective `2/1`, and corrupt-state
+  full `0/3` rebuilds while every output executes with status 42. Full C/Rust
+  compiler semantics, general assembler/linker, transitive dependency
+  discovery, variable/parallel build graphs, debugger, package delivery, and an
+  in-OS MakOS rebuild remain.

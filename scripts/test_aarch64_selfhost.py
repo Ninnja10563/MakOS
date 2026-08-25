@@ -67,7 +67,24 @@ for fragment in (
     "const char *build_manifest_path = argv[1]",
     "if (fixture_mode &&",
     "MAKOS_AARCH64_MAKBUILD_OK mode=",
-    '" startup=sysv argc=2 envc=1 seeded=0 status=42\\n"',
+    '" cache=makstate-v1 cache_hits="',
+    '" state_committed=1 status=42\\n"',
+    "BUILD_STATE_BYTES = 72",
+    'static const char magic[] = "MAKSTATE1"',
+    "static uint64_t build_hash(",
+    "static int build_state_path(",
+    "static int build_state_path_safe(",
+    "static int read_build_state(",
+    "static int write_build_state(",
+    "static size_t compile_build_object(",
+    "static int incremental_build(",
+    "saved_source_hashes[input] == source_hash",
+    "saved_object_hashes[input]",
+    "parse_object(object_storage[input]",
+    "validate_symbols(&view)",
+    "++*cache_hits",
+    "++*cache_misses",
+    "write_build_state(state_path",
     "static int c_compile_function(",
     "static int c_find_parameter(",
     "static int c_variable_register(",
@@ -242,6 +259,7 @@ require(SHELL, '"makbuild "')
 require(SHELL, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
 require(SHELL, "source=existing-makfs seeded=0 startup=sysv status=42")
 require(SHELL, "toolchain_startup=sysv manifest_arg=1")
+require(SHELL, "cache=makstate-v1 cache_hits=0 cache_misses=3 state_committed=1")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
@@ -265,12 +283,22 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, 'send_command(stream, "makbuild /home/user/generated.build")')
 require(RUNTIME, "MAKOS_AARCH64_MAKBUILD_OK mode=build")
 require(RUNTIME, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
+require(RUNTIME, '"{": "shift-bracket_left"')
+require(RUNTIME, '"}": "shift-bracket_right"')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "FIXTURE_BUILD_MARKER")
-require(FOCUSED_RUNTIME, "CLI_BUILD_MARKER")
+require(FOCUSED_RUNTIME, "WARM_BUILD_MARKER")
+require(FOCUSED_RUNTIME, "SELECTIVE_BUILD_MARKER")
+require(FOCUSED_RUNTIME, "INVALIDATED_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
+require(FOCUSED_RUNTIME, "cache_hits=3 cache_misses=0")
+require(FOCUSED_RUNTIME, "cache_hits=2 cache_misses=1")
+require(FOCUSED_RUNTIME, "cache_hits=0 cache_misses=3")
+require(FOCUSED_RUNTIME, "write generated-library.o corrupt")
+require(FOCUSED_RUNTIME, "write generated-library.c")
+require(FOCUSED_RUNTIME, "write generated.build.state corrupt")
 require(FOCUSED_RUNTIME, "malformed_c_denied=17")
 require(FOCUSED_RUNTIME, "malformed_build_denied=4")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")

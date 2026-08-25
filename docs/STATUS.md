@@ -188,7 +188,16 @@ Last updated: 2026-08-26.
   `argv[1]`, and uses `MODE=build` to consume existing MakFS inputs without
   seeding or overwriting them. `selfhost-aarch64` explicitly selects the
   separate deterministic `MODE=fixture` path. Focused Pi/TCG runtime executes
-  both modes and reaps both status 42. Each bounded C
+  fixture mode once and build mode six times, with every toolchain process
+  reaped at status 42. Build mode derives a versioned 72-byte `MAKSTATE1`
+  record and commits it only after object writes and an always-relinked final
+  ELF. Its 64-bit FNV-1a manifest/source/object fingerprints are
+  non-cryptographic cache keys, not a security boundary; a hit also requires
+  the persisted object to parse and pass symbol validation. The focused run
+  proves cold `0/3`, warm `3/0`, corrupt-object `2/1`, rewarm `3/0`,
+  edited-source `2/1`, rewarm `3/0`, and corrupt-state full `0/3` hit/miss
+  results. Stale, missing, or malformed state safely forces a full rebuild.
+  Each bounded C
   translation unit accepts up to three
   AAPCS64 `int` functions, each with one or two typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
@@ -255,8 +264,15 @@ Last updated: 2026-08-26.
   The library function is executed directly as `combine(40,2)=42`; the linked
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
-  `make unit check`, and fresh visible login pass. This is a real but deliberately bounded seed, not a
-  general C/Rust compiler/linker, dependency-aware or variable-graph build system, debugger, or substantial
+  `make unit check`, and a fresh visible Pi/TCG login pass. The visible guest is
+  PID 491323 under `makos-visible-makstate-cache-final4.service`, with private
+  boot/data/variables and QMP in
+  `build/makos-pi-visible-makstate-cache-final-KHjut1RP`; its boot clone exactly
+  matches the current release image SHA-256
+  `5c8436f8f3faf08cbcd217ff4d6313771314f8fdccf01265f4340a773f8c8c1c`.
+  This is a real but deliberately bounded seed, not a
+  general C/Rust compiler/linker, transitive dependency/header engine,
+  variable/parallel build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
@@ -884,8 +900,11 @@ Last updated: 2026-08-26.
   preserving every artifact size, relocation, execution, and loader result.
   The latest focused run first seeds that fixture, then invokes the authenticated
   `makbuild` CLI against the persisted manifest. Kernel-built SysV `argc=2`/
-  `argv[1]`, distinct fixture/build modes, `seeded=0` for the CLI process, and
-  two status-42 toolchain reaps all pass without changing the graph's results.
+  `argv[1]`, distinct fixture/build modes, and `seeded=0` for CLI processes all
+  pass. The newest focused cache run executes six CLI builds and proves cold,
+  warm, object-corrupt, source-edited, and state-corrupt invalidation outcomes;
+  all toolchain processes reap with status 42 without changing the graph's
+  linked result.
   A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The

@@ -26,6 +26,7 @@ LINKER_MARKER = (
     b"format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
     b"symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
     b"build_manifest=argv1 build_driver=makbuild-v1 build_inputs=3 "
+    b"cache=makstate-v1 cache_hits=0 cache_misses=3 state_committed=1 "
     b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
     b"c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -40,12 +41,26 @@ LINKER_MARKER = (
 FIXTURE_BUILD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=fixture "
     b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
-    b"seeded=1 status=42"
+    b"seeded=1 cache=makstate-v1 cache_hits=0 cache_misses=3 "
+    b"state_committed=1 status=42"
 )
-CLI_BUILD_MARKER = (
+WARM_BUILD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
     b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
-    b"seeded=0 status=42"
+    b"seeded=0 cache=makstate-v1 cache_hits=3 cache_misses=0 "
+    b"state_committed=1 status=42"
+)
+SELECTIVE_BUILD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v1 cache_hits=2 cache_misses=1 "
+    b"state_committed=1 status=42"
+)
+INVALIDATED_BUILD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v1 cache_hits=0 cache_misses=3 "
+    b"state_committed=1 status=42"
 )
 CLI_REAP_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated.build "
@@ -57,7 +72,9 @@ EXECUTION_MARKER = (
     b"assembler=guest-native linker=guest-native objects=3 "
     b"object_format=elf64-et-rel relocations=R_AARCH64_CALL26:3 "
     b"symbols=_start,answer,adjust,combine build_manifest=/home/user/generated.build "
-    b"build_driver=makbuild-v1 build_inputs=3 toolchain_startup=sysv manifest_arg=1 "
+    b"build_driver=makbuild-v1 build_inputs=3 cache=makstate-v1 "
+    b"cache_hits=0 cache_misses=3 state_committed=1 "
+    b"toolchain_startup=sysv manifest_arg=1 "
     b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c "
     b"translation_unit_functions=2,1 c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -201,10 +218,87 @@ def main() -> int:
                     stream, "makbuild /home/user/generated.build"
                 )
                 common.wait_for_output(
-                    selector, process, output, CLI_BUILD_MARKER, 60
+                    selector, process, output, WARM_BUILD_MARKER, 60
                 )
                 common.wait_for_output(
                     selector, process, output, CLI_REAP_MARKER, 60
+                )
+                common.send_command(
+                    stream, "write generated-library.o corrupt"
+                )
+                common.wait_for_output(
+                    selector,
+                    process,
+                    output,
+                    b"MAKOS_AARCH64_SHELL_CMD write bytes=7 persisted=1",
+                    30,
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, SELECTIVE_BUILD_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, CLI_REAP_MARKER, 2, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated.build"
+                )
+                common.wait_for_output_count(
+                    selector, process, output, WARM_BUILD_MARKER, 2, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, CLI_REAP_MARKER, 3, 60
+                )
+                common.send_command(
+                    stream,
+                    "write generated-library.c "
+                    "int combine(int value, int delta) { return value + delta; }",
+                )
+                common.wait_for_output(
+                    selector,
+                    process,
+                    output,
+                    b"MAKOS_AARCH64_SHELL_CMD write bytes=59 persisted=1",
+                    30,
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated.build"
+                )
+                common.wait_for_output_count(
+                    selector, process, output, SELECTIVE_BUILD_MARKER, 2, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, CLI_REAP_MARKER, 4, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated.build"
+                )
+                common.wait_for_output_count(
+                    selector, process, output, WARM_BUILD_MARKER, 3, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, CLI_REAP_MARKER, 5, 60
+                )
+                common.send_command(
+                    stream, "write generated.build.state corrupt"
+                )
+                common.wait_for_output(
+                    selector,
+                    process,
+                    output,
+                    b"MAKOS_AARCH64_SHELL_CMD write bytes=7 persisted=1",
+                    30,
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, INVALIDATED_BUILD_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, CLI_REAP_MARKER, 6, 60
                 )
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
@@ -221,7 +315,10 @@ def main() -> int:
         "compiler=guest-native assembler=guest-native objects=3 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine build_driver=makbuild-v1 build_inputs=3 "
-        "toolchain_startup=sysv manifest_arg=1 cli_build=1 seeded_modes=fixture,existing translation_unit_functions=2,1 "
+        "toolchain_startup=sysv manifest_arg=1 cli_builds=6 seeded_modes=fixture,existing "
+        "cache=makstate-v1 invalidations=object,source,state "
+        "cache_results=cold:0/3,warm:3/0,object:2/1,rewarm:3/0,source:2/1,rewarm:3/0,state:0/3 "
+        "translation_unit_functions=2,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "

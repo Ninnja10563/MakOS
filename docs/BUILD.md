@@ -215,7 +215,8 @@ addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than three functions per translation unit, general object
-count/relocation repertoire, dependency discovery, or incremental rules. The
+count/relocation repertoire, transitive dependency discovery, or variable input
+graphs. The
 authenticated shell command `makbuild <manifest>` accepts either a name under
 `/home/user/` or an absolute `/home/user/` path. The kernel validates and copies
 that path into the sandboxed toolchain's child-owned SysV `argv[1]`; build mode
@@ -225,6 +226,27 @@ and is the only path that seeds the documented files. The current CLI still
 accepts only the fixed `asm,c,c` graph. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build.
+
+`makbuild` now persists a bounded incremental cache beside the manifest as
+`<manifest>.state`; consequently the manifest path itself is limited to 90
+bytes so the `.state` suffix remains in the validated path bound. `MAKSTATE1`
+is exactly 72 bytes: a nine-byte magic plus seven reserved zero bytes, followed
+by one manifest fingerprint, three source fingerprints, and three object
+fingerprints. These are 64-bit FNV-1a build fingerprints, not cryptographic
+integrity or a security boundary. A cache hit additionally requires the object
+bytes to match their saved fingerprint and pass the existing ELF object parser
+and symbol validator. Every build still links and writes the final ELF; it
+commits state only after every rebuilt object and the final ELF have been
+written. Missing, malformed, stale-manifest, or corrupt state safely rebuilds
+all three inputs. Changed source or corrupt/missing object selectively rebuilds
+only the affected input.
+
+The focused runtime proves cold `0/3`, warm `3/0`, corrupt-object `2/1`, warm
+`3/0`, changed-source `2/1`, warm `3/0`, and corrupt-state `0/3` hit/miss
+sequences. All six authenticated CLI builds link, execute, and reap with status
+42; the state-invalidated build re-establishes a valid cache. This is
+incremental reuse for the fixed three-input graph, not header discovery,
+parallel builds, a general dependency engine, or a trust mechanism.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.

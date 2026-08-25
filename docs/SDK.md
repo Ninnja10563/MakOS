@@ -123,6 +123,20 @@ Unsupported tokens, duplicate parameter names, more than two parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
+Build mode derives `<manifest>.state` and therefore accepts manifest paths up
+to 90 bytes. The exact 72-byte `MAKSTATE1` record contains its version magic,
+zero reserved bytes, one manifest fingerprint, three source fingerprints, and
+three object fingerprints. Fingerprints use 64-bit FNV-1a solely for build
+cache change detection; they are non-cryptographic and confer no trust. Cached
+objects are reused only when the state and source/object fingerprints match and
+the object passes the normal ELF parser and symbol validator. A source or
+object change selectively recompiles that input. Missing, malformed, corrupt,
+or manifest-stale state rebuilds all inputs. Linking and final-ELF output happen
+on every invocation, and the state record is written last so an interrupted
+build cannot bless partial output. Focused Pi/QEMU TCG runtime proves hit/miss
+sequences `0/3`, `3/0`, `2/1`, `3/0`, `2/1`, `3/0`, and `0/3` for cold, warm,
+object corruption, rewarm, source edit, rewarm, and state corruption.
+
 Pointer expressions also accept a scalar `int` parameter or non-address-taken
 scalar local as the element offset when the pointer's bound is unknown. AArch64
 codegen uses `ADD ... SXTW #2`, so positive and negative 32-bit offsets retain C
@@ -137,7 +151,8 @@ or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
 nested/general blocks, more than three functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
-archives, dynamic linking, dependency/incremental rules, variable input graphs,
+archives, dynamic linking, transitive dependency/header discovery, variable
+input graphs, parallel builds,
 general CLI options, or debug information. It must not be presented as a general C compiler or a
 self-hosted MakOS build.
 

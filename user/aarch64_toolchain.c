@@ -176,6 +176,8 @@ enum {
     BUILD_LANGUAGE_C = 2,
     MAX_BUILD_INPUTS = 3,
     MAX_BUILD_PATH_BYTES = 96,
+    BUILD_STATE_BYTES = 72,
+    BUILD_STATE_SUFFIX_BYTES = 6,
 };
 
 struct build_input {
@@ -1903,6 +1905,209 @@ static size_t emit_elf(volatile uint8_t image[IMAGE_CAPACITY],
     return DATA_OFFSET + sizeof(provenance) - 1;
 }
 
+static uint64_t build_hash(const uint8_t *bytes, size_t count) {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (size_t index = 0; index < count; ++index) {
+        hash ^= bytes[index];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static int build_state_path(const char *manifest_path,
+                            size_t manifest_path_length,
+                            char output[MAX_BUILD_PATH_BYTES +
+                                        BUILD_STATE_SUFFIX_BYTES],
+                            size_t *output_length) {
+    static const char suffix[] = ".state";
+    if (!output_length || manifest_path_length == 0 ||
+        manifest_path_length > MAX_BUILD_PATH_BYTES - BUILD_STATE_SUFFIX_BYTES)
+        return 0;
+    for (size_t index = 0; index < manifest_path_length; ++index)
+        output[index] = manifest_path[index];
+    for (size_t index = 0; index < BUILD_STATE_SUFFIX_BYTES; ++index)
+        output[manifest_path_length + index] = suffix[index];
+    *output_length = manifest_path_length + BUILD_STATE_SUFFIX_BYTES;
+    return 1;
+}
+
+static int build_state_path_safe(const struct build_manifest *build,
+                                 const char *path, size_t path_length) {
+    if (build_path_equal(path, path_length, build->output_path,
+                         build->output_path_length))
+        return 0;
+    for (size_t input = 0; input < build->input_count; ++input)
+        if (build_path_equal(path, path_length,
+                             build->inputs[input].source_path,
+                             build->inputs[input].source_path_length) ||
+            build_path_equal(path, path_length,
+                             build->inputs[input].object_path,
+                             build->inputs[input].object_path_length))
+            return 0;
+    return 1;
+}
+
+static int read_build_state(
+    const char *path, size_t path_length, uint64_t manifest_hash,
+    uint64_t source_hashes[MAX_BUILD_INPUTS],
+    uint64_t object_hashes[MAX_BUILD_INPUTS]) {
+    static const char magic[] = "MAKSTATE1";
+    uint8_t state[BUILD_STATE_BYTES] = {0};
+    if (read_file(path, path_length, state, sizeof(state)) != sizeof(state))
+        return 0;
+    for (size_t index = 0; index < sizeof(magic) - 1; ++index)
+        if (state[index] != (uint8_t)magic[index]) return 0;
+    for (size_t index = sizeof(magic) - 1; index < 16; ++index)
+        if (state[index] != 0) return 0;
+    if (get64(state, 16) != manifest_hash) return 0;
+    for (size_t input = 0; input < MAX_BUILD_INPUTS; ++input) {
+        source_hashes[input] = get64(state, 24 + input * 8);
+        object_hashes[input] = get64(state, 48 + input * 8);
+    }
+    return 1;
+}
+
+static int write_build_state(
+    const char *path, size_t path_length, uint64_t manifest_hash,
+    const uint8_t *const sources[MAX_BUILD_INPUTS],
+    const size_t source_lengths[MAX_BUILD_INPUTS],
+    const uint8_t *const objects[MAX_BUILD_INPUTS],
+    const size_t object_lengths[MAX_BUILD_INPUTS]) {
+    static const char magic[] = "MAKSTATE1";
+    uint8_t state[BUILD_STATE_BYTES] = {0};
+    for (size_t index = 0; index < sizeof(magic) - 1; ++index)
+        state[index] = (uint8_t)magic[index];
+    put64(state, 16, manifest_hash);
+    for (size_t input = 0; input < MAX_BUILD_INPUTS; ++input) {
+        if (!source_lengths[input] || !object_lengths[input]) return 0;
+        put64(state, 24 + input * 8,
+              build_hash(sources[input], source_lengths[input]));
+        put64(state, 48 + input * 8,
+              build_hash(objects[input], object_lengths[input]));
+    }
+    return write_file(path, path_length, state, sizeof(state));
+}
+
+static size_t compile_build_object(const struct build_manifest *build,
+                                   size_t input, const uint8_t *source,
+                                   size_t source_length,
+                                   uint8_t object[OBJECT_CAPACITY]) {
+    uint8_t code[512] = {0};
+    struct relocation relocations[MAX_RELOCATIONS] = {0};
+    size_t relocation_count = 0;
+    if (build->inputs[input].language == BUILD_LANGUAGE_ASM) {
+        size_t code_length = assemble((const char *)source, source_length,
+                                      code, sizeof(code), relocations,
+                                      &relocation_count);
+        if (!code_length) return 0;
+        return emit_object(object, code, code_length, build->entry,
+                           build->entry_length, relocations,
+                           relocation_count);
+    }
+    if (build->inputs[input].language != BUILD_LANGUAGE_C) return 0;
+    struct c_definition definitions[MAX_C_FUNCTIONS] = {0};
+    size_t definition_count = 0;
+    size_t code_length = compile_c_unit(
+        (const char *)source, source_length, code, sizeof(code), definitions,
+        &definition_count, relocations, &relocation_count);
+    if (!code_length) return 0;
+    return emit_object_definitions(object, code, code_length, definitions,
+                                   definition_count, relocations,
+                                   relocation_count);
+}
+
+static int incremental_build(
+    const struct build_manifest *build, const char *manifest_path,
+    size_t manifest_path_length, const uint8_t *manifest,
+    size_t manifest_length, const uint8_t *const sources[MAX_BUILD_INPUTS],
+    const size_t source_lengths[MAX_BUILD_INPUTS], size_t *cache_hits,
+    size_t *cache_misses) {
+    char state_path[MAX_BUILD_PATH_BYTES + BUILD_STATE_SUFFIX_BYTES] = {0};
+    size_t state_path_length = 0;
+    if (!cache_hits || !cache_misses ||
+        !build_state_path(manifest_path, manifest_path_length, state_path,
+                          &state_path_length) ||
+        !build_state_path_safe(build, state_path, state_path_length))
+        return 0;
+
+    uint64_t saved_source_hashes[MAX_BUILD_INPUTS] = {0};
+    uint64_t saved_object_hashes[MAX_BUILD_INPUTS] = {0};
+    uint64_t manifest_hash = build_hash(manifest, manifest_length);
+    int state_valid = read_build_state(
+        state_path, state_path_length, manifest_hash, saved_source_hashes,
+        saved_object_hashes);
+    uint8_t object_storage[MAX_BUILD_INPUTS][OBJECT_CAPACITY] = {{0}};
+    const uint8_t *objects[MAX_BUILD_INPUTS] = {
+        object_storage[0], object_storage[1], object_storage[2],
+    };
+    size_t object_lengths[MAX_BUILD_INPUTS] = {0};
+    *cache_hits = 0;
+    *cache_misses = 0;
+    for (size_t input = 0; input < MAX_BUILD_INPUTS; ++input) {
+        uint64_t source_hash = build_hash(sources[input],
+                                          source_lengths[input]);
+        struct object_view view = {0};
+        if (state_valid && saved_source_hashes[input] == source_hash) {
+            object_lengths[input] = read_file(
+                build->inputs[input].object_path,
+                build->inputs[input].object_path_length,
+                object_storage[input], sizeof(object_storage[input]));
+            if (object_lengths[input] &&
+                build_hash(object_storage[input], object_lengths[input]) ==
+                    saved_object_hashes[input] &&
+                parse_object(object_storage[input], object_lengths[input],
+                             &view) &&
+                validate_symbols(&view)) {
+                ++*cache_hits;
+                continue;
+            }
+        }
+        object_lengths[input] = compile_build_object(
+            build, input, sources[input], source_lengths[input],
+            object_storage[input]);
+        if (!object_lengths[input] ||
+            !write_file(build->inputs[input].object_path,
+                        build->inputs[input].object_path_length,
+                        object_storage[input], object_lengths[input]))
+            return 0;
+        ++*cache_misses;
+    }
+
+    uint8_t linked_code[512] = {0};
+    size_t entry_offset = 0;
+    size_t linked_length = link_objects(
+        objects, object_lengths, MAX_BUILD_INPUTS, linked_code,
+        sizeof(linked_code), build->entry, &entry_offset);
+    volatile uint8_t image[IMAGE_CAPACITY];
+    size_t image_length = emit_elf(image, linked_code, linked_length,
+                                   entry_offset);
+    if (!linked_length || !image_length ||
+        !write_file(build->output_path, build->output_path_length,
+                    (const uint8_t *)image, image_length) ||
+        !write_build_state(state_path, state_path_length, manifest_hash,
+                           sources, source_lengths, objects, object_lengths))
+        return 0;
+    return 1;
+}
+
+static void write_build_marker(const char *mode, const char *manifest_path,
+                               size_t manifest_path_length, int seeded,
+                               size_t cache_hits, size_t cache_misses) {
+    char hit = (char)('0' + cache_hits);
+    char miss = (char)('0' + cache_misses);
+    write_text("MAKOS_AARCH64_MAKBUILD_OK mode=");
+    write_text(mode);
+    write_text(" manifest=");
+    write_bytes(manifest_path, manifest_path_length);
+    write_text(" startup=sysv argc=2 envc=1 seeded=");
+    write_text(seeded ? "1" : "0");
+    write_text(" cache=makstate-v1 cache_hits=");
+    write_bytes(&hit, 1);
+    write_text(" cache_misses=");
+    write_bytes(&miss, 1);
+    write_text(" state_committed=1 status=42\n");
+}
+
 static void fail(uint64_t status) {
     syscall4(SYS_EXIT, status, 0, 0, 0);
     for (;;) __asm__ volatile("wfe");
@@ -2037,7 +2242,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "compiler=guest-native assembler=guest-native objects=3 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
-        "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=3 "
+        "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=3 cache=makstate-v1 cache_hits=0 cache_misses=3 state_committed=1 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -2056,7 +2261,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         fail(79);
     size_t build_manifest_path_length = length(argv[1]);
     if (!build_manifest_path_length ||
-        build_manifest_path_length > MAX_BUILD_PATH_BYTES || argv[1][0] != '/')
+        build_manifest_path_length >
+            MAX_BUILD_PATH_BYTES - BUILD_STATE_SUFFIX_BYTES ||
+        argv[1][0] != '/')
         fail(79);
     for (size_t index = 0; index < build_manifest_path_length; ++index)
         if (!build_path_byte(argv[1][index])) fail(79);
@@ -2115,10 +2322,33 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     size_t library_source_length = read_file(
         build.inputs[2].source_path, build.inputs[2].source_path_length,
         library_input, sizeof(library_input));
-    if (source_length != sizeof(main_source) - 1 ||
-        program_source_length != sizeof(program_source) - 1 ||
-        library_source_length != sizeof(library_source) - 1)
+    if (!source_length || !program_source_length || !library_source_length ||
+        (fixture_mode &&
+         (source_length != sizeof(main_source) - 1 ||
+          program_source_length != sizeof(program_source) - 1 ||
+          library_source_length != sizeof(library_source) - 1)))
         fail(81);
+    const uint8_t *build_sources[MAX_BUILD_INPUTS] = {
+        source_input, program_input, library_input,
+    };
+    size_t build_source_lengths[MAX_BUILD_INPUTS] = {
+        source_length, program_source_length, library_source_length,
+    };
+    if (build_mode) {
+        size_t cache_hits = 0, cache_misses = 0;
+        if (!incremental_build(&build, build_manifest_path,
+                               build_manifest_path_length, manifest_input,
+                               manifest_length, build_sources,
+                               build_source_lengths, &cache_hits,
+                               &cache_misses) ||
+            cache_hits + cache_misses != MAX_BUILD_INPUTS)
+            fail(91);
+        write_build_marker("build", build_manifest_path,
+                           build_manifest_path_length, 0, cache_hits,
+                           cache_misses);
+        syscall4(SYS_EXIT, 42, 0, 0, 0);
+        __builtin_unreachable();
+    }
 
     uint8_t main_code[128] = {0}, program_code[384] = {0};
     uint8_t library_code[128] = {0};
@@ -2489,13 +2719,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         !write_file(build.output_path, build.output_path_length,
                     (const uint8_t *)image, image_length))
         fail(90);
-    write_text("MAKOS_AARCH64_MAKBUILD_OK mode=");
-    write_text(fixture_mode ? "fixture" : "build");
-    write_text(" manifest=");
-    write_bytes(build_manifest_path, build_manifest_path_length);
-    write_text(fixture_mode
-                   ? " startup=sysv argc=2 envc=1 seeded=1 status=42\n"
-                   : " startup=sysv argc=2 envc=1 seeded=0 status=42\n");
+    char state_path[MAX_BUILD_PATH_BYTES + BUILD_STATE_SUFFIX_BYTES] = {0};
+    size_t state_path_length = 0;
+    if (!build_state_path(build_manifest_path, build_manifest_path_length,
+                          state_path, &state_path_length) ||
+        !build_state_path_safe(&build, state_path, state_path_length) ||
+        !write_build_state(state_path, state_path_length,
+                           build_hash(manifest_input, manifest_length),
+                           build_sources, build_source_lengths, objects,
+                           object_lengths))
+        fail(90);
+    write_build_marker("fixture", build_manifest_path,
+                       build_manifest_path_length, 1, 0, 3);
     write_bytes(marker, sizeof(marker) - 1);
     syscall4(SYS_EXIT, 42, 0, 0, 0);
     __builtin_unreachable();
