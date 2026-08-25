@@ -175,9 +175,10 @@ Last updated: 2026-08-26.
   same overlap/contention from the genuine Firefox process are still open, so
   the scheduler row stays Partial.
 - 2026-08-26 the AArch64 guest-native toolchain now crosses a genuine
-  two-source/two-object build boundary. It writes and rereads an assembly
-  startup plus one C translation unit containing `answer` and later-defined
-  `adjust` through MakFS. Each bounded C translation unit accepts up to two
+  three-source/three-object build boundary. It writes and rereads an assembly
+  startup, a C translation unit containing `answer` and `adjust`, and a second
+  C translation unit defining `combine` through MakFS. Each bounded C
+  translation unit accepts up to three
   AAPCS64 `int` functions, each with one or two typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
   `*`/`+`/`-`, mutable parameter/local assignments, signed
@@ -209,18 +210,18 @@ Last updated: 2026-08-26.
   `distance = next - pointer` through 64-bit `SUB`/arithmetic shift-right two,
   updates element zero, loops while `count < distance`,
   and stores through `*(pointer + delta)`. The compiler concatenates a 140-byte
-  `answer`, 168-byte `adjust`, and 60-byte `combine` into one 368-byte `.text`
-  with three defined symbols in a 1,032-byte ELF64 `ET_REL`; the
-  assembler produces 76 bytes in a 688-byte
-  object. Both persist and reopen. The bounded general linker concatenates up
+  `answer` and 168-byte `adjust` into one 308-byte `.text` with two definitions
+  plus undefined `combine` in a 976-byte ELF64 `ET_REL`; the separate 60-byte
+  `combine` definition occupies a 616-byte library object. The assembler
+  produces 76 bytes in a 688-byte object. All three persist and reopen. The bounded general linker concatenates up
   to three objects, discovers global definitions/undefined symbols, resolves
   relocations against either same-object definitions or external symbols,
   applies validated `R_AARCH64_CALL26` relocations
-  (`_start`→`answer` externally, `answer`→`adjust` and `adjust`→`combine`
-  internally), and emits 444 code
+  (`_start`→`answer` and `adjust`→`combine` externally, with
+  `answer`→`adjust` internally), and emits 444 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
-  site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
-  and duplicate `answer` definitions. Duplicate parameter names, more than two
+  site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`, a
+  missing `combine` object, and duplicate `answer` definitions. Duplicate parameter names, more than two
   parameters, more than two call arguments, division syntax,
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
@@ -235,13 +236,13 @@ Last updated: 2026-08-26.
   Separate RX probes exercise all four signed ordering relations and prove a
   `pointer + -1` load returns 42 plus pointer differences of `3` and `-3`.
   Same-array provenance remains a caller obligation. The linked `answer`→`adjust` call passes the
-  stack-backed `values[3] + 1` address, so its same-object call result requires
-  real relocation, scaled pointer addition, and callee loads/stores into the
-  final two elements of caller-owned memory. Focused
+  stack-backed `values[3] + 1` address; that internal call plus the external
+  `adjust`→`combine` call require real relocations, scaled pointer addition, and
+  callee loads/stores into the final two elements of caller-owned memory. Focused
   Pi/QEMU 10.0.11 TCG then
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
-  The third function is executed directly as `combine(40,2)=42`; the linked
-  mutation paths also require the internal call. Release artifact validation,
+  The library function is executed directly as `combine(40,2)=42`; the linked
+  mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and fresh visible login pass. This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, build system, debugger, or substantial
@@ -859,10 +860,15 @@ Last updated: 2026-08-26.
   signed relations, then signed pointer differences of `3`/`-3` used directly
   and by the linked program, with sixteen malformed-C denials,
   persistence/reopen and both status-42 final-ELF executions. The latest
-  three-function run adds a later-defined 60-byte
+  three-function run added a later-defined 60-byte
   `combine`, a second same-object relocation, 2 KiB object capacity, and a
   four-function fail-closed case. Its exact artifacts are 76/140/168/60 code
-  bytes, 688/1,032 object bytes, 444 linked bytes and an 815-byte ELF. A fresh private TCG boot then
+  bytes, 688/1,032 object bytes, 444 linked bytes and an 815-byte ELF. The
+  latest three-object run moves `combine` into its own persisted C source and
+  616-byte object; the program object is 976 bytes, its `adjust`→`combine`
+  reference resolves externally, linking without the library fails closed,
+  and the exact 444-byte linked program still executes twice with status 42.
+  A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The
   focused four-vCPU TCG SMP input/network image also

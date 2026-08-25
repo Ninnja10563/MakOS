@@ -62,6 +62,6 @@ if "$driver" --target=aarch64-unknown-makos \
     exit 1
 fi
 grep -Fq 'default target runtime incomplete' "$out_dir/runtime.stderr"
-"$port_dir/toolchain-audit.sh" --require >/dev/null
+MAKOS_CC="$driver" "$port_dir/toolchain-audit.sh" --require >/dev/null
 
 echo "MAKOS_FIREFOX_TOOLCHAIN_DRIVER_OK target=aarch64-unknown-makos compile=elf link=elf stack_protector=strong-default,explicit-bootstrap-optout host_gcc=unused default_runtime=blocked"

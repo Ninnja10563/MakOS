@@ -1768,8 +1768,10 @@ static void fail(uint64_t status) {
 __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
+    static const char library_source_path[] = "/home/user/generated-library.c";
     static const char main_object_path[] = "/home/user/generated-main.o";
     static const char program_object_path[] = "/home/user/generated-program.o";
+    static const char library_object_path[] = "/home/user/generated-library.o";
     static const char output_path[] = "/home/user/generated-aarch64.elf";
     static const char main_source[] =
         "_start:\n"
@@ -1812,7 +1814,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "        count = count + 1;\n"
         "    }\n"
         "    return *next;\n"
-        "}\n"
+        "}\n";
+    static const char library_source[] =
         "int combine(int value, int delta) {\n"
         "    return value + delta;\n"
         "}\n";
@@ -1860,17 +1863,17 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int distance(int *end, int *begin) { int count = end - begin; return count; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
-        "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
-        "compiler=guest-native assembler=guest-native objects=2 "
+        "MAKOS_AARCH64_LINKER_OK sources=3 languages=aarch64-asm,c-subset-v1 "
+        "compiler=guest-native assembler=guest-native objects=3 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
-        "c_source=/home/user/generated-program.c translation_unit_functions=3 "
+        "c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-        "code_bytes=76,140,168,60 object_bytes=688,1032 intra_object_calls=2 linked_bytes=444 output_bytes=815 "
+        "code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815 "
         "persisted_reopened=1 malformed_c_denied=17 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
@@ -1880,29 +1883,42 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                     (const uint8_t *)main_source, sizeof(main_source) - 1) ||
         !write_file(program_source_path, sizeof(program_source_path) - 1,
                     (const uint8_t *)program_source,
-                    sizeof(program_source) - 1))
+                    sizeof(program_source) - 1) ||
+        !write_file(library_source_path, sizeof(library_source_path) - 1,
+                    (const uint8_t *)library_source,
+                    sizeof(library_source) - 1))
         fail(80);
     uint8_t source_input[512] = {0}, program_input[768] = {0};
+    uint8_t library_input[128] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
     size_t program_source_length = read_file(
         program_source_path, sizeof(program_source_path) - 1,
         program_input, sizeof(program_input));
+    size_t library_source_length = read_file(
+        library_source_path, sizeof(library_source_path) - 1,
+        library_input, sizeof(library_input));
     if (source_length != sizeof(main_source) - 1 ||
-        program_source_length != sizeof(program_source) - 1)
+        program_source_length != sizeof(program_source) - 1 ||
+        library_source_length != sizeof(library_source) - 1)
         fail(81);
 
     uint8_t main_code[128] = {0}, program_code[384] = {0};
+    uint8_t library_code[128] = {0};
     struct relocation main_relocations[MAX_RELOCATIONS] = {0};
     struct relocation program_relocations[MAX_RELOCATIONS] = {0};
+    struct relocation library_relocations[MAX_RELOCATIONS] = {0};
     size_t main_relocation_count = 0, program_relocation_count = 0;
+    size_t library_relocation_count = 0;
     size_t main_code_length = assemble((const char *)source_input, source_length,
                                        main_code, sizeof(main_code),
                                        main_relocations,
                                        &main_relocation_count);
     struct c_definition program_definitions[MAX_C_FUNCTIONS] = {0};
     size_t program_definition_count = 0;
+    struct c_definition library_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t library_definition_count = 0;
     uint8_t malformed_code[128] = {0};
     char malformed_function[MAX_LABEL_BYTES] = {0};
     size_t malformed_function_length = 0;
@@ -2018,8 +2034,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         (const char *)program_input, program_source_length, program_code,
         sizeof(program_code), program_definitions, &program_definition_count,
         program_relocations, &program_relocation_count);
-    if (main_code_length != 76 || program_code_length != 368 ||
-        program_definition_count != 3 ||
+    size_t library_code_length = compile_c_unit(
+        (const char *)library_input, library_source_length, library_code,
+        sizeof(library_code), library_definitions, &library_definition_count,
+        library_relocations, &library_relocation_count);
+    if (main_code_length != 76 || program_code_length != 308 ||
+        library_code_length != 60 || program_definition_count != 2 ||
+        library_definition_count != 1 ||
         !same_name(program_definitions[0].name,
                    program_definitions[0].length, "answer", 6) ||
         program_definitions[0].offset != 0 ||
@@ -2028,17 +2049,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                    program_definitions[1].length, "adjust", 6) ||
         program_definitions[1].offset != 140 ||
         program_definitions[1].size != 168 ||
-        !same_name(program_definitions[2].name,
-                   program_definitions[2].length, "combine", 7) ||
-        program_definitions[2].offset != 308 ||
-        program_definitions[2].size != 60 ||
+        !same_name(library_definitions[0].name,
+                   library_definitions[0].length, "combine", 7) ||
+        library_definitions[0].offset != 0 ||
+        library_definitions[0].size != 60 ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
         program_relocation_count != 2 ||
         program_relocations[0].offset != 92 ||
         !same_name(program_relocations[0].name,
                    program_relocations[0].length, "adjust", 6) ||
         !same_name(program_relocations[1].name,
-                   program_relocations[1].length, "combine", 7))
+                   program_relocations[1].length, "combine", 7) ||
+        library_relocation_count != 0)
         fail(82);
 
     uint8_t *relational_jit =
@@ -2112,6 +2134,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         fail(85);
 
     uint8_t main_object[OBJECT_CAPACITY], program_object[OBJECT_CAPACITY];
+    uint8_t library_object[OBJECT_CAPACITY];
     size_t main_object_length = emit_object(main_object, main_code,
                                             main_code_length, "_start", 6,
                                             main_relocations,
@@ -2120,22 +2143,34 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         program_object, program_code, program_code_length,
         program_definitions, program_definition_count, program_relocations,
         program_relocation_count);
-    if (main_object_length != 688 || program_object_length != 1032 ||
+    size_t library_object_length = emit_object_definitions(
+        library_object, library_code, library_code_length,
+        library_definitions, library_definition_count, library_relocations,
+        library_relocation_count);
+    if (main_object_length != 688 || program_object_length != 976 ||
+        library_object_length != 616 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(program_object_path, sizeof(program_object_path) - 1,
-                    program_object, program_object_length))
+                    program_object, program_object_length) ||
+        !write_file(library_object_path, sizeof(library_object_path) - 1,
+                    library_object, library_object_length))
         fail(85);
 
     memset(main_object, 0, sizeof(main_object));
     memset(program_object, 0, sizeof(program_object));
+    memset(library_object, 0, sizeof(library_object));
     main_object_length = read_file(main_object_path,
                                    sizeof(main_object_path) - 1,
                                    main_object, sizeof(main_object));
     program_object_length = read_file(program_object_path,
                                       sizeof(program_object_path) - 1,
                                       program_object, sizeof(program_object));
-    if (!main_object_length || !program_object_length)
+    library_object_length = read_file(library_object_path,
+                                      sizeof(library_object_path) - 1,
+                                      library_object, sizeof(library_object));
+    if (!main_object_length || !program_object_length ||
+        !library_object_length)
         fail(86);
 
     struct object_view corrupt_view;
@@ -2146,19 +2181,19 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     uint8_t linked_code[512] = {0};
     size_t entry_offset = 0;
     const uint8_t *objects[MAX_LINK_OBJECTS] = {
-        main_object, program_object,
+        main_object, program_object, library_object,
     };
     size_t object_lengths[MAX_LINK_OBJECTS] = {
-        main_object_length, program_object_length,
+        main_object_length, program_object_length, library_object_length,
     };
-    if (link_objects(objects, object_lengths, 2, linked_code,
+    if (link_objects(objects, object_lengths, 3, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
     main_object[corrupt_info] = saved_type;
     size_t corrupt_addend = corrupt_view.rela_offset + 16;
     if (main_object[corrupt_addend] != 0) fail(88);
     main_object[corrupt_addend] = 1;
-    if (link_objects(objects, object_lengths, 2, linked_code,
+    if (link_objects(objects, object_lengths, 3, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
     main_object[corrupt_addend] = 0;
@@ -2176,7 +2211,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     put16(program_object, adjust_symbol + 6, 0);
     put64(program_object, adjust_symbol + 8, 0);
     put64(program_object, adjust_symbol + 16, 0);
-    if (link_objects(objects, object_lengths, 2, linked_code,
+    if (link_objects(objects, object_lengths, 3, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
     put16(program_object, adjust_symbol + 6, 1);
@@ -2191,7 +2226,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     if (link_objects(duplicate_objects, duplicate_lengths, 3, linked_code,
                      sizeof(linked_code), "_start", &entry_offset) != 0)
         fail(88);
-    size_t linked_length = link_objects(objects, object_lengths, 2, linked_code,
+    if (link_objects(objects, object_lengths, 2, linked_code,
+                     sizeof(linked_code), "_start", &entry_offset) != 0)
+        fail(88);
+    size_t linked_length = link_objects(objects, object_lengths, 3, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
     if (linked_length != 444 || entry_offset != 0) fail(89);

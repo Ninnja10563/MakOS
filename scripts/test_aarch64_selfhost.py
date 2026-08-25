@@ -128,14 +128,17 @@ for fragment in (
     "bases[object] > capacity",
     "addend != 0",
     "link_objects(objects, object_lengths, 2",
+    "link_objects(objects, object_lengths, 3",
     "link_objects(duplicate_objects, duplicate_lengths, 3",
     "program_relocations[0].offset != 92",
-    "program_definition_count != 3",
+    "program_definition_count != 2",
+    "library_definition_count != 1",
     "program_definitions[0].size != 140",
     "program_definitions[1].offset != 140",
     "program_definitions[1].size != 168",
-    "program_definitions[2].offset != 308",
-    "program_definitions[2].size != 60",
+    "library_definitions[0].offset != 0",
+    "library_definitions[0].size != 60",
+    "library_relocation_count != 0",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
     "compiled_adjust(forty, 1) != 42 ||",
     "compiled_adjust(scaled, 2) != 44 ||",
@@ -146,7 +149,8 @@ for fragment in (
     "compiled_previous(previous_values + 1, UINT32_MAX) != 42",
     "compiled_distance(distance_values + 3, distance_values) != 3",
     "compiled_combine(40, 2) != 42",
-    "main_object_length != 688 || program_object_length != 1032",
+    "main_object_length != 688 || program_object_length != 976",
+    "library_object_length != 616",
     "linked_length != 444",
     "image_length != 815",
     "format=elf64-et-rel",
@@ -159,8 +163,10 @@ for fragment in (
     "MAKOS_AARCH64_LINKER_OK",
     "/home/user/generated.s",
     "/home/user/generated-program.c",
+    "/home/user/generated-library.c",
     "/home/user/generated-main.o",
     "/home/user/generated-program.o",
+    "/home/user/generated-library.o",
     "/home/user/generated-aarch64.elf",
 ):
     require(TOOLCHAIN, fragment)
@@ -202,14 +208,14 @@ require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
 require(SHELL, "sizeof(startup) - 1")
-require(SHELL, "objects=2 object_format=elf64-et-rel")
+require(SHELL, "objects=3 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocations=R_AARCH64_CALL26:3 symbols=_start,answer,adjust,combine")
-require(SHELL, "translation_unit_functions=3")
+require(SHELL, "translation_unit_functions=2,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
 require(SHELL, "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return max_parameters=2 max_call_arguments=2 nonleaf_frame=96")
 require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86")
-require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,1032 intra_object_calls=2 linked_bytes=444 output_bytes=815")
+require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815")
 require(SHELL, "malformed_c_denied=17")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")

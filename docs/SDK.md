@@ -101,8 +101,11 @@ ELF64 `ET_REL` with `.text`, `.rela.text`, `.symtab`, `.strtab`, and
 `.shstrtab`. Multiple definitions carry distinct `.text` offsets and sizes;
 relocations may reference a same-object definition or an external undefined
 symbol. The companion assembler supplies `_start`; the bounded linker discovers
-symbols across up to three objects, resolves two
+symbols across up to three objects, resolves three
 `R_AARCH64_CALL26` relocations, and produces a validated static `ET_EXEC`.
+The current graph persists one assembly and two C sources as three objects:
+`answer` and `adjust` share the program object, while `combine` is defined in a
+separate library object. Linking without that required library fails closed.
 Unsupported tokens, duplicate parameter names, more than two parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.

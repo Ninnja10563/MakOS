@@ -137,7 +137,7 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   file into MakFS; VFS exec-by-path validates/maps it in a fresh address space,
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
   concurrently in PID7/PID8, and reaps both. On AArch64, the guest reads an A64
-  startup and one three-function C source from MakFS. A bounded source-driven C compiler emits
+  startup and two C sources from MakFS. A bounded source-driven C compiler emits
   AAPCS64 integer/pointer expressions, one or two typed parameters/call arguments
   in x0/x1, register locals, mutable integer parameter/local
   assignments, signed equality/inequality/ordering control flow, a real backward-branch
@@ -146,12 +146,13 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   array decay, constant and signed scalar-variable element pointer addition
   with known-bound fail-closed rejection, signed typed pointer difference,
   typed pointer parameters, non-leaf frames preserving x19-x24,
-  two chained same-object calls that mutate caller-owned array elements, and
+  one same-object plus one external C-to-C call that mutate caller-owned array elements, and
   genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
   loop/memory outcomes execute in EL0.
   The assembler emits `_start`. The guest static
-  linker resolves external `_start`→`answer` and same-object `answer`→`adjust`
-  across two objects, applies two `R_AARCH64_CALL26` relocations, rejects
+  linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
+  external `adjust`→`combine` across three persisted objects, applies three
+  `R_AARCH64_CALL26` relocations, rejects
   malformed C (including unproved variable offsets from known-bounded arrays
   and pointer-minus-scalar), invalid relocation type,
   unresolved symbols and duplicate definitions, emits `ET_EXEC`, and executes
