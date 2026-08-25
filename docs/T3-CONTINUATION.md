@@ -27,14 +27,14 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `1133fa2`:
-  PID 181966, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-g93k7m`, private data clone
-  `build/makos-pi-visible-g93k7m/data.img`, private variables
-  `build/makos-pi-visible-g93k7m/vars.fd`, QMP
-  `build/makos-pi-visible-g93k7m/qmp.sock`, serial
-  `build/makos-pi-visible-g93k7m/serial.log`, and PID file
-  `build/makos-pi-visible-g93k7m/qemu.pid`. It is the sole QEMU process and
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `5e16640`:
+  PID 189401, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-IpgkA3`, private data clone
+  `build/makos-pi-visible-IpgkA3/data.img`, private variables
+  `build/makos-pi-visible-IpgkA3/vars.fd`, QMP
+  `build/makos-pi-visible-IpgkA3/qmp.sock`, serial
+  `build/makos-pi-visible-IpgkA3/serial.log`, and PID file
+  `build/makos-pi-visible-IpgkA3/qemu.pid`. It is the sole QEMU process and
   passes the four-PE EL0 marker, both remote group-stop markers, the concurrent
   independent-group serialization marker, the simultaneous same-group join
   marker, ordinary-config `smp_input_probe=0`, `MAKOS_LOGIN_UI_OK`, and
@@ -89,7 +89,7 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending network, block, and GPU service-affinity/contention gates.
+  remains pending network TX, block, and GPU service-affinity/contention gates.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -101,6 +101,14 @@ Preserve existing files and changes.
   boot completion. Full `make unit`, `make check`, normal release image/artifact
   checks, and the fresh visible login pass. Normal `boot/MAKOS.CFG` never arms
   this external-input wait.
+  The same opt-in image first runs an eighth fixture: AP1 sends UDP transaction
+  `0x4d4c` to QEMU slirp DNS, blocks in receive, and returns to idle. CPU0 alone
+  drains/demultiplexes the virtio-net RX ring and sends the wake SGI. Two
+  repeated Pi/TCG passes require a validated response, nonzero CPU0 frames/AP
+  deferrals, I/O idle/resume masks `0x2`, status 63, and exact frame balance.
+  The first attempt exposed rejection of legal saved EL0 NZCV bits on AP
+  re-entry; the invariant now permits NZCV only and still rejects privileged
+  SPSR state. RX is qualified; `tx_path=ap-syscall-unqualified` remains honest.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -110,10 +118,10 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 181966 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 189401 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- Core ownership commit `1133fa2` is ready on GitHub `main`. Generated
+- Core ownership commit `5e16640` is ready on GitHub `main`. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -185,8 +193,8 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A still
    exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds.
 2. Continue the AArch64 userspace SMP row with the next real service-ownership
-   gate. Network RX/socket pumping is the strongest candidate after completing
-   virtio-input ownership; block and GPU ownership remain after it. Stop the
+   gate. Network TX is the strongest candidate after completing input and RX
+   ownership; block and GPU ownership remain after it. Stop the
    visible QEMU through QMP before any focused runtime.
 3. Boot a fresh visible login milestone after the next verified behavior change
    and record PID/session/data clone/QMP. Preserve real implementation
