@@ -177,7 +177,12 @@ Last updated: 2026-08-26.
 - 2026-08-26 the AArch64 guest-native toolchain now crosses a genuine
   three-source/three-object build boundary. It writes and rereads an assembly
   startup, a C translation unit containing `answer` and `adjust`, and a second
-  C translation unit defining `combine` through MakFS. Each bounded C
+  C translation unit defining `combine` through MakFS. A parsed `MAKBUILD1`
+  manifest supplies all three source/object paths, the final output path, and
+  `_start` entry symbol; these fields drive source reads, object persistence,
+  linking, and the final write. It accepts only the bounded `asm,c,c` graph,
+  absolute non-colliding paths, and one terminal link record. Bad version,
+  relative path, collision, and missing-link manifests fail closed. Each bounded C
   translation unit accepts up to three
   AAPCS64 `int` functions, each with one or two typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, precedence-correct
@@ -245,7 +250,7 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and fresh visible login pass. This is a real but deliberately bounded seed, not a
-  general C/Rust compiler/linker, build system, debugger, or substantial
+  general C/Rust compiler/linker, dependency-aware build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
 - 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
@@ -868,6 +873,9 @@ Last updated: 2026-08-26.
   616-byte object; the program object is 976 bytes, its `adjust`→`combine`
   reference resolves externally, linking without the library fails closed,
   and the exact 444-byte linked program still executes twice with status 42.
+  The subsequent manifest-build run routes the same graph through a real
+  versioned MakFS build description and denies four malformed manifests before
+  preserving every artifact size, relocation, execution, and loader result.
   A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The

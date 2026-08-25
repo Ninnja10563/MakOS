@@ -48,6 +48,18 @@ for fragment in (
     "static size_t assemble(",
     "static size_t compile_c(",
     "static size_t compile_c_unit(",
+    "static int parse_build_manifest(",
+    '"MAKBUILD1\\n"',
+    '"asm /home/user/generated.s /home/user/generated-main.o\\n"',
+    '"c /home/user/generated-program.c /home/user/generated-program.o\\n"',
+    '"c /home/user/generated-library.c /home/user/generated-library.o\\n"',
+    '"link /home/user/generated-aarch64.elf _start\\n"',
+    "MAX_BUILD_INPUTS = 3",
+    "MAX_BUILD_PATH_BYTES = 96",
+    "malformed_build_header",
+    "malformed_build_relative",
+    "malformed_build_duplicate",
+    "malformed_build_missing_link",
     "static int c_compile_function(",
     "static int c_find_parameter(",
     "static int c_variable_register(",
@@ -139,6 +151,11 @@ for fragment in (
     "library_definitions[0].offset != 0",
     "library_definitions[0].size != 60",
     "library_relocation_count != 0",
+    "build.inputs[0].source_path",
+    "build.inputs[1].object_path",
+    "build.inputs[2].object_path",
+    "build.output_path, build.output_path_length",
+    "main_code_length, build.entry",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
     "compiled_adjust(forty, 1) != 42 ||",
     "compiled_adjust(scaled, 2) != 44 ||",
@@ -154,7 +171,7 @@ for fragment in (
     "linked_length != 444",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_c_denied=17",
+    "persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -162,6 +179,7 @@ for fragment in (
     "PROT_READ | PROT_WRITE | PROT_EXEC",
     "MAKOS_AARCH64_LINKER_OK",
     "/home/user/generated.s",
+    "/home/user/generated.build",
     "/home/user/generated-program.c",
     "/home/user/generated-library.c",
     "/home/user/generated-main.o",
@@ -211,12 +229,14 @@ require(SHELL, "sizeof(startup) - 1")
 require(SHELL, "objects=3 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocations=R_AARCH64_CALL26:3 symbols=_start,answer,adjust,combine")
+require(SHELL, "build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3")
 require(SHELL, "translation_unit_functions=2,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
 require(SHELL, "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return max_parameters=2 max_call_arguments=2 nonleaf_frame=96")
 require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86")
 require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815")
 require(SHELL, "malformed_c_denied=17")
+require(SHELL, "malformed_build_denied=4")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -226,6 +246,7 @@ require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "malformed_c_denied=17")
+require(FOCUSED_RUNTIME, "malformed_build_denied=4")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

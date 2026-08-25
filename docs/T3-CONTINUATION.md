@@ -27,31 +27,35 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG three-object-link milestone:
-  PID 464852, user service `makos-visible-selfhost-three-object-link-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG manifest-build milestone:
+  PID 472733, user service `makos-visible-selfhost-manifest-build-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi`, private boot clone
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/boot.img`, private data clone
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/data.img`, private variables
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/vars.fd`, QMP
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/qmp.sock`, serial
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/serial.log`, PID file
-  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/qemu.pid`, and QMP framebuffer
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK`, private boot clone
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/boot.img`, private data clone
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/data.img`, private variables
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/vars.fd`, QMP
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/qmp.sock`, serial
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/serial.log`, PID file
+  `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/qemu.pid`, and QMP framebuffer
   captures `login.ppm`/`login.png`. Its boot
   clone SHA-256 is
-  `6f5f1f848979449cf70b200ba5b43adffbe1c770c39634e2a11d90c5575c12ec`,
+  `11f696e0a007b623a158c9cd693cc411f6a126a08f5f74b83c0ddee5cf6ead23`,
   exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `99,98,100`, with no fatal/panic. The 800x600 capture SHA-256 is
+  counters `100,97,100`, with no fatal/panic. The 800x600 capture SHA-256 is
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`; it was visually
   inspected and shows the native login with username focus. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 464852/session
+  `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi` was
+  stopped cleanly through QMP before the manifest-build runtime; its private
+  files remain.
   Prior PID 454609/session
   `build/makos-pi-visible-selfhost-three-function-final-hce1ALSI` was stopped
   cleanly through QMP before the three-object runtime; its private files remain.
@@ -324,8 +328,13 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- 2026-08-26 the guest-native AArch64 toolchain builds three source files
-  into three persisted ELF64 `ET_REL` objects. The assembler emits 76 bytes of
+- 2026-08-26 the guest-native AArch64 toolchain reads a versioned
+  `/home/user/generated.build` plus three source files from MakFS and builds
+  three persisted ELF64 `ET_REL` objects. `MAKBUILD1` supplies the bounded
+  `asm,c,c` languages, three absolute source/object path pairs, absolute final
+  output, and entry symbol. Parsed values drive every source read, object
+  write/reopen, linker entry, and final write. Bad version, relative path,
+  path collision, and missing-link manifests fail closed. The assembler emits 76 bytes of
   `_start` code in a 688-byte object. The program C translation unit contains
   the 140-byte `answer` and 168-byte `adjust(int *pointer, int delta)` in a
   308-byte `.text` and 976-byte object. A separate library C translation unit
@@ -370,9 +379,9 @@ Preserve existing files and changes.
   passes release artifact checks, `make unit check`, structural guard, focused
   Pi/QEMU 10.0.11 TCG runtime, and a fresh visible login boot.
   Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows remain
-  Partial: this is not a full C/Rust compiler, general linker/build system/
-  debugger, or substantial in-guest MakOS build.
-- At this handoff PID 464852 is the sole QEMU and no runtime-test harness is
+  Partial: this is not a full C/Rust compiler/linker, dependency-aware/general
+  build system, debugger, or substantial in-guest MakOS build.
+- At this handoff PID 472733 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -467,7 +476,8 @@ Preserve existing files and changes.
    provenance-aware/broader pointer and lvalue expressions,
    variable-length/global/multidimensional arrays, structs and nested/general
    blocks, then lift the function/parameter bounds, add broader relocation/
-   object support, and a real build driver before a substantial in-guest build. Preserve real implementation
+   object support, dependency/incremental build rules, and command-line build
+   control before a substantial in-guest build. Preserve real implementation
    requirements—no fake/spoofed apps.
 
 ## Operating constraints

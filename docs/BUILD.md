@@ -115,7 +115,23 @@ compiler used by MicroPython during the same `make unit check` run.
 After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
 linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
 `/home/user/generated-program.c` plus `/home/user/generated-library.c`, then
-rereads all three from MakFS. A bounded C
+rereads all three from MakFS. It also writes and rereads the build description
+`/home/user/generated.build`:
+
+```text
+MAKBUILD1
+asm /home/user/generated.s /home/user/generated-main.o
+c /home/user/generated-program.c /home/user/generated-program.o
+c /home/user/generated-library.c /home/user/generated-library.o
+link /home/user/generated-aarch64.elf _start
+```
+
+This bounded guest-native build driver requires exactly one assembly input and
+two C inputs, three distinct absolute source/object paths of at most 96 bytes,
+a distinct absolute output path, and one valid entry symbol. The parsed paths
+drive all source reads, object writes/reopens, entry-symbol emission/selection,
+and the final executable write. Bad version, relative path, colliding paths,
+and missing-link manifests fail closed before compilation. A bounded C
 translation unit accepts up to three `int` functions, each with one or two typed
 `int`/`int *` parameters, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
@@ -198,8 +214,9 @@ addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than three functions per translation unit, general object
-count/relocation repertoire, or build driver. It is not a
-full C/Rust compiler, general linker, build system, debugger, or end-to-end
+count/relocation repertoire, dependency discovery, incremental rules, or a
+general command-line build driver. It is not a
+full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image

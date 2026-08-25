@@ -156,6 +156,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   malformed C (including unproved variable offsets from known-bounded arrays
   and pointer-minus-scalar), invalid relocation type,
   unresolved symbols and duplicate definitions, emits `ET_EXEC`, and executes
-  the result twice under Pi/QEMU TCG. Full C/Rust
-  compiler semantics, general assembler/linker, build system, debugger, package
+  the result twice under Pi/QEMU TCG. A versioned `MAKBUILD1` manifest now
+  supplies all three source/object paths, the output path, and entry symbol;
+  four malformed forms fail closed. Full C/Rust compiler semantics, general
+  assembler/linker, dependency-aware build system, debugger, package
   delivery, and an in-OS MakOS rebuild remain.

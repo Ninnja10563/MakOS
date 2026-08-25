@@ -106,6 +106,13 @@ symbols across up to three objects, resolves three
 The current graph persists one assembly and two C sources as three objects:
 `answer` and `adjust` share the program object, while `combine` is defined in a
 separate library object. Linking without that required library fails closed.
+The guest reads `/home/user/generated.build` in the versioned `MAKBUILD1`
+format. Its three input records select language, absolute MakFS source path,
+and distinct absolute object path; the final record selects the absolute ELF
+output and entry symbol. Parsed fields drive every source read, object
+write/reopen, link entry, and final write. The current driver deliberately
+accepts exactly `asm,c,c`; malformed version, relative/colliding paths, a
+fourth input, or missing final link record fail closed.
 Unsupported tokens, duplicate parameter names, more than two parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
@@ -124,8 +131,8 @@ or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
 nested/general blocks, more than three functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
-archives, dynamic linking, CLI build driver, or
-debug information. It must not be presented as a general C compiler or a
+archives, dynamic linking, dependency/incremental rules, a general CLI build
+driver, or debug information. It must not be presented as a general C compiler or a
 self-hosted MakOS build.
 
 Current libc is intentionally narrow: no stdio allocator, dynamic linker,

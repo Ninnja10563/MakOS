@@ -28,7 +28,10 @@ same-object `answer`→`adjust(values + 1, 1)` call that mutates caller-owned
 array elements using its second parameter, followed by an external
 `adjust`→`combine` call. It compiles `answer` and `adjust` into a 976-byte
 multi-definition object and `combine` into a separate 616-byte library object,
-then persists/reopens those plus the 688-byte assembly object. Its bounded
+then persists/reopens those plus the 688-byte assembly object. It reads a
+versioned `/home/user/generated.build` whose bounded absolute
+source/object/output paths and entry symbol drive the complete build, and
+rejects four malformed manifests. Its bounded
 linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, and
 external `adjust`→`combine`,
 applies three `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
@@ -44,10 +47,10 @@ Full unit/check and release artifact checks pass. This remains a bounded compile
 seed, not a general C toolchain or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 464852, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 472733, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-three-object-link-final-Y2MmpHwi/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-selfhost-manifest-build-final-O9IghdKK/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

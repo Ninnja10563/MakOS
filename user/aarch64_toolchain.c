@@ -165,6 +165,143 @@ static int same_name(const char *first, size_t first_length, const char *second,
     return 1;
 }
 
+enum {
+    BUILD_LANGUAGE_ASM = 1,
+    BUILD_LANGUAGE_C = 2,
+    MAX_BUILD_INPUTS = 3,
+    MAX_BUILD_PATH_BYTES = 96,
+};
+
+struct build_input {
+    uint8_t language;
+    const char *source_path;
+    size_t source_path_length;
+    const char *object_path;
+    size_t object_path_length;
+};
+
+struct build_manifest {
+    struct build_input inputs[MAX_BUILD_INPUTS];
+    size_t input_count;
+    const char *output_path;
+    size_t output_path_length;
+    char entry[MAX_LABEL_BYTES + 1];
+    size_t entry_length;
+};
+
+static int build_path_byte(char byte) {
+    return (byte >= 'a' && byte <= 'z') ||
+           (byte >= 'A' && byte <= 'Z') ||
+           (byte >= '0' && byte <= '9') || byte == '/' || byte == '.' ||
+           byte == '_' || byte == '-';
+}
+
+static int build_field(const char *source, size_t source_length,
+                       size_t *cursor, char terminator, const char **field,
+                       size_t *field_length) {
+    size_t start = *cursor;
+    while (*cursor < source_length && source[*cursor] != terminator) {
+        if (!build_path_byte(source[*cursor])) return 0;
+        ++*cursor;
+    }
+    size_t count = *cursor - start;
+    if (*cursor == source_length || count == 0 ||
+        count > MAX_BUILD_PATH_BYTES || source[start] != '/')
+        return 0;
+    *field = source + start;
+    *field_length = count;
+    ++*cursor;
+    return 1;
+}
+
+static int build_path_equal(const char *first, size_t first_length,
+                            const char *second, size_t second_length) {
+    if (first_length != second_length) return 0;
+    for (size_t index = 0; index < first_length; ++index)
+        if (first[index] != second[index]) return 0;
+    return 1;
+}
+
+static int parse_build_manifest(const char *source, size_t source_length,
+                                struct build_manifest *manifest) {
+    if (!source || !manifest) return 0;
+    memset(manifest, 0, sizeof(*manifest));
+    size_t cursor = 0;
+    if (!consume(source, source_length, &cursor, "MAKBUILD1\n")) return 0;
+    while (cursor < source_length) {
+        uint8_t language = 0;
+        if (consume(source, source_length, &cursor, "asm "))
+            language = BUILD_LANGUAGE_ASM;
+        else if (consume(source, source_length, &cursor, "c "))
+            language = BUILD_LANGUAGE_C;
+        else if (consume(source, source_length, &cursor, "link ")) {
+            if (manifest->input_count != MAX_BUILD_INPUTS ||
+                manifest->inputs[0].language != BUILD_LANGUAGE_ASM ||
+                manifest->inputs[1].language != BUILD_LANGUAGE_C ||
+                manifest->inputs[2].language != BUILD_LANGUAGE_C ||
+                !build_field(source, source_length, &cursor, ' ',
+                             &manifest->output_path,
+                             &manifest->output_path_length))
+                return 0;
+            size_t entry_start = cursor;
+            while (cursor < source_length && source[cursor] != '\n') {
+                if (!name_byte(source[cursor], cursor == entry_start)) return 0;
+                ++cursor;
+            }
+            manifest->entry_length = cursor - entry_start;
+            if (cursor == source_length || manifest->entry_length == 0 ||
+                manifest->entry_length > MAX_LABEL_BYTES)
+                return 0;
+            for (size_t index = 0; index < manifest->entry_length; ++index)
+                manifest->entry[index] = source[entry_start + index];
+            ++cursor;
+            if (cursor != source_length) return 0;
+            for (size_t input = 0; input < manifest->input_count; ++input)
+                if (build_path_equal(manifest->output_path,
+                                     manifest->output_path_length,
+                                     manifest->inputs[input].source_path,
+                                     manifest->inputs[input].source_path_length) ||
+                    build_path_equal(manifest->output_path,
+                                     manifest->output_path_length,
+                                     manifest->inputs[input].object_path,
+                                     manifest->inputs[input].object_path_length))
+                    return 0;
+            return 1;
+        } else {
+            return 0;
+        }
+
+        if (manifest->input_count == MAX_BUILD_INPUTS) return 0;
+        struct build_input *input = &manifest->inputs[manifest->input_count];
+        input->language = language;
+        if (!build_field(source, source_length, &cursor, ' ',
+                         &input->source_path, &input->source_path_length) ||
+            !build_field(source, source_length, &cursor, '\n',
+                         &input->object_path, &input->object_path_length) ||
+            build_path_equal(input->source_path, input->source_path_length,
+                             input->object_path, input->object_path_length))
+            return 0;
+        for (size_t previous = 0; previous < manifest->input_count; ++previous) {
+            const struct build_input *other = &manifest->inputs[previous];
+            if (build_path_equal(input->source_path, input->source_path_length,
+                                 other->source_path,
+                                 other->source_path_length) ||
+                build_path_equal(input->source_path, input->source_path_length,
+                                 other->object_path,
+                                 other->object_path_length) ||
+                build_path_equal(input->object_path, input->object_path_length,
+                                 other->source_path,
+                                 other->source_path_length) ||
+                build_path_equal(input->object_path, input->object_path_length,
+                                 other->object_path,
+                                 other->object_path_length))
+                return 0;
+        }
+        ++manifest->input_count;
+    }
+    return 0;
+}
+
 static int same_label(const struct label *label, const char *name, size_t count) {
     return same_name(label->name, label->length, name, count);
 }
@@ -1766,13 +1903,39 @@ static void fail(uint64_t status) {
 }
 
 __attribute__((section(".text._start"), noreturn)) void _start(void) {
+    static const char build_manifest_path[] = "/home/user/generated.build";
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
     static const char library_source_path[] = "/home/user/generated-library.c";
-    static const char main_object_path[] = "/home/user/generated-main.o";
-    static const char program_object_path[] = "/home/user/generated-program.o";
-    static const char library_object_path[] = "/home/user/generated-library.o";
-    static const char output_path[] = "/home/user/generated-aarch64.elf";
+    static const char build_manifest_source[] =
+        "MAKBUILD1\n"
+        "asm /home/user/generated.s /home/user/generated-main.o\n"
+        "c /home/user/generated-program.c /home/user/generated-program.o\n"
+        "c /home/user/generated-library.c /home/user/generated-library.o\n"
+        "link /home/user/generated-aarch64.elf _start\n";
+    static const char malformed_build_header[] =
+        "MAKBUILD0\n"
+        "asm /home/user/generated.s /home/user/generated-main.o\n"
+        "c /home/user/generated-program.c /home/user/generated-program.o\n"
+        "c /home/user/generated-library.c /home/user/generated-library.o\n"
+        "link /home/user/generated-aarch64.elf _start\n";
+    static const char malformed_build_relative[] =
+        "MAKBUILD1\n"
+        "asm generated.s /home/user/generated-main.o\n"
+        "c /home/user/generated-program.c /home/user/generated-program.o\n"
+        "c /home/user/generated-library.c /home/user/generated-library.o\n"
+        "link /home/user/generated-aarch64.elf _start\n";
+    static const char malformed_build_duplicate[] =
+        "MAKBUILD1\n"
+        "asm /home/user/generated.s /home/user/generated-main.o\n"
+        "c /home/user/generated-program.c /home/user/generated-main.o\n"
+        "c /home/user/generated-library.c /home/user/generated-library.o\n"
+        "link /home/user/generated-aarch64.elf _start\n";
+    static const char malformed_build_missing_link[] =
+        "MAKBUILD1\n"
+        "asm /home/user/generated.s /home/user/generated-main.o\n"
+        "c /home/user/generated-program.c /home/user/generated-program.o\n"
+        "c /home/user/generated-library.c /home/user/generated-library.o\n";
     static const char main_source[] =
         "_start:\n"
         "cmp x0, #1\n"
@@ -1867,6 +2030,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "compiler=guest-native assembler=guest-native objects=3 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
+        "build_manifest=/home/user/generated.build build_driver=makbuild-v1 build_inputs=3 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c translation_unit_functions=2,1 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -1874,12 +2038,15 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60 object_bytes=688,976,616 intra_object_calls=1 cross_object_calls=2 linked_bytes=444 output_bytes=815 "
-        "persisted_reopened=1 malformed_c_denied=17 "
+        "persisted_reopened=1 malformed_build_denied=4 malformed_c_denied=17 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
 
-    if (!write_file(main_source_path, sizeof(main_source_path) - 1,
+    if (!write_file(build_manifest_path, sizeof(build_manifest_path) - 1,
+                    (const uint8_t *)build_manifest_source,
+                    sizeof(build_manifest_source) - 1) ||
+        !write_file(main_source_path, sizeof(main_source_path) - 1,
                     (const uint8_t *)main_source, sizeof(main_source) - 1) ||
         !write_file(program_source_path, sizeof(program_source_path) - 1,
                     (const uint8_t *)program_source,
@@ -1888,16 +2055,37 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                     (const uint8_t *)library_source,
                     sizeof(library_source) - 1))
         fail(80);
+    uint8_t manifest_input[512] = {0};
     uint8_t source_input[512] = {0}, program_input[768] = {0};
     uint8_t library_input[128] = {0};
-    size_t source_length = read_file(main_source_path,
-                                     sizeof(main_source_path) - 1,
+    size_t manifest_length = read_file(
+        build_manifest_path, sizeof(build_manifest_path) - 1,
+        manifest_input, sizeof(manifest_input));
+    struct build_manifest build = {0}, malformed_build = {0};
+    if (manifest_length != sizeof(build_manifest_source) - 1 ||
+        !parse_build_manifest((const char *)manifest_input, manifest_length,
+                              &build) ||
+        parse_build_manifest(malformed_build_header,
+                             sizeof(malformed_build_header) - 1,
+                             &malformed_build) ||
+        parse_build_manifest(malformed_build_relative,
+                             sizeof(malformed_build_relative) - 1,
+                             &malformed_build) ||
+        parse_build_manifest(malformed_build_duplicate,
+                             sizeof(malformed_build_duplicate) - 1,
+                             &malformed_build) ||
+        parse_build_manifest(malformed_build_missing_link,
+                             sizeof(malformed_build_missing_link) - 1,
+                             &malformed_build))
+        fail(81);
+    size_t source_length = read_file(build.inputs[0].source_path,
+                                     build.inputs[0].source_path_length,
                                      source_input, sizeof(source_input));
     size_t program_source_length = read_file(
-        program_source_path, sizeof(program_source_path) - 1,
+        build.inputs[1].source_path, build.inputs[1].source_path_length,
         program_input, sizeof(program_input));
     size_t library_source_length = read_file(
-        library_source_path, sizeof(library_source_path) - 1,
+        build.inputs[2].source_path, build.inputs[2].source_path_length,
         library_input, sizeof(library_input));
     if (source_length != sizeof(main_source) - 1 ||
         program_source_length != sizeof(program_source) - 1 ||
@@ -2136,7 +2324,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     uint8_t main_object[OBJECT_CAPACITY], program_object[OBJECT_CAPACITY];
     uint8_t library_object[OBJECT_CAPACITY];
     size_t main_object_length = emit_object(main_object, main_code,
-                                            main_code_length, "_start", 6,
+                                            main_code_length, build.entry,
+                                            build.entry_length,
                                             main_relocations,
                                             main_relocation_count);
     size_t program_object_length = emit_object_definitions(
@@ -2149,25 +2338,28 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         library_relocation_count);
     if (main_object_length != 688 || program_object_length != 976 ||
         library_object_length != 616 ||
-        !write_file(main_object_path, sizeof(main_object_path) - 1,
+        !write_file(build.inputs[0].object_path,
+                    build.inputs[0].object_path_length,
                     main_object, main_object_length) ||
-        !write_file(program_object_path, sizeof(program_object_path) - 1,
+        !write_file(build.inputs[1].object_path,
+                    build.inputs[1].object_path_length,
                     program_object, program_object_length) ||
-        !write_file(library_object_path, sizeof(library_object_path) - 1,
+        !write_file(build.inputs[2].object_path,
+                    build.inputs[2].object_path_length,
                     library_object, library_object_length))
         fail(85);
 
     memset(main_object, 0, sizeof(main_object));
     memset(program_object, 0, sizeof(program_object));
     memset(library_object, 0, sizeof(library_object));
-    main_object_length = read_file(main_object_path,
-                                   sizeof(main_object_path) - 1,
+    main_object_length = read_file(build.inputs[0].object_path,
+                                   build.inputs[0].object_path_length,
                                    main_object, sizeof(main_object));
-    program_object_length = read_file(program_object_path,
-                                      sizeof(program_object_path) - 1,
+    program_object_length = read_file(build.inputs[1].object_path,
+                                      build.inputs[1].object_path_length,
                                       program_object, sizeof(program_object));
-    library_object_length = read_file(library_object_path,
-                                      sizeof(library_object_path) - 1,
+    library_object_length = read_file(build.inputs[2].object_path,
+                                      build.inputs[2].object_path_length,
                                       library_object, sizeof(library_object));
     if (!main_object_length || !program_object_length ||
         !library_object_length)
@@ -2187,14 +2379,14 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         main_object_length, program_object_length, library_object_length,
     };
     if (link_objects(objects, object_lengths, 3, linked_code,
-                     sizeof(linked_code), "_start", &entry_offset) != 0)
+                     sizeof(linked_code), build.entry, &entry_offset) != 0)
         fail(88);
     main_object[corrupt_info] = saved_type;
     size_t corrupt_addend = corrupt_view.rela_offset + 16;
     if (main_object[corrupt_addend] != 0) fail(88);
     main_object[corrupt_addend] = 1;
     if (link_objects(objects, object_lengths, 3, linked_code,
-                     sizeof(linked_code), "_start", &entry_offset) != 0)
+                     sizeof(linked_code), build.entry, &entry_offset) != 0)
         fail(88);
     main_object[corrupt_addend] = 0;
     struct object_view program_view;
@@ -2212,7 +2404,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     put64(program_object, adjust_symbol + 8, 0);
     put64(program_object, adjust_symbol + 16, 0);
     if (link_objects(objects, object_lengths, 3, linked_code,
-                     sizeof(linked_code), "_start", &entry_offset) != 0)
+                     sizeof(linked_code), build.entry, &entry_offset) != 0)
         fail(88);
     put16(program_object, adjust_symbol + 6, 1);
     put64(program_object, adjust_symbol + 8, 140);
@@ -2224,13 +2416,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         main_object_length, program_object_length, program_object_length,
     };
     if (link_objects(duplicate_objects, duplicate_lengths, 3, linked_code,
-                     sizeof(linked_code), "_start", &entry_offset) != 0)
+                     sizeof(linked_code), build.entry, &entry_offset) != 0)
         fail(88);
     if (link_objects(objects, object_lengths, 2, linked_code,
-                     sizeof(linked_code), "_start", &entry_offset) != 0)
+                     sizeof(linked_code), build.entry, &entry_offset) != 0)
         fail(88);
     size_t linked_length = link_objects(objects, object_lengths, 3, linked_code,
-                                        sizeof(linked_code), "_start",
+                                        sizeof(linked_code), build.entry,
                                         &entry_offset);
     if (linked_length != 444 || entry_offset != 0) fail(89);
 
@@ -2266,7 +2458,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t image_length = emit_elf(image, linked_code, linked_length,
                                    entry_offset);
     if (image_length != 815 ||
-        !write_file(output_path, sizeof(output_path) - 1,
+        !write_file(build.output_path, build.output_path_length,
                     (const uint8_t *)image, image_length))
         fail(90);
     syscall4(SYS_WRITE, (uintptr_t)marker, sizeof(marker) - 1, 0, 0);
