@@ -13,11 +13,14 @@ Last updated: 2026-08-25.
   roots, restores exact free-frame balance, closes the AP gate, and reaches the
   visible login. A subsequent probe has every AP block in `sleep_until`, return
   through its per-CPU kernel record to the idle dispatcher, receive CPU0's
-  timer wake, and resume in EL0 with `resume_mask=0xe`. The current AArch64
-  release image/artifact check, full
+  timer wake, and resume in EL0 with `resume_mask=0xe`. The same fixed-affinity
+  processes then execute timed futex waits: CPU0 idles in the syscall, all APs
+  return to idle, and the 20 ms timeout resumes them with
+  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. The current AArch64 release
+  image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending the remaining IPC/futex/
-  input/I/O idle returns, remote group-exit acknowledgement, device affinity
+  desktop/Firefox AP scheduling remains gated pending the remaining IPC/input/
+  general-I/O idle returns, remote group-exit acknowledgement, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.

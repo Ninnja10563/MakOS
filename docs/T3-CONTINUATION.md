@@ -45,9 +45,11 @@ Preserve existing files and changes.
   artifact checks, full `make check`, both structural guards, and visible login
   pass. The next runtime additionally has every AP block in `sleep_until`,
   return to its idle dispatcher, receive CPU0's timer wake, and resume with
-  `resume_mask=0xe`. The gate closes before the desktop; general desktop/
-  Firefox AP scheduling remains pending other blocking classes, remote
-  teardown, device-affinity and contention gates.
+  `resume_mask=0xe`. A fixed-affinity timed-futex phase also idles CPU0 in the
+  syscall, returns every AP to idle, and proves the 20 ms timer wake with
+  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. The gate closes before the
+  desktop; general desktop/Firefox AP scheduling remains pending IPC/input/I/O
+  blocking classes, remote teardown, device-affinity and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates

@@ -13,7 +13,11 @@ Pi/QEMU TCG requires four distinct TIDs, `overlap_mask=0xf`, unique statuses
 40-43, complete address-space reap, and exact frame recovery. Each AP process
 also calls `sleep_until`; with no local successor it remains Blocked, returns
 through the per-CPU kernel record to the idle dispatcher, and resumes after a
-CPU0 timer wake. Runtime requires `resume_mask=0xe`. This explicit release
+CPU0 timer wake. Runtime requires `resume_mask=0xe`. It then performs a timed
+futex wait. Stable per-PE probe affinity prevents a woken context being stolen
+while CPU0 leaves WFI; CPU0 idles inside the syscall and APs return to their
+dispatchers until the 20 ms timer expiry. Runtime requires
+`futex_idle_mask=0xe` and `futex_resume_mask=0xe`. This explicit release
 barrier keeps the correctness fixture independent of host emulation speed. The
 gate then closes and APs return to interrupt-masked WFI. General
 desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
@@ -38,10 +42,11 @@ safe general process migration.
 - Initial and exception-time AP selectors now restrict candidates to
   non-leader Firefox workers. Broader affinity/load balancing remains gated
   until device-owning and PID1/UI paths are qualified.
-- `sleep_until` with no AP-eligible successor now returns through the per-CPU
-  saved kernel record into the AP idle loop and has timer-wake/resume proof.
-  IPC, futex, input, and general I/O no-successor paths still reactivate or
-  reject the sole local task and need the same idle-return contract.
+- `sleep_until` and timed futex waits with no AP-eligible successor now return
+  through the per-CPU saved kernel record into the AP idle loop and have
+  timer-wake/resume proof. IPC, input, and general I/O no-successor paths still
+  reactivate or reject the sole local task and need the same idle-return
+  contract.
 - Exit/session teardown must distinguish no local successor from no live
   session. `exit_group` must first stop/ack remote-running siblings; current
   administrative `terminate` correctly rejects a task owned by another CPU.

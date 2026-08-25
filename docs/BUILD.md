@@ -113,9 +113,11 @@ storage. Three AP contexts rendezvous immediately before EL0 transition, CPU0
 joins and releases all four PEs, and four independent processes must overlap,
 block on an absolute monotonic sleep with no local successor, return to AP idle,
 resume after CPU0's timer wake, return statuses 40-43, reap cleanly, and restore
-the free-frame count. The marker requires `resume_mask=0xe`. The scheduler
-closes AP dispatch again before the desktop; this is not yet general multicore
-userspace.
+the free-frame count. They also perform a 20 ms timed futex wait with CPU0 in
+WFI and APs back in their idle dispatchers. The marker requires
+`idle_mask=0xe`, `resume_mask=0xe`, `futex_idle_mask=0xe`, and
+`futex_resume_mask=0xe`. The scheduler closes AP dispatch again before the
+desktop; this is not yet general multicore userspace.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
