@@ -260,6 +260,9 @@ pub extern "C" fn aarch64_kernel_main(boot_ptr: *const BootInfo) -> ! {
 
     let framebuffer = aarch64_virtio_gpu::init(800, 600);
     aarch64_desktop::initialize(framebuffer);
+    if boot_options.smp_input_probe {
+        aarch64_process::run_smp_input_device_self_test();
+    }
     aarch64_tty::initialize();
     serial_println!(
         "MAKOS_AARCH64_BOOT_OK uefi=1 hvf_ready=1 native_isa=1 framebuffer={}x{} gpu=virtio pmm=1 heap=1 mmu=1 exceptions=1 gic=2 timer=1 userspace=1 svc=1 input=virtio desktop=login",
@@ -272,6 +275,7 @@ pub extern "C" fn aarch64_kernel_main(boot_ptr: *const BootInfo) -> ! {
 #[derive(Clone, Copy)]
 struct BootOptions {
     recover_makfs: bool,
+    smp_input_probe: bool,
 }
 
 fn parse_boot_config(boot: &BootInfo) -> BootOptions {
@@ -284,11 +288,13 @@ fn parse_boot_config(boot: &BootInfo) -> BootOptions {
     let mut root_ata1 = false;
     let mut serial_log = false;
     let mut recover_makfs = false;
+    let mut smp_input_probe = false;
     for option in config.split_ascii_whitespace() {
         match option {
             "root=ata1" => root_ata1 = true,
             "log=serial" => serial_log = true,
             "makfs.recover=auto" => recover_makfs = true,
+            "test.smp-input=required" => smp_input_probe = true,
             _ => fatal("unsupported boot config option"),
         }
     }
@@ -296,10 +302,14 @@ fn parse_boot_config(boot: &BootInfo) -> BootOptions {
         fatal("required boot config option absent");
     }
     serial_println!(
-        "MAKOS_CONFIG_OK source=fat bytes={} root=ata1 log=serial makfs_recover=auto",
-        length
+        "MAKOS_CONFIG_OK source=fat bytes={} root=ata1 log=serial makfs_recover=auto smp_input_probe={}",
+        length,
+        u8::from(smp_input_probe),
     );
-    BootOptions { recover_makfs }
+    BootOptions {
+        recover_makfs,
+        smp_input_probe,
+    }
 }
 
 fn physical_memory_self_test(boot: &BootInfo) {

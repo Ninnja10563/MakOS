@@ -85,6 +85,17 @@ per-CPU kernel frame without running duplicate cleanup. Runtime proves
 `cpu_mask=0x3`, one owner bit, the complementary joined bit, first-owner status
 for both callers, one shared-root reap, and exact frame recovery.
 
+An opt-in seventh fixture runs only with `test.smp-input=required`, after the
+virtio keyboard/tablet and graphics service are initialized. AP1 enters the
+real EL0 `read_key` syscall while a CPU0-affined Ready sentinel prevents the
+last-runnable WFI shortcut. With no AP1-eligible successor, the waiter now
+returns to the AP idle dispatcher instead of undoing its block. The host
+harness sends a real QEMU Ctrl-K event; CPU0 drains the virtio used ring, wakes
+the input wait class, and sends the scheduler SGI. Runtime requires matching
+`input_idle_mask=0x2`/`input_resume_mask=0x2`, exact key delivery, status 61,
+frame balance, and subsequent boot completion. The ordinary boot config never
+arms or waits for external test input.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -108,8 +119,8 @@ safe general process migration.
   successor now return through the per-CPU saved kernel record into the AP idle
   loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit
   also returns to its calling CPU's kernel record when no local successor
-  exists. Input no-successor behavior and device-triggered I/O still need
-  runtime coverage.
+  exists. Input no-successor behavior now has a real virtio-keyboard
+  device-triggered AP idle/wake/resume proof.
 - CPU0-initiated `exit_group` now stops and acknowledges both a remote-running
   EL0 sibling and a sibling inside a returning SVC/page-fault EL1 path before
   reap. Simultaneous unrelated groups now serialize without holding the

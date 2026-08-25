@@ -156,6 +156,20 @@ status propagation, one root reap, and exact frame balance. The joining CPU
 leaves the shared TTBR0 and acknowledges under the process lock; it never runs
 a second group cleanup.
 
+The focused device-wake gate uses a separate boot configuration so a normal
+boot never waits for harness input:
+
+```sh
+make test-aarch64-smp-input-runtime
+```
+
+`boot/MAKOS-SMP-INPUT.CFG` arms an AP1 EL0 `read_key` waiter only after
+virtio-input initialization. The harness waits for the guest readiness marker,
+sends QEMU Ctrl-K, and requires CPU0 used-ring polling plus an SGI to resume
+AP1 from its idle dispatcher. Exact idle/resume masks, key-derived status 61,
+frame balance, and normal boot completion are mandatory. `boot/MAKOS.CFG`
+does not contain the test option.
+
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
 data memory type for an ELF entry would fault immediately after

@@ -49,12 +49,18 @@ Last updated: 2026-08-25.
   the acknowledgement contract, and does not duplicate cleanup. Runtime proves
   complementary owner/join masks, first-owner-wins status, one shared-root
   reap, exact frame balance, and subsequent visible login.
+  An opt-in seventh fixture starts after real virtio-input initialization. AP1
+  blocks in EL0 `read_key`, returns to its idle dispatcher with no eligible
+  local successor, then resumes only after the focused harness sends QEMU
+  Ctrl-K and CPU0 drains the virtio ring and sends an SGI. Two repeated Pi/TCG
+  runs require `input_idle_mask=0x2`/`input_resume_mask=0x2`, status 61, exact
+  frame balance, and subsequent boot completion. The ordinary image never
+  arms the external-input wait.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending input/device-triggered
-  idle returns, device affinity
-  and contention proof, so the
+  desktop/Firefox AP scheduling remains gated pending device affinity and
+  contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
@@ -450,7 +456,8 @@ Last updated: 2026-08-25.
   Four AArch64 PEs now execute coherent EL1 code with private stacks, but APs
   deliberately park after proof. Current-task, kernel-return, and active-TTBR
   state are CPU-indexed; multicore userspace still needs AP run queues,
-  remote-sibling stop/ack teardown, device affinity, wake proof, and balancing.
+  production device affinity/contention qualification, forced migration, and
+  load balancing before the desktop gate can open.
 - Processes/userspace: isolated ELF processes, spawn/wait/exit, user threads,
   static C libc, shell, login, package/log APIs, and two-slot static-ELF
   exec-by-path with bounded argv/env; no fork/COW, complete signals, general PID

@@ -8,6 +8,10 @@ TABLE = (ROOT / "crates/process-table/src/lib.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
 PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
 DESIGN = (ROOT / "docs/AARCH64-SMP-SCHEDULER.md").read_text()
+MAIN = (ROOT / "kernel/src/main.rs").read_text()
+MAKEFILE = (ROOT / "Makefile").read_text()
+INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
+INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
 
 for token in (
     "current: [Option<usize>; MAX_SCHEDULER_CPUS]",
@@ -93,6 +97,13 @@ for token in (
     "join_remote_group_stop",
     "pub fn run_smp_same_group_exit_self_test()",
     "MAKOS_AARCH64_SMP_SAME_GROUP_EXIT_OK",
+    "SMP_PROBE_INPUT_WAIT_TID",
+    "SMP_PROBE_INPUT_IDLE_MASK",
+    "SMP_PROBE_INPUT_BLOCKED_MASK",
+    "SMP_PROBE_INPUT_RESUME_MASK",
+    "pub fn run_smp_input_device_self_test()",
+    "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
+    "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
     "state.table.running_cpu(slot.pid).is_some()",
     "return_to_kernel(frame, 0)",
     "statuses != [40, 41, 42, 43]",
@@ -121,6 +132,17 @@ for cpu0_wrapper in (
 
 assert "Until every gate passes, MakOS reports `userspace_scheduler_cpus=1`." in DESIGN
 assert "Firefox first paint/navigation" in DESIGN
+assert '"test.smp-input=required" => smp_input_probe = true' in MAIN
+assert "if boot_options.smp_input_probe" in MAIN
+assert "test-aarch64-smp-input-runtime: image-aarch64-smp-input" in MAKEFILE
+assert "test.smp-input=required" in INPUT_CONFIG
+for token in (
+    "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY",
+    'send_key(stream, "ctrl-k")',
+    "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK",
+    "input_idle_mask=0x2 input_resume_mask=0x2 status=61 free_balance=1",
+):
+    assert token in INPUT_RUNTIME, token
 
 print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "

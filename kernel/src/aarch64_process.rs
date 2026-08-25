@@ -69,6 +69,10 @@ static SMP_SAME_GROUP_EXIT_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-same-group-exit-probe.elf"
 ));
+static SMP_INPUT_DEVICE_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-input-device-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -257,6 +261,10 @@ static SMP_PROBE_SAME_GROUP_ARRIVED_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_SAME_GROUP_OWNER_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_SAME_GROUP_JOINED_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_SAME_GROUP_OWNER_STATUS: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_INPUT_WAIT_TID: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_INPUT_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_INPUT_BLOCKED_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_INPUT_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -1139,6 +1147,126 @@ pub fn run_smp_same_group_exit_self_test() {
     reset_scheduler();
 }
 
+pub fn run_smp_input_device_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_INPUT_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_INPUT_BLOCKED_MASK.store(0, Ordering::Release);
+    SMP_PROBE_INPUT_RESUME_MASK.store(0, Ordering::Release);
+    SMP_PROBE_INPUT_WAIT_TID.store(0, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let waiter = spawn_process(0, SMP_INPUT_DEVICE_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP input-device waiter spawn failed"))
+        .0;
+    // A second Ready task makes the input syscall take the scheduler block
+    // path. It is fixed to CPU0, so AP1 must return to its idle dispatcher
+    // instead of substituting unrelated work.
+    let sentinel = spawn_process(
+        0,
+        SMP_CONCURRENT_EXIT_PROBE_ELF,
+        62,
+        ProcessRole::SmpProbe,
+    )
+    .unwrap_or_else(|| crate::fatal("AArch64 SMP input-device sentinel spawn failed"))
+    .0;
+    SMP_PROBE_AFFINITY[0].store(sentinel, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(waiter, Ordering::Release);
+    SMP_PROBE_INPUT_WAIT_TID.store(waiter, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let idle_deadline = crate::arch::counter_deadline_millis(20_000);
+    while SMP_PROBE_INPUT_IDLE_MASK.load(Ordering::Acquire) & 0b0010 == 0
+        || SMP_PROBE_INPUT_BLOCKED_MASK.load(Ordering::Acquire) & 0b0010 == 0
+    {
+        if crate::arch::counter_deadline_expired(idle_deadline) {
+            crate::fatal("AArch64 SMP input-device AP idle timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_INPUT_DEVICE_READY waiter_cpu=1 poller_cpu=0 device=virtio-keyboard chord=ctrl-k input_idle_mask={:#x}",
+        SMP_PROBE_INPUT_IDLE_MASK.load(Ordering::Acquire),
+    );
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        // Device ownership stays on CPU0: it drains the real virtio used ring,
+        // publishes the input wait wake, and sends the scheduler SGI to AP1.
+        crate::aarch64_virtio_input::poll();
+        crate::graphics::service_deferred_actions();
+        let complete = with_state(|state| {
+            state.table.get(waiter).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP input-device completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let mut reaped = [(0u64, 0u64, 0u64); 2];
+    with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, waiter)
+        else {
+            crate::fatal("AArch64 SMP input-device waiter reap failed");
+        };
+        reaped[0] = (waiter, resource, exit_status);
+        if state.table.terminate(sentinel, 62).is_none() {
+            crate::fatal("AArch64 SMP input-device sentinel terminate failed");
+        }
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, sentinel)
+        else {
+            crate::fatal("AArch64 SMP input-device sentinel reap failed");
+        };
+        reaped[1] = (sentinel, resource, exit_status);
+        for tid in [waiter, sentinel] {
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == tid) {
+                *slot = ContextSlot::EMPTY;
+            }
+        }
+    });
+    for (pid, resource, status) in reaped {
+        cleanup_reaped(pid, resource, status);
+    }
+
+    let idle = SMP_PROBE_INPUT_IDLE_MASK.load(Ordering::Acquire);
+    let resumed = SMP_PROBE_INPUT_RESUME_MASK.load(Ordering::Acquire);
+    if reaped[0].2 != 61
+        || reaped[1].2 != 62
+        || idle != 0b0010
+        || resumed != idle
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP input-device userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_INPUT_DEVICE_OK waiter_cpu=1 poller_cpu=0 device=virtio-keyboard event=ctrl-k ring_activity=real block=ap-idle wake=cpu0-device-poll,sgi input_idle_mask={:#x} input_resume_mask={:#x} status=61 free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed",
+        idle,
+        resumed,
+    );
+    SMP_PROBE_INPUT_WAIT_TID.store(0, Ordering::Release);
+    reset_scheduler();
+}
+
 pub fn run_desktop_shell() -> ! {
     reset_scheduler();
     let (pid, process) = spawn_process(0, SHELL_ELF, 0, ProcessRole::Shell)
@@ -1523,10 +1651,15 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
             state.contexts[index].input_wait = false;
             return Err(IoBlockResult::Failed);
         }
-        let Some(next) = state.schedule_next_for_cpu(scheduler_cpu()) else {
+        let cpu = scheduler_cpu();
+        let Some(next) = state.schedule_next_for_cpu(cpu) else {
+            if cpu != 0 && SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
+                SMP_PROBE_INPUT_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                return Ok((tid, None));
+            }
             state.contexts[index].input_wait = false;
             let _ = state.table.wake(tid);
-            let _ = state.table.activate_on(scheduler_cpu(), tid);
+            let _ = state.table.activate_on(cpu, tid);
             return Err(IoBlockResult::Failed);
         };
         let context = state
@@ -1535,17 +1668,26 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
             .find(|slot| slot.pid == next.pid)
             .map(|slot| slot.context)
             .ok_or(IoBlockResult::Failed)?;
-        Ok((tid, context))
+        Ok((tid, Some(context)))
     });
     match switched {
         Ok((tid, context)) => {
-            context.restore(frame);
-            crate::arch::switch_address_space(context.ttbr0);
+            let returned_to_idle = context.is_none();
+            if let Some(context) = context {
+                context.restore(frame);
+                crate::arch::switch_address_space(context.ttbr0);
+            } else {
+                crate::arch::return_to_kernel(frame, 0);
+            }
             if !INPUT_BLOCK_REPORTED.swap(true, Ordering::AcqRel) {
                 crate::serial_println!(
                     "MAKOS_AARCH64_INPUT_BLOCK_OK tid={} scheduler=blocked retry=svc",
                     tid,
                 );
+            }
+            if returned_to_idle && SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
+                SMP_PROBE_INPUT_BLOCKED_MASK
+                    .fetch_or(1u64 << scheduler_cpu(), Ordering::AcqRel);
             }
             IoBlockResult::Switched
         }
@@ -2440,6 +2582,9 @@ fn smp_probe_enter(tid: u64) {
     }
     if SMP_PROBE_IPC_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
         SMP_PROBE_IPC_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
+    }
+    if SMP_PROBE_INPUT_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
+        SMP_PROBE_INPUT_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
     }
     SMP_PROBE_TIDS[cpu].store(tid, Ordering::Release);
     let active = SMP_PROBE_ACTIVE_MASK.fetch_or(bit, Ordering::AcqRel) | bit;

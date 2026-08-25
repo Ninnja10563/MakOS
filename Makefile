@@ -11,6 +11,7 @@ X86_64_GPT_IMAGE := $(BUILD)/makos-x86_64-gpt.img
 AARCH64_KERNEL := target/aarch64-unknown-none/release/makos-kernel
 AARCH64_LOADER := target/aarch64-unknown-uefi/release/makos-loader.efi
 AARCH64_IMAGE := $(BUILD)/makos-aarch64.img
+AARCH64_SMP_INPUT_IMAGE := $(BUILD)/makos-aarch64-smp-input.img
 AARCH64_DATA_IMAGE := $(BUILD)/makos-data-aarch64.img
 AARCH64_GPT_DATA_IMAGE := $(BUILD)/makos-data-aarch64-gpt-seed.img
 AARCH64_GPT_IMAGE := $(BUILD)/makos-aarch64-gpt.img
@@ -20,7 +21,7 @@ SOURCE_DATA_IMAGE ?=
 INTEGRATED_OUTPUT_DIR ?= $(BUILD)
 INSTALL_TARGET ?=
 
-.PHONY: all build build-aarch64 image image-x86_64-gpt image-aarch64 image-aarch64-gpt data-aarch64 cpython-aarch64 package-cpython-aarch64 integrated-data-aarch64 test-integrated-data run run-x86_64-gpt run-x86_64-installer run-aarch64 run-aarch64-gpt test test-x86_64-gpt test-x86_64-install test-aarch64 test-makfs4-guest-fsck test-aarch64-cursor-runtime test-aarch64-firefox-runtime test-aarch64-ipv6-runtime test-aarch64-package-runtime test-aarch64-gpt test-aarch64-install test-cpython-aarch64 unit check release clean
+.PHONY: all build build-aarch64 image image-x86_64-gpt image-aarch64 image-aarch64-smp-input image-aarch64-gpt data-aarch64 cpython-aarch64 package-cpython-aarch64 integrated-data-aarch64 test-integrated-data run run-x86_64-gpt run-x86_64-installer run-aarch64 run-aarch64-gpt test test-x86_64-gpt test-x86_64-install test-aarch64 test-aarch64-smp-input-runtime test-makfs4-guest-fsck test-aarch64-cursor-runtime test-aarch64-firefox-runtime test-aarch64-ipv6-runtime test-aarch64-package-runtime test-aarch64-gpt test-aarch64-install test-cpython-aarch64 unit check release clean
 
 all: image
 
@@ -64,6 +65,16 @@ image-aarch64: build-aarch64
 		KERNEL.ELF=$(BUILD)/esp-aarch64/KERNEL.ELF \
 		MAKOS.CFG=boot/MAKOS.CFG
 	python3 scripts/check_artifacts.py $(AARCH64_IMAGE) $(AARCH64_KERNEL)
+
+image-aarch64-smp-input: build-aarch64
+	mkdir -p $(BUILD)/esp-aarch64-smp-input/EFI/BOOT
+	cp $(AARCH64_LOADER) $(BUILD)/esp-aarch64-smp-input/EFI/BOOT/BOOTAA64.EFI
+	cp $(AARCH64_KERNEL) $(BUILD)/esp-aarch64-smp-input/KERNEL.ELF
+	python3 scripts/mkfat.py $(AARCH64_SMP_INPUT_IMAGE) \
+		EFI/BOOT/BOOTAA64.EFI=$(BUILD)/esp-aarch64-smp-input/EFI/BOOT/BOOTAA64.EFI \
+		KERNEL.ELF=$(BUILD)/esp-aarch64-smp-input/KERNEL.ELF \
+		MAKOS.CFG=boot/MAKOS-SMP-INPUT.CFG
+	python3 scripts/check_artifacts.py $(AARCH64_SMP_INPUT_IMAGE) $(AARCH64_KERNEL)
 
 image-aarch64-gpt: image-aarch64
 	python3 scripts/mkdata.py $(AARCH64_GPT_DATA_IMAGE)
@@ -116,6 +127,9 @@ test-x86_64-install: image-x86_64-gpt
 
 test-aarch64: image-aarch64
 	python3 scripts/boot_test_aarch64.py
+
+test-aarch64-smp-input-runtime: image-aarch64-smp-input
+	MAKOS_AARCH64_IMAGE=$(AARCH64_SMP_INPUT_IMAGE) python3 scripts/boot_test_aarch64_smp_input.py
 
 test-makfs4-guest-fsck: image-aarch64
 	python3 scripts/test_makfs4_guest_fsck.py
