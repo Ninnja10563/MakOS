@@ -16,11 +16,13 @@ Last updated: 2026-08-25.
   timer wake, and resume in EL0 with `resume_mask=0xe`. The same fixed-affinity
   processes then execute timed futex waits: CPU0 idles in the syscall, all APs
   return to idle, and the 20 ms timeout resumes them with
-  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. The current AArch64 release
+  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. A zero-descriptor timed `poll`
+  additionally proves the retry-PC I/O path with
+  `io_idle_mask=0xe`/`io_resume_mask=0xe`. The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending the remaining IPC/input/
-  general-I/O idle returns, remote group-exit acknowledgement, device affinity
+  desktop/Firefox AP scheduling remains gated pending IPC/input idle returns,
+  remote group-exit acknowledgement, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.

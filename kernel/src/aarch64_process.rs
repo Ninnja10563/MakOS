@@ -210,6 +210,8 @@ static SMP_PROBE_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_FUTEX_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_FUTEX_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_AFFINITY: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static SMP_PROBE_IO_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_IO_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -408,6 +410,8 @@ pub fn run_smp_userspace_self_test() {
     SMP_PROBE_RESUME_MASK.store(0, Ordering::Release);
     SMP_PROBE_FUTEX_IDLE_MASK.store(0, Ordering::Release);
     SMP_PROBE_FUTEX_RESUME_MASK.store(0, Ordering::Release);
+    SMP_PROBE_IO_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_IO_RESUME_MASK.store(0, Ordering::Release);
     for tid in &SMP_PROBE_AFFINITY {
         tid.store(0, Ordering::Release);
     }
@@ -510,6 +514,8 @@ pub fn run_smp_userspace_self_test() {
     let resumed = SMP_PROBE_RESUME_MASK.load(Ordering::Acquire);
     let futex_idle = SMP_PROBE_FUTEX_IDLE_MASK.load(Ordering::Acquire);
     let futex_resumed = SMP_PROBE_FUTEX_RESUME_MASK.load(Ordering::Acquire);
+    let io_idle = SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire);
+    let io_resumed = SMP_PROBE_IO_RESUME_MASK.load(Ordering::Acquire);
     let free_balance = crate::mm::free_frames() == free_before;
     if statuses != [40, 41, 42, 43]
         || peak != 0b1111
@@ -517,6 +523,8 @@ pub fn run_smp_userspace_self_test() {
         || resumed & 0b1110 != 0b1110
         || futex_idle & 0b1110 != 0b1110
         || futex_resumed & 0b1110 != 0b1110
+        || io_idle & 0b1110 != 0b1110
+        || io_resumed & 0b1110 != 0b1110
         || tids.contains(&0)
         || tids
             .iter()
@@ -525,10 +533,12 @@ pub fn run_smp_userspace_self_test() {
         || !free_balance
     {
         crate::serial_println!(
-            "MAKOS_AARCH64_SMP_PROBE_DIAGNOSTIC peak={:#x} idle={:#x} resumed={:#x} futex_idle={:#x} futex_resumed={:#x} statuses={},{},{},{} tids={},{},{},{} free_balance={}",
+            "MAKOS_AARCH64_SMP_PROBE_DIAGNOSTIC peak={:#x} idle={:#x} resumed={:#x} io_idle={:#x} io_resumed={:#x} futex_idle={:#x} futex_resumed={:#x} statuses={},{},{},{} tids={},{},{},{} free_balance={}",
             peak,
             idle,
             resumed,
+            io_idle,
+            io_resumed,
             futex_idle,
             futex_resumed,
             statuses[0],
@@ -544,8 +554,8 @@ pub fn run_smp_userspace_self_test() {
         crate::fatal("AArch64 SMP userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_USER_OK cpus=4 tids={},{},{},{} overlap_mask={:#x} el=0 timer_ppi=per-cpu ap_block_idle=sleep-until wake=timer idle_mask={:#x} resume_mask={:#x} ap_futex_idle=timeout wake=timer futex_idle_mask={:#x} futex_resume_mask={:#x} statuses=40,41,42,43 scheduler_scope=boot-probe desktop_gate=closed free_balance=1",
-        tids[0], tids[1], tids[2], tids[3], peak, idle, resumed, futex_idle, futex_resumed,
+        "MAKOS_AARCH64_SMP_USER_OK cpus=4 tids={},{},{},{} overlap_mask={:#x} el=0 timer_ppi=per-cpu ap_block_idle=sleep-until wake=timer idle_mask={:#x} resume_mask={:#x} ap_io_idle=poll-timeout wake=timer io_idle_mask={:#x} io_resume_mask={:#x} ap_futex_idle=timeout wake=timer futex_idle_mask={:#x} futex_resume_mask={:#x} statuses=40,41,42,43 scheduler_scope=boot-probe desktop_gate=closed free_balance=1",
+        tids[0], tids[1], tids[2], tids[3], peak, idle, resumed, io_idle, io_resumed, futex_idle, futex_resumed,
     );
     reset_scheduler();
 }
@@ -805,7 +815,12 @@ pub(crate) fn block_current_for_io_on(
             state.contexts[index].sleep_deadline = 0;
             return Err(IoBlockResult::Failed);
         }
-        let Some(next) = state.schedule_next_for_cpu(scheduler_cpu()) else {
+        let cpu = scheduler_cpu();
+        let Some(next) = state.schedule_next_for_cpu(cpu) else {
+            if cpu != 0 && state.contexts[index].role == ProcessRole::SmpProbe {
+                SMP_PROBE_IO_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                return Ok((tid, deadline, None));
+            }
             state.contexts[index].io_wait = false;
             state.contexts[index].io_source = makos_readiness::WaitSource::Any;
             state.contexts[index].io_deadline = 0;
@@ -820,7 +835,7 @@ pub(crate) fn block_current_for_io_on(
             .find(|slot| slot.pid == next.pid)
             .map(|slot| slot.context)
             .ok_or(IoBlockResult::Failed)?;
-        Ok((tid, deadline, context))
+        Ok((tid, deadline, Some(context)))
     });
     match switched {
         Ok((tid, deadline, context)) => {
@@ -831,8 +846,12 @@ pub(crate) fn block_current_for_io_on(
                     deadline,
                 );
             }
-            context.restore(frame);
-            crate::arch::switch_address_space(context.ttbr0);
+            if let Some(context) = context {
+                context.restore(frame);
+                crate::arch::switch_address_space(context.ttbr0);
+            } else {
+                crate::arch::return_to_kernel(frame, 0);
+            }
             IoBlockResult::Switched
         }
         Err(result) => result,
@@ -1818,6 +1837,9 @@ fn smp_probe_enter(tid: u64) {
     }
     if SMP_PROBE_FUTEX_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
         SMP_PROBE_FUTEX_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
+    }
+    if SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
+        SMP_PROBE_IO_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
     }
     SMP_PROBE_TIDS[cpu].store(tid, Ordering::Release);
     let active = SMP_PROBE_ACTIVE_MASK.fetch_or(bit, Ordering::AcqRel) | bit;

@@ -60,6 +60,8 @@ for token in (
     "SMP_PROBE_FUTEX_RESUME_MASK",
     "SMP_PROBE_AFFINITY",
     "FutexBlockResult::BspIdle",
+    "SMP_PROBE_IO_IDLE_MASK",
+    "SMP_PROBE_IO_RESUME_MASK",
     "return_to_kernel(frame, 0)",
     "statuses != [40, 41, 42, 43]",
     "peak != 0b1111",
@@ -67,6 +69,8 @@ for token in (
     "resumed & 0b1110 != 0b1110",
     "futex_idle & 0b1110 != 0b1110",
     "futex_resumed & 0b1110 != 0b1110",
+    "io_idle & 0b1110 != 0b1110",
+    "io_resumed & 0b1110 != 0b1110",
     'asm!("dsb ish", "sev", options(nostack))',
 ):
     assert token in PROCESS, token

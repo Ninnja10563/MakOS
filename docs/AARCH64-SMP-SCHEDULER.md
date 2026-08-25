@@ -18,8 +18,11 @@ futex wait. Stable per-PE probe affinity prevents a woken context being stolen
 while CPU0 leaves WFI; CPU0 idles inside the syscall and APs return to their
 dispatchers until the 20 ms timer expiry. Runtime requires
 `futex_idle_mask=0xe` and `futex_resume_mask=0xe`. This explicit release
-barrier keeps the correctness fixture independent of host emulation speed. The
-gate then closes and APs return to interrupt-masked WFI. General
+barrier keeps the correctness fixture independent of host emulation speed. A
+zero-descriptor 20 ms `poll` also blocks each AP with its PC rewound to the SVC,
+returns to idle, wakes on the shared deadline, retries, and observes timeout;
+runtime requires `io_idle_mask=0xe` and `io_resume_mask=0xe`. The gate then
+closes and APs return to interrupt-masked WFI. General
 desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
 the truthful scope marker.
 
@@ -42,11 +45,12 @@ safe general process migration.
 - Initial and exception-time AP selectors now restrict candidates to
   non-leader Firefox workers. Broader affinity/load balancing remains gated
   until device-owning and PID1/UI paths are qualified.
-- `sleep_until` and timed futex waits with no AP-eligible successor now return
-  through the per-CPU saved kernel record into the AP idle loop and have
-  timer-wake/resume proof. IPC, input, and general I/O no-successor paths still
+- `sleep_until`, timed poll/I/O, and timed futex waits with no AP-eligible
+  successor now return through the per-CPU saved kernel record into the AP idle
+  loop and have timer-wake/resume proof. IPC and input no-successor paths still
   reactivate or reject the sole local task and need the same idle-return
-  contract.
+  contract. Other I/O wait sources share the proved scheduler path but still
+  need device-triggered runtime coverage.
 - Exit/session teardown must distinguish no local successor from no live
   session. `exit_group` must first stop/ack remote-running siblings; current
   administrative `terminate` correctly rejects a task owned by another CPU.

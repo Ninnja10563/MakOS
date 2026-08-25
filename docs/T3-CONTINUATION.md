@@ -47,9 +47,11 @@ Preserve existing files and changes.
   return to its idle dispatcher, receive CPU0's timer wake, and resume with
   `resume_mask=0xe`. A fixed-affinity timed-futex phase also idles CPU0 in the
   syscall, returns every AP to idle, and proves the 20 ms timer wake with
-  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. The gate closes before the
-  desktop; general desktop/Firefox AP scheduling remains pending IPC/input/I/O
-  blocking classes, remote teardown, device-affinity and contention gates.
+  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. A timed zero-descriptor `poll`
+  proves I/O retry after AP idle with `io_idle_mask=0xe`/`io_resume_mask=0xe`.
+  The gate closes before the desktop; general desktop/Firefox AP scheduling
+  remains pending IPC/input and device-triggered blocking proof, remote
+  teardown, device-affinity and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates

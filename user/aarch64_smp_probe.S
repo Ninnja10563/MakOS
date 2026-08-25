@@ -12,6 +12,19 @@ _start:
     adrp x0, futex_word
     add x0, x0, :lo12:futex_word
     mov x1, #0
+    mov x2, #20
+    mov x3, #0
+    mov x4, #0
+    mov x8, #91
+    svc #0
+    cbz x0, 5f
+    mov x9, #-11
+    cmp x0, x9
+    b.ne 4f
+5:
+    adrp x0, futex_word
+    add x0, x0, :lo12:futex_word
+    mov x1, #0
     mov x2, #0
     adrp x3, futex_timeout
     add x3, x3, :lo12:futex_timeout
