@@ -65,7 +65,7 @@ See `docs/SYSCALLS.md`.
 
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
-normal VFS. Its C subset accepts up to two `int` functions in one translation
+normal VFS. Its C subset accepts up to three `int` functions in one translation
 unit, each with one or two typed `int`/`int *` parameters. Integer parameters
 may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
@@ -119,7 +119,7 @@ This seed has no general pointer arithmetic beyond constant/scalar-variable
 element addition and typed pointer difference, no pointer-provenance analysis
 or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
-nested/general blocks, more than two functions per translation unit,
+nested/general blocks, more than three functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
 archives, dynamic linking, CLI build driver, or
 debug information. It must not be presented as a general C compiler or a

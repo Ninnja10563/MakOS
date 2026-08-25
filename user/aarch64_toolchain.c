@@ -23,7 +23,7 @@ enum {
     CODE_OFFSET = 256,
     DATA_OFFSET = 768,
     IMAGE_CAPACITY = 1024,
-    OBJECT_CAPACITY = 1024,
+    OBJECT_CAPACITY = 2048,
     R_AARCH64_CALL26 = 283,
 };
 
@@ -337,7 +337,7 @@ static size_t assemble(const char *source, size_t source_length,
 enum {
     MAX_C_LOCALS = 4,
     MAX_C_STACK_SLOTS = 4,
-    MAX_C_FUNCTIONS = 2,
+    MAX_C_FUNCTIONS = 3,
     MAX_C_PARAMETERS = 2,
 };
 
@@ -1804,7 +1804,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "}\n"
         "int adjust(int *pointer, int delta) {\n"
         "    int *next = pointer + delta;\n"
-        "    pointer[0] = pointer[0] + delta;\n"
+        "    pointer[0] = combine(pointer[0], delta);\n"
         "    int distance = next - pointer;\n"
         "    int count = 0;\n"
         "    while (count < distance) {\n"
@@ -1812,6 +1812,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "        count = count + 1;\n"
         "    }\n"
         "    return *next;\n"
+        "}\n"
+        "int combine(int value, int delta) {\n"
+        "    return value + delta;\n"
         "}\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value / 2; }\n";
@@ -1839,6 +1842,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int difference(int *pointer, int delta) { return pointer - delta; }\n";
     static const char malformed_duplicate_function_source[] =
         "int answer(int value) { return value; } int answer(int value) { return value; }\n";
+    static const char malformed_too_many_functions_source[] =
+        "int one(int value) { return value; } int two(int value) { return value; } int three(int value) { return value; } int four(int value) { return value; }\n";
     static const char malformed_duplicate_parameter_source[] =
         "int adjust(int value, int value) { return value; }\n";
     static const char malformed_too_many_parameters_source[] =
@@ -1857,16 +1862,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     static const char marker[] =
         "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
         "compiler=guest-native assembler=guest-native objects=2 "
-        "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:2 "
-        "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
-        "c_source=/home/user/generated-program.c translation_unit_functions=2 "
+        "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
+        "symbols=_start,answer,adjust,combine output=/home/user/generated-aarch64.elf "
+        "c_source=/home/user/generated-program.c translation_unit_functions=3 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-        "code_bytes=76,140,168 object_bytes=688,920 intra_object_call=1 linked_bytes=384 output_bytes=815 "
-        "persisted_reopened=1 malformed_c_denied=16 "
+        "code_bytes=76,140,168,60 object_bytes=688,1032 intra_object_calls=2 linked_bytes=444 output_bytes=815 "
+        "persisted_reopened=1 malformed_c_denied=17 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -1877,7 +1882,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                     (const uint8_t *)program_source,
                     sizeof(program_source) - 1))
         fail(80);
-    uint8_t source_input[512] = {0}, program_input[512] = {0};
+    uint8_t source_input[512] = {0}, program_input[768] = {0};
     size_t source_length = read_file(main_source_path,
                                      sizeof(main_source_path) - 1,
                                      source_input, sizeof(source_input));
@@ -2000,12 +2005,21 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                        malformed_relocations,
                        &malformed_relocation_count) != 0)
         fail(82);
+    malformed_definition_count = 0;
+    malformed_relocation_count = 0;
+    if (compile_c_unit(malformed_too_many_functions_source,
+                       sizeof(malformed_too_many_functions_source) - 1,
+                       malformed_code, sizeof(malformed_code),
+                       malformed_definitions, &malformed_definition_count,
+                       malformed_relocations,
+                       &malformed_relocation_count) != 0)
+        fail(82);
     size_t program_code_length = compile_c_unit(
         (const char *)program_input, program_source_length, program_code,
         sizeof(program_code), program_definitions, &program_definition_count,
         program_relocations, &program_relocation_count);
-    if (main_code_length != 76 || program_code_length != 308 ||
-        program_definition_count != 2 ||
+    if (main_code_length != 76 || program_code_length != 368 ||
+        program_definition_count != 3 ||
         !same_name(program_definitions[0].name,
                    program_definitions[0].length, "answer", 6) ||
         program_definitions[0].offset != 0 ||
@@ -2014,11 +2028,17 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                    program_definitions[1].length, "adjust", 6) ||
         program_definitions[1].offset != 140 ||
         program_definitions[1].size != 168 ||
+        !same_name(program_definitions[2].name,
+                   program_definitions[2].length, "combine", 7) ||
+        program_definitions[2].offset != 308 ||
+        program_definitions[2].size != 60 ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
-        program_relocation_count != 1 ||
+        program_relocation_count != 2 ||
         program_relocations[0].offset != 92 ||
         !same_name(program_relocations[0].name,
-                   program_relocations[0].length, "adjust", 6))
+                   program_relocations[0].length, "adjust", 6) ||
+        !same_name(program_relocations[1].name,
+                   program_relocations[1].length, "combine", 7))
         fail(82);
 
     uint8_t *relational_jit =
@@ -2100,7 +2120,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         program_object, program_code, program_code_length,
         program_definitions, program_definition_count, program_relocations,
         program_relocation_count);
-    if (main_object_length != 688 || program_object_length != 920 ||
+    if (main_object_length != 688 || program_object_length != 1032 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(program_object_path, sizeof(program_object_path) - 1,
@@ -2123,7 +2143,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t corrupt_info = corrupt_view.rela_offset + 8;
     uint8_t saved_type = main_object[corrupt_info];
     main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1);
-    uint8_t linked_code[384] = {0};
+    uint8_t linked_code[512] = {0};
     size_t entry_offset = 0;
     const uint8_t *objects[MAX_LINK_OBJECTS] = {
         main_object, program_object,
@@ -2144,7 +2164,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     main_object[corrupt_addend] = 0;
     struct object_view program_view;
     if (!parse_object(program_object, program_object_length, &program_view) ||
-        program_view.symbol_count != 3)
+        program_view.symbol_count != 4)
         fail(88);
     size_t adjust_symbol = program_view.symbol_offset + 2 * SYMBOL_SIZE;
     if (!string_is(&program_view, get32(program_object, adjust_symbol),
@@ -2174,7 +2194,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t linked_length = link_objects(objects, object_lengths, 2, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
-    if (linked_length != 384 || entry_offset != 0) fail(89);
+    if (linked_length != 444 || entry_offset != 0) fail(89);
 
     uint8_t *compiled_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -2189,10 +2209,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         (uint64_t (*)(uint64_t))(uintptr_t)(compiled_jit + 76);
     uint64_t (*compiled_adjust)(uint32_t *, uint64_t) =
         (uint64_t (*)(uint32_t *, uint64_t))(uintptr_t)(compiled_jit + 216);
+    uint64_t (*compiled_combine)(uint64_t, uint64_t) =
+        (uint64_t (*)(uint64_t, uint64_t))(uintptr_t)(compiled_jit + 384);
     uint32_t forty[3] = {40, 0, 0};
     uint32_t scaled[3] = {40, 0, 0};
     uint32_t zero[3] = {0, 0, 0};
     if (compiled_answer(20) != 42 || compiled_answer(0) != 86 ||
+        compiled_combine(40, 2) != 42 ||
         compiled_adjust(forty, 1) != 42 ||
         forty[0] != 41 || forty[1] != 42 || forty[2] != 0 ||
         compiled_adjust(scaled, 2) != 44 ||

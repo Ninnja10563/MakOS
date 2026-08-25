@@ -36,13 +36,15 @@ for fragment in (
     '"    return 86;\\n"',
     '"int adjust(int *pointer, int delta) {\\n"',
     '"    int *next = pointer + delta;\\n"',
-    '"    pointer[0] = pointer[0] + delta;\\n"',
+    '"    pointer[0] = combine(pointer[0], delta);\\n"',
     '"    int distance = next - pointer;\\n"',
     '"    int count = 0;\\n"',
     '"    while (count < distance) {\\n"',
     '"        *(pointer + delta) = pointer[0] + count + 1;\\n"',
     '"        count = count + 1;\\n"',
     '"    return *next;\\n"',
+    '"int combine(int value, int delta) {\\n"',
+    '"    return value + delta;\\n"',
     "static size_t assemble(",
     "static size_t compile_c(",
     "static size_t compile_c_unit(",
@@ -65,7 +67,8 @@ for fragment in (
     "static int c_if_return(",
     "static int c_while(",
     "MAX_C_LOCALS = 4",
-    "MAX_C_FUNCTIONS = 2",
+    "OBJECT_CAPACITY = 2048",
+    "MAX_C_FUNCTIONS = 3",
     "MAX_C_PARAMETERS = 2",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x0b000000)",
@@ -108,6 +111,7 @@ for fragment in (
     "signed_pointer_offset_source",
     "pointer_difference_source",
     "malformed_duplicate_function_source",
+    "malformed_too_many_functions_source",
     "compile_c(malformed_c_source",
     "static size_t emit_object(",
     "static size_t emit_object_definitions(",
@@ -126,10 +130,12 @@ for fragment in (
     "link_objects(objects, object_lengths, 2",
     "link_objects(duplicate_objects, duplicate_lengths, 3",
     "program_relocations[0].offset != 92",
-    "program_definition_count != 2",
+    "program_definition_count != 3",
     "program_definitions[0].size != 140",
     "program_definitions[1].offset != 140",
     "program_definitions[1].size != 168",
+    "program_definitions[2].offset != 308",
+    "program_definitions[2].size != 60",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
     "compiled_adjust(forty, 1) != 42 ||",
     "compiled_adjust(scaled, 2) != 44 ||",
@@ -139,11 +145,12 @@ for fragment in (
     "compiled_at_most(5) != 42 || compiled_at_most(6) != 0",
     "compiled_previous(previous_values + 1, UINT32_MAX) != 42",
     "compiled_distance(distance_values + 3, distance_values) != 3",
-    "main_object_length != 688 || program_object_length != 920",
-    "linked_length != 384",
+    "compiled_combine(40, 2) != 42",
+    "main_object_length != 688 || program_object_length != 1032",
+    "linked_length != 444",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_c_denied=16",
+    "persisted_reopened=1 malformed_c_denied=17",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -197,13 +204,13 @@ require(SHELL, "malformed.argv_offsets[7] = 1")
 require(SHELL, "sizeof(startup) - 1")
 require(SHELL, "objects=2 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
-require(SHELL, "relocations=R_AARCH64_CALL26:2 symbols=_start,answer,adjust")
-require(SHELL, "translation_unit_functions=2")
+require(SHELL, "relocations=R_AARCH64_CALL26:3 symbols=_start,answer,adjust,combine")
+require(SHELL, "translation_unit_functions=3")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
 require(SHELL, "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return max_parameters=2 max_call_arguments=2 nonleaf_frame=96")
 require(SHELL, "c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86")
-require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168 object_bytes=688,920 intra_object_call=1 linked_bytes=384 output_bytes=815")
-require(SHELL, "malformed_c_denied=16")
+require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 code_bytes=76,140,168,60 object_bytes=688,1032 intra_object_calls=2 linked_bytes=444 output_bytes=815")
+require(SHELL, "malformed_c_denied=17")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -212,7 +219,7 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_c_denied=16")
+require(FOCUSED_RUNTIME, "malformed_c_denied=17")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

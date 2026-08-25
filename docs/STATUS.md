@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-08-25.
+Last updated: 2026-08-26.
 
 ## Implemented
 
@@ -209,14 +209,15 @@ Last updated: 2026-08-25.
   `distance = next - pointer` through 64-bit `SUB`/arithmetic shift-right two,
   updates element zero, loops while `count < distance`,
   and stores through `*(pointer + delta)`. The compiler concatenates a 140-byte
-  `answer` and 168-byte `adjust` into one 308-byte `.text` with two defined
-  symbols in a 920-byte ELF64 `ET_REL`; the
+  `answer`, 168-byte `adjust`, and 60-byte `combine` into one 368-byte `.text`
+  with three defined symbols in a 1,032-byte ELF64 `ET_REL`; the
   assembler produces 76 bytes in a 688-byte
   object. Both persist and reopen. The bounded general linker concatenates up
   to three objects, discovers global definitions/undefined symbols, resolves
   relocations against either same-object definitions or external symbols,
   applies validated `R_AARCH64_CALL26` relocations
-  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 384 code
+  (`_start`→`answer` externally, `answer`→`adjust` and `adjust`→`combine`
+  internally), and emits 444 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
   and duplicate `answer` definitions. Duplicate parameter names, more than two
@@ -225,7 +226,8 @@ Last updated: 2026-08-25.
   assignment to an undefined variable, address-of an undefined local, and
   untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
   known two-element array at index two, deriving `values + 2` or a variable
-  offset from that known array, pointer-minus-scalar, and duplicate functions in one
+  offset from that known array, pointer-minus-scalar, duplicate functions and
+  a fourth function in one
   translation unit also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
   `adjust(forty,1)=42`, `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; the latter
@@ -238,7 +240,9 @@ Last updated: 2026-08-25.
   final two elements of caller-owned memory. Focused
   Pi/QEMU 10.0.11 TCG then
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
-  Release artifact validation, focused runtime, structural guard, full
+  The third function is executed directly as `combine(40,2)=42`; the linked
+  mutation paths also require the internal call. Release artifact validation,
+  focused runtime, structural guard, full
   `make unit check`, and fresh visible login pass. This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, build system, debugger, or substantial
   in-guest MakOS build, so self-hosting remains Partial.
@@ -843,7 +847,7 @@ Last updated: 2026-08-25.
   and expected geometry remain unchanged. This is functional Pi evidence only,
   not Apple-HVF performance
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
-  the unprivileged user. A newer focused run passes the two-function C
+  the unprivileged user. An earlier focused run passed the two-function C
   translation unit, 872-byte multi-definition object, same-object CALL26, exact
   array mutation, and both final-ELF executions. A still newer focused run
   passes bounded scaled pointer addition across the call and inside `adjust`,
@@ -853,10 +857,12 @@ Last updated: 2026-08-25.
   signed ordering relations: it proves two dynamic positive additions, a
   `SXTW #2` negative-one load, three exact three-element mutations, all four
   signed relations, then signed pointer differences of `3`/`-3` used directly
-  and by the linked program. Sixteen
-  malformed-C denials, persistence/reopen and both status-42 final-ELF
-  executions. Its exact artifacts are 76/140/168 code bytes, 688/920 object
-  bytes, 384 linked bytes and an 815-byte ELF. A fresh private TCG boot then
+  and by the linked program, with sixteen malformed-C denials,
+  persistence/reopen and both status-42 final-ELF executions. The latest
+  three-function run adds a later-defined 60-byte
+  `combine`, a second same-object relocation, 2 KiB object capacity, and a
+  four-function fail-closed case. Its exact artifacts are 76/140/168/60 code
+  bytes, 688/1,032 object bytes, 444 linked bytes and an 815-byte ELF. A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The
   focused four-vCPU TCG SMP input/network image also

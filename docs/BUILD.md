@@ -106,7 +106,7 @@ runtimes when using an extracted, non-system QEMU installation.
 After login, `selfhost-aarch64` runs the guest-native compiler/assembler/static-
 linker gate. It writes an A64 startup to `/home/user/generated.s` and valid C to
 `/home/user/generated-program.c`, then rereads both from MakFS. A bounded C
-translation unit accepts up to two `int` functions, each with one or two typed
+translation unit accepts up to three `int` functions, each with one or two typed
 `int`/`int *` parameters, 0..65535 constants,
 parentheses, precedence-correct `*`, `+`, and `-`, up to four register locals,
 mutable parameter/local assignments, signed `==`, `!=`, `<`, `<=`, `>`, and
@@ -145,14 +145,16 @@ returns 86. `adjust(int *pointer, int delta)` accepts its pointer in AAPCS64
 computes `distance = next - pointer`, then uses `while (count < distance)` and
 `*(pointer + delta)` to store through the
 dynamically derived address and advance the counter. Its return reloads through
-`next`. The compiler emits 140-byte `answer` and 168-byte `adjust` definitions in a
-single 308-byte `.text` and a 920-byte
+`next`. `adjust` calls the later-defined `combine(int value, int delta)`, so the
+same object carries a second internal call relocation. The compiler emits
+140-byte `answer`, 168-byte `adjust`, and 60-byte `combine` definitions in a
+single 368-byte `.text` and a 1,032-byte
 `generated-program.o`; the assembler emits 76 code bytes in the 688-byte
 `generated-main.o`. Both genuine ELF64 `ET_REL` files persist/reopen. The C
 object's symbol table defines `answer` at offset zero and `adjust` at offset
 140. The bounded linker discovers definitions and undefined symbols across
 both, applies the external `_start`→`answer` and same-object
-`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 384 code bytes in the
+`answer`→`adjust` plus `adjust`→`combine` `R_AARCH64_CALL26` relocations, and emits 444 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
 `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
 `adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the three-element direct-call arrays also
@@ -165,8 +167,8 @@ without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
-unproved variable offset from a known-bounded local array, pointer-minus-scalar, duplicate
-functions/parameters, and more than two parameters or call arguments
+unproved variable offset from a known-bounded local array, pointer-minus-scalar,
+duplicate functions/parameters, a fourth function, and more than two parameters or call arguments
 are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
@@ -184,7 +186,7 @@ has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
-blocks, more than two functions per translation unit, general object
+blocks, more than three functions per translation unit, general object
 count/relocation repertoire, or build driver. It is not a
 full C/Rust compiler, general linker, build system, debugger, or end-to-end
 in-guest OS build.
