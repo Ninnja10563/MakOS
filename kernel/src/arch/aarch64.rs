@@ -1846,6 +1846,7 @@ extern "C" fn aarch64_exception_dispatch(kind: u64, frame: *mut ExceptionFrame) 
     let immediate = frame.esr & 0xffff;
     if kind == 8 && exception_class == 0x15 {
         handle_svc(frame);
+        let _ = crate::aarch64_process::stop_remote_group_member_on_el0_return(frame);
         return;
     }
     let fault_status = frame.esr & 0x3f;
@@ -1859,6 +1860,7 @@ extern "C" fn aarch64_exception_dispatch(kind: u64, frame: *mut ExceptionFrame) 
             exception_class == 0x20,
         )
     {
+        let _ = crate::aarch64_process::stop_remote_group_member_on_el0_return(frame);
         return;
     }
     if matches!(kind, 0 | 4 | 8 | 12) && exception_class == 0x3c && immediate == BRK_SELF_TEST {
@@ -2985,6 +2987,10 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             return;
         }
         SYS_YIELD => {
+            if crate::aarch64_process::hold_smp_exit_group_probe_in_el1(frame.registers[0]) {
+                frame.registers[0] = 0;
+                return;
+            }
             crate::aarch64_virtio_input::poll();
             crate::graphics::service_deferred_actions();
             frame.registers[0] = 0;
@@ -5496,6 +5502,11 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
         } else if cpu_index() == 0 {
             crate::aarch64_process::service_timer_waiters();
         }
+    }
+    if kind == 9 {
+        // Close the publication race where this IRQ entered from EL0 just
+        // before CPU0 installed the remote-stop target mask.
+        let _ = crate::aarch64_process::stop_remote_group_member_from_irq(frame);
     }
 }
 

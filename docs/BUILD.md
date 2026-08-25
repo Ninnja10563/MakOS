@@ -132,6 +132,14 @@ redispatch, send an SGI, detach the AP1 task on AP1, switch that PE to the
 kernel root, and report matching `stopped_cpu_mask=0x2`/`ack_mask=0x2` before
 reaping. The marker also requires one shared-root reap and balanced frames.
 
+A second teardown fixture places AP1 inside the real yield SVC before its CPU0
+leader invokes syscall 119 with status 56. The bounded boot-probe rendezvous
+must report `entered_el1_mask=0x2`; the safe EL0-return boundary must detach the
+worker, switch to the kernel root, and report
+`deferred_ack_mask=0x2` together with matching target/ack masks. This also
+guards the race where an exception entered scheduling just before publication.
+Normal yield behavior is unchanged outside the armed boot fixture.
+
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that
 data memory type for an ELF entry would fault immediately after

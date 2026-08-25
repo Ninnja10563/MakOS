@@ -46,6 +46,19 @@ and shared-resource handling. Runtime requires target/ack masks `0x2`, absent
 worker state, one status-55 leader zombie, single address-space reap, and exact
 frame recovery.
 
+A fourth fixture proves the safe-return case for a sibling already executing
+in EL1. Its AP1 worker enters the real yield syscall; an armed boot-probe hook
+publishes a user-visible release flag only after EL1 entry and holds that
+syscall until CPU0 publishes `exit_group(56)`. The normal yield ABI is
+unchanged outside this bounded probe. SVC and resolved page-fault returns now
+recheck the stop contract before EL0 return. The AP detaches under the
+scheduler lock, switches to the kernel root, rewrites the outer exception
+frame, executes a `DSB`, and then acknowledges. An exception that entered the
+scheduler just before publication uses the same locked boundary and contributes
+an early-stop bit to the exact target/ack contract. Runtime requires
+`entered_el1_mask=0x2`, `deferred_ack_mask=0x2`, target/ack masks `0x2`, status
+56, single address-space reap, and exact frame recovery.
+
 The offline scheduler foundation adds:
 
 - `ProcessTable::*_on(cpu, ...)` transitions with one current task per CPU and
@@ -71,11 +84,12 @@ safe general process migration.
   also returns to its calling CPU's kernel record when no local successor
   exists. Input no-successor behavior and device-triggered I/O still need
   runtime coverage.
-- CPU0-initiated `exit_group` now stops and acknowledges a remote-running EL0
-  sibling before reap. Teardown of a sibling interrupted in an EL1 critical
-  section needs a deferred-return acknowledgement, and simultaneous unrelated
-  group exits still need serialization without deadlock. Administrative
-  `terminate` correctly continues to reject a task owned by another CPU.
+- CPU0-initiated `exit_group` now stops and acknowledges both a remote-running
+  EL0 sibling and a sibling inside a returning SVC/page-fault EL1 path before
+  reap. Simultaneous unrelated group exits still need serialization without
+  deadlock, and a permanently non-returning EL1 driver path would require a
+  cancellable safe point. Administrative `terminate` correctly continues to
+  reject a task owned by another CPU.
 - AP banked virtual-timer PPI enable/programming and CPU0-only global tick/device
   servicing pass the bounded probe. General AP syscalls still require a complete
   device/service ownership audit.

@@ -39,6 +39,7 @@ for token in (
     "user_stack_pointer_valid_in(context.ttbr0, context.sp_el0)",
     "pub(crate) fn send_scheduler_ipi()",
     "stop_remote_group_member_from_irq(frame)",
+    "stop_remote_group_member_on_el0_return(frame)",
 ):
     assert token in ARCH, token
 
@@ -73,8 +74,14 @@ for token in (
     "MAKOS_AARCH64_SMP_IPC_OK",
     "REMOTE_GROUP_STOP_TARGET_MASK",
     "REMOTE_GROUP_STOP_ACK_MASK",
+    "REMOTE_GROUP_STOP_EARLY_MASK",
     "pub fn run_smp_exit_group_self_test()",
     "MAKOS_AARCH64_SMP_EXIT_GROUP_OK",
+    "SMP_PROBE_EL1_ENTER_MASK",
+    "SMP_PROBE_GROUP_STOP_DEFERRED_MASK",
+    "hold_smp_exit_group_probe_in_el1",
+    "pub fn run_smp_exit_group_el1_self_test()",
+    "MAKOS_AARCH64_SMP_EXIT_GROUP_EL1_OK",
     "return_to_kernel(frame, 0)",
     "statuses != [40, 41, 42, 43]",
     "peak != 0b1111",

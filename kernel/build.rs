@@ -25,6 +25,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_smp_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_ipc_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_exit_group_probe.S");
+    println!("cargo:rerun-if-changed=../user/aarch64_smp_exit_group_el1_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_textedit.c");
     println!("cargo:rerun-if-changed=../user/aarch64_browser.c");
     println!("cargo:rerun-if-changed=../user/aarch64_files.c");
@@ -319,6 +320,46 @@ fn build_aarch64_init() {
     assert!(
         status.success(),
         "AArch64 SMP exit-group userspace probe link failed"
+    );
+
+    let smp_exit_group_el1_probe_object =
+        output_dir.join("aarch64-smp-exit-group-el1-probe.o");
+    let smp_exit_group_el1_probe_output =
+        output_dir.join("aarch64-smp-exit-group-el1-probe.elf");
+    let status = Command::new("clang")
+        .args([
+            "-target",
+            "aarch64-unknown-none-elf",
+            "-ffreestanding",
+            "-c",
+        ])
+        .arg(manifest.join("../user/aarch64_smp_exit_group_el1_probe.S"))
+        .arg("-o")
+        .arg(&smp_exit_group_el1_probe_object)
+        .status()
+        .expect("failed to compile AArch64 SMP EL1 exit-group userspace probe");
+    assert!(
+        status.success(),
+        "AArch64 SMP EL1 exit-group userspace probe compile failed"
+    );
+    let status = Command::new(rust_lld())
+        .args([
+            "-flavor",
+            "gnu",
+            "--build-id=none",
+            "-z",
+            "max-page-size=4096",
+            "-T",
+        ])
+        .arg(manifest.join("../user/linker-aarch64.ld"))
+        .arg("-o")
+        .arg(&smp_exit_group_el1_probe_output)
+        .arg(&smp_exit_group_el1_probe_object)
+        .status()
+        .expect("failed to link AArch64 SMP EL1 exit-group userspace probe");
+    assert!(
+        status.success(),
+        "AArch64 SMP EL1 exit-group userspace probe link failed"
     );
 
     let browser_object = output_dir.join("aarch64-browser.o");

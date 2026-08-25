@@ -29,11 +29,18 @@ Last updated: 2026-08-25.
   exclusion, sends a GICv2 SGI, detaches the worker on AP1, switches AP1 off
   the shared TTBR0, and receives acknowledgement mask `0x2` before worker reap;
   status 55, single-root cleanup, frame balance, and subsequent login pass.
+  A fourth fixture holds the AP1 worker inside its real yield SVC after a
+  release-ordered EL1-entry publication. CPU0 exits the group with status 56;
+  AP1 detaches at the safe outer-exception return, changes to the kernel root,
+  and acknowledges only after the barrier. Runtime reports matching
+  `entered_el1_mask=0x2`/`deferred_ack_mask=0x2`, target/ack masks `0x2`, exact
+  frame balance, and subsequent login. Scheduler-entry races before target-mask
+  publication are folded into the same locked stop/ack contract.
   The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
   desktop/Firefox AP scheduling remains gated pending input/device-triggered
-  idle returns, in-flight-EL1/concurrent group-exit completion, device affinity
+  idle returns, concurrent group-exit serialization, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.

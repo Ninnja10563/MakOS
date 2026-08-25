@@ -57,6 +57,10 @@ static SMP_EXIT_GROUP_PROBE_ELF: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/aarch64-smp-exit-group-probe.elf"
 ));
+static SMP_EXIT_GROUP_EL1_PROBE_ELF: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/aarch64-smp-exit-group-el1-probe.elf"
+));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -229,8 +233,12 @@ static REMOTE_GROUP_STOP_PID: AtomicU64 = AtomicU64::new(0);
 static REMOTE_GROUP_STOP_STATUS: AtomicU64 = AtomicU64::new(0);
 static REMOTE_GROUP_STOP_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
 static REMOTE_GROUP_STOP_ACK_MASK: AtomicU64 = AtomicU64::new(0);
+static REMOTE_GROUP_STOP_EARLY_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_GROUP_STOP_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_GROUP_STOP_ACK_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_GROUP_STOP_DEFERRED_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_EL1_HOLD_TID: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_EL1_ENTER_MASK: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -718,6 +726,9 @@ pub fn run_smp_exit_group_self_test() {
     SMP_PROBE_RELEASE.store(true, Ordering::Release);
     SMP_PROBE_GROUP_STOP_TARGET_MASK.store(0, Ordering::Release);
     SMP_PROBE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    SMP_PROBE_GROUP_STOP_DEFERRED_MASK.store(0, Ordering::Release);
+    SMP_PROBE_EL1_HOLD_TID.store(0, Ordering::Release);
+    SMP_PROBE_EL1_ENTER_MASK.store(0, Ordering::Release);
     for tid in &SMP_PROBE_AFFINITY {
         tid.store(0, Ordering::Release);
     }
@@ -780,18 +791,117 @@ pub fn run_smp_exit_group_self_test() {
     cleanup_reaped(leader, resource, status);
     let targets = SMP_PROBE_GROUP_STOP_TARGET_MASK.load(Ordering::Acquire);
     let acks = SMP_PROBE_GROUP_STOP_ACK_MASK.load(Ordering::Acquire);
+    let deferred = SMP_PROBE_GROUP_STOP_DEFERRED_MASK.load(Ordering::Acquire);
     if status != 55
         || !child_absent
         || targets != 0b0010
         || acks != targets
+        || deferred != 0
         || crate::mm::free_frames() != free_before
     {
         crate::fatal("AArch64 SMP exit-group userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_EXIT_GROUP_OK caller_cpu=0 stopped_cpu_mask={:#x} ack_mask={:#x} remote_tid={} remote_state=zombie,reaped parent_exit=55 shared_root=single-reap free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
+        "MAKOS_AARCH64_SMP_EXIT_GROUP_OK caller_cpu=0 stopped_cpu_mask={:#x} ack_mask={:#x} deferred_ack_mask={:#x} remote_tid={} remote_state=el0-interrupted,zombie,reaped parent_exit=55 shared_root=single-reap free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
         targets,
         acks,
+        deferred,
+        expected_child,
+    );
+    reset_scheduler();
+}
+
+pub fn run_smp_exit_group_el1_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_GROUP_STOP_TARGET_MASK.store(0, Ordering::Release);
+    SMP_PROBE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    SMP_PROBE_GROUP_STOP_DEFERRED_MASK.store(0, Ordering::Release);
+    SMP_PROBE_EL1_ENTER_MASK.store(0, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let leader = spawn_process(0, SMP_EXIT_GROUP_EL1_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP EL1 exit-group probe spawn failed"))
+        .0;
+    let expected_child = leader.saturating_add(1);
+    SMP_PROBE_AFFINITY[0].store(leader, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(expected_child, Ordering::Release);
+    SMP_PROBE_EL1_HOLD_TID.store(expected_child, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP EL1 exit-group leader absent"));
+        if process.pid != leader {
+            crate::fatal("AArch64 SMP EL1 exit-group leader affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == leader)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP EL1 exit-group leader context absent"))
+            .context
+    });
+    smp_probe_enter(leader);
+    crate::arch::switch_address_space(context.ttbr0);
+    let returned_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if returned_status != 56 {
+        crate::fatal("AArch64 SMP EL1 exit-group caller status invalid");
+    }
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    while SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) != 0 {
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP EL1 exit-group AP return timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+    SMP_PROBE_EL1_HOLD_TID.store(0, Ordering::Release);
+
+    let child_absent = with_state(|state| state.table.get(expected_child).is_none());
+    let (resource, status) = with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, leader)
+        else {
+            crate::fatal("AArch64 SMP EL1 exit-group leader reap failed");
+        };
+        if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == leader) {
+            *slot = ContextSlot::EMPTY;
+        }
+        (resource, exit_status)
+    });
+    cleanup_reaped(leader, resource, status);
+    let targets = SMP_PROBE_GROUP_STOP_TARGET_MASK.load(Ordering::Acquire);
+    let acks = SMP_PROBE_GROUP_STOP_ACK_MASK.load(Ordering::Acquire);
+    let entered = SMP_PROBE_EL1_ENTER_MASK.load(Ordering::Acquire);
+    let deferred = SMP_PROBE_GROUP_STOP_DEFERRED_MASK.load(Ordering::Acquire);
+    if status != 56
+        || !child_absent
+        || targets != 0b0010
+        || acks != targets
+        || entered != targets
+        || deferred != targets
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP EL1 exit-group userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_EXIT_GROUP_EL1_OK caller_cpu=0 stopped_cpu_mask={:#x} ack_mask={:#x} entered_el1_mask={:#x} deferred_ack_mask={:#x} remote_tid={} remote_state=el1-deferred,zombie,reaped parent_exit=56 shared_root=single-reap free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
+        targets,
+        acks,
+        entered,
+        deferred,
         expected_child,
     );
     reset_scheduler();
@@ -3649,17 +3759,18 @@ pub(crate) fn exit_group_from_exception(status: u64, frame: &mut crate::arch::Ex
 }
 
 fn begin_remote_group_stop(group_pid: u64, status: u64) -> u64 {
+    REMOTE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    REMOTE_GROUP_STOP_EARLY_MASK.store(0, Ordering::Release);
+    REMOTE_GROUP_STOP_STATUS.store(status, Ordering::Relaxed);
     if REMOTE_GROUP_STOP_PID
         .compare_exchange(0, group_pid, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
         crate::fatal("AArch64 concurrent exit_group remote stop unsupported");
     }
-    REMOTE_GROUP_STOP_STATUS.store(status, Ordering::Relaxed);
-    REMOTE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
     let caller_cpu = scheduler_cpu();
     let targets = with_state(|state| {
-        let mut targets = 0u64;
+        let mut targets = REMOTE_GROUP_STOP_EARLY_MASK.load(Ordering::Acquire);
         for slot in &state.contexts {
             if slot.pid == 0 || slot.group_pid != group_pid {
                 continue;
@@ -3701,13 +3812,66 @@ fn finish_remote_group_stop(group_pid: u64) {
     }
     REMOTE_GROUP_STOP_TARGET_MASK.store(0, Ordering::Release);
     REMOTE_GROUP_STOP_ACK_MASK.store(0, Ordering::Release);
+    REMOTE_GROUP_STOP_EARLY_MASK.store(0, Ordering::Release);
     REMOTE_GROUP_STOP_STATUS.store(0, Ordering::Relaxed);
     REMOTE_GROUP_STOP_PID.store(0, Ordering::Release);
+}
+
+/// Deterministically holds the boot-only AP1 teardown fixture inside its yield
+/// syscall until CPU0 has published a remote group-stop request. Normal tasks
+/// and every unarmed SMP phase retain the ordinary yield behavior.
+pub(crate) fn hold_smp_exit_group_probe_in_el1(flag_address: u64) -> bool {
+    let cpu = scheduler_cpu();
+    let expected_tid = SMP_PROBE_EL1_HOLD_TID.load(Ordering::Acquire);
+    if expected_tid == 0 || cpu >= 64 {
+        return false;
+    }
+    let group_pid = with_state(|state| {
+        let tid = state.table.current_pid_on(cpu)?;
+        let slot = state.contexts.iter().find(|slot| slot.pid == tid)?;
+        (tid == expected_tid && slot.role == ProcessRole::SmpProbe).then_some(slot.group_pid)
+    });
+    let Some(group_pid) = group_pid else {
+        return false;
+    };
+    if flag_address & 3 != 0 || !crate::arch::user_range_writable(flag_address, 4) {
+        crate::fatal("AArch64 SMP EL1 exit-group flag invalid");
+    }
+    unsafe {
+        asm!(
+            "stlr {value:w}, [{address}]",
+            value = in(reg) 1u32,
+            address = in(reg) flag_address,
+            options(nostack),
+        )
+    };
+    let bit = 1u64 << cpu;
+    SMP_PROBE_EL1_ENTER_MASK.fetch_or(bit, Ordering::AcqRel);
+    let deadline = crate::arch::counter_deadline_millis(20_000);
+    while REMOTE_GROUP_STOP_PID.load(Ordering::Acquire) != group_pid
+        || REMOTE_GROUP_STOP_TARGET_MASK.load(Ordering::Acquire) & bit == 0
+    {
+        if crate::arch::counter_deadline_expired(deadline) {
+            crate::fatal("AArch64 SMP EL1 exit-group rendezvous timeout");
+        }
+        core::hint::spin_loop();
+    }
+    true
 }
 
 pub(crate) fn stop_remote_group_member_from_irq(
     frame: &mut crate::arch::ExceptionFrame,
 ) -> bool {
+    stop_remote_group_member(frame, false)
+}
+
+pub(crate) fn stop_remote_group_member_on_el0_return(
+    frame: &mut crate::arch::ExceptionFrame,
+) -> bool {
+    stop_remote_group_member(frame, true)
+}
+
+fn stop_remote_group_member(frame: &mut crate::arch::ExceptionFrame, deferred: bool) -> bool {
     let cpu = scheduler_cpu();
     let bit = 1u64 << cpu;
     if REMOTE_GROUP_STOP_TARGET_MASK.load(Ordering::Acquire) & bit == 0 {
@@ -3715,22 +3879,41 @@ pub(crate) fn stop_remote_group_member_from_irq(
     }
     let group_pid = REMOTE_GROUP_STOP_PID.load(Ordering::Acquire);
     let status = REMOTE_GROUP_STOP_STATUS.load(Ordering::Relaxed);
-    let stopped = with_state(|state| {
-        let tid = state.table.current_pid_on(cpu)?;
-        let slot = state.contexts.iter().find(|slot| slot.pid == tid)?;
-        if slot.group_pid != group_pid {
-            return None;
+    let (stopped, safe) = with_state(|state| {
+        let current = state.table.current_pid_on(cpu);
+        let current_is_target = current.is_some_and(|tid| {
+            state
+                .contexts
+                .iter()
+                .find(|slot| slot.pid == tid)
+                .is_some_and(|slot| slot.group_pid == group_pid)
+        });
+        if current_is_target {
+            return (
+                state.table.exit_current_on(cpu, status).is_some(),
+                true,
+            );
         }
-        state.table.exit_current_on(cpu, status).map(|_| tid)
+        let target_still_running_here = state.contexts.iter().any(|slot| {
+            slot.pid != 0
+                && slot.group_pid == group_pid
+                && state.table.running_cpu(slot.pid) == Some(cpu)
+        });
+        (false, !target_still_running_here)
     });
-    let Some(_tid) = stopped else {
+    if !safe {
         return false;
-    };
-    crate::arch::switch_address_space(crate::arch::kernel_root());
-    crate::arch::return_to_kernel(frame, status);
+    }
+    if stopped {
+        crate::arch::switch_address_space(crate::arch::kernel_root());
+        crate::arch::return_to_kernel(frame, status);
+        if deferred {
+            SMP_PROBE_GROUP_STOP_DEFERRED_MASK.fetch_or(bit, Ordering::AcqRel);
+        }
+    }
     unsafe { asm!("dsb ish", options(nostack)) };
     REMOTE_GROUP_STOP_ACK_MASK.fetch_or(bit, Ordering::AcqRel);
-    true
+    stopped
 }
 
 fn exit_thread_from_exception(status: u64, frame: &mut crate::arch::ExceptionFrame) {
@@ -3878,9 +4061,9 @@ fn select_surface_priority(
 fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool) {
     let cpu = scheduler_cpu();
     let captured = crate::arch::UserContext::capture(frame);
-    let (prior_pid, next) = with_state(|state| {
+    let (prior_pid, next, remote_stopped) = with_state(|state| {
         if !state.session_active {
-            return (0, None);
+            return (0, None, false);
         }
         let prior_pid = state
             .table
@@ -3892,6 +4075,28 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             .find(|slot| slot.pid == prior_pid)
             .unwrap_or_else(|| crate::fatal("AArch64 current context absent"));
         prior.context = captured;
+        let stopping_group = REMOTE_GROUP_STOP_PID.load(Ordering::Acquire);
+        if stopping_group != 0 && prior.group_pid == stopping_group {
+            state
+                .table
+                .exit_current_on(cpu, REMOTE_GROUP_STOP_STATUS.load(Ordering::Relaxed))
+                .unwrap_or_else(|| crate::fatal("AArch64 scheduler remote-stop transition failed"));
+            // This happens while holding the same scheduler lock used to
+            // calculate the target mask. If CPU0 has not published the mask
+            // yet, it will subsequently observe no remote owner. If it has,
+            // acknowledge only after the hardware root and return frame are
+            // private, all before releasing the lock.
+            crate::arch::switch_address_space(crate::arch::kernel_root());
+            crate::arch::return_to_kernel(
+                frame,
+                REMOTE_GROUP_STOP_STATUS.load(Ordering::Relaxed),
+            );
+            unsafe { asm!("dsb ish", options(nostack)) };
+            let bit = 1u64 << cpu;
+            REMOTE_GROUP_STOP_EARLY_MASK.fetch_or(bit, Ordering::AcqRel);
+            REMOTE_GROUP_STOP_ACK_MASK.fetch_or(bit, Ordering::AcqRel);
+            return (prior_pid, None, true);
+        }
         let priority = if cpu == 0 {
             select_surface_priority(state, prior_pid)
         } else {
@@ -3912,8 +4117,12 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
         (
             prior_pid,
             Some((next.pid, state.contexts[index].context, priority.is_some())),
+            false,
         )
     });
+    if remote_stopped {
+        return;
+    }
     let Some((next_pid, context, surface_priority)) = next else {
         return;
     };
