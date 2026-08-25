@@ -123,6 +123,10 @@ also supply the offset for an unknown-bound pointer; codegen uses signed
 `SXTW #2`, and guest execution proves both positive offsets and `-1`. Known
 local-array/derived-pointer bounds reject one-past-end constants and all
 variable offsets whose range this compiler cannot prove.
+Subtracting one typed `int *` expression from another emits a 64-bit `SUB`
+followed by arithmetic shift-right two, producing a signed element count as
+the subset's 32-bit `int`. The caller remains responsible for C's same-array
+provenance rule; the compiler rejects pointer-minus-scalar syntax.
 Fixed local `int` arrays accept one to four exactly supplied initializer
 expressions, subject to the shared four-slot frame limit. Constant indices are
 bounded to 0..3 and known local-array indices are checked against the declared
@@ -138,28 +142,30 @@ then calls `adjust(values + 1, 1)` when element zero is at least 40; otherwise i
 returns 86. `adjust(int *pointer, int delta)` accepts its pointer in AAPCS64
 `x0` and delta in `w1`, preserves them in `x23`/`w24`, derives
 `next = pointer + delta`, adds delta to element zero,
-then uses `while (count < delta)` and `*(pointer + delta)` to store through the
+computes `distance = next - pointer`, then uses `while (count < distance)` and
+`*(pointer + delta)` to store through the
 dynamically derived address and advance the counter. Its return reloads through
-`next`. The compiler emits 140-byte `answer` and 152-byte `adjust` definitions in a
-single 292-byte `.text` and a 904-byte
+`next`. The compiler emits 140-byte `answer` and 168-byte `adjust` definitions in a
+single 308-byte `.text` and a 920-byte
 `generated-program.o`; the assembler emits 76 code bytes in the 688-byte
 `generated-main.o`. Both genuine ELF64 `ET_REL` files persist/reopen. The C
 object's symbol table defines `answer` at offset zero and `adjust` at offset
 140. The bounded linker discovers definitions and undefined symbols across
 both, applies the external `_start`→`answer` and same-object
-`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 368 code bytes in the
+`answer`→`adjust` `R_AARCH64_CALL26` relocations, and emits 384 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
 `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
 `adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the three-element direct-call arrays also
 required to become `41:42:0`, `42:0:44`, and `1:2:0`. Separate RX probes cover
-all four signed ordering relations and load 42 through `pointer + -1`. Invalid
+all four signed ordering relations, load 42 through `pointer + -1`, and return
+signed pointer differences of `3` and `-3`. Invalid
 relocation type/addend/site, unresolved `adjust`, and duplicate `answer` inputs
 are denied, as are unsupported division, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
-unproved variable offset from a known-bounded local array, duplicate
+unproved variable offset from a known-bounded local array, pointer-minus-scalar, duplicate
 functions/parameters, and more than two parameters or call arguments
 are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
@@ -175,7 +181,8 @@ make test-aarch64-selfhost-runtime
 
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element
-addition, no pointer differences, variable-length/global/multidimensional arrays,
+addition and typed pointer difference, no pointer-provenance analysis or
+broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
 blocks, more than two functions per translation unit, general object
 count/relocation repertoire, or build driver. It is not a

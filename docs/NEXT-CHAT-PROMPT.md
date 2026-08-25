@@ -22,8 +22,9 @@ one or two independently typed `int`/`int *` parameters and call arguments in
 AAPCS64 x0/x1, fixed local `int` arrays, checked constant indexing, array decay,
 bounded scaled `pointer-or-array + constant-or-scalar` expressions in pointer
 initializers/calls, signed `SXTW #2` dynamic offsets, parenthesized
-derived-pointer loads/stores, known-bound one-past-end/unproved-variable
-rejection, and a same-object `adjust(values + 1, 1)` call that
+derived-pointer loads/stores, typed signed pointer difference, known-bound
+one-past-end/unproved-variable and pointer-minus-scalar rejection, and a
+same-object `adjust(values + 1, 1)` call that
 mutates caller-owned array elements using its second parameter. It
 compiles `answer` and later-defined `adjust` from one C translation unit into
 one multi-definition object and persists/reopens two genuine ELF64 `ET_REL`
@@ -31,20 +32,20 @@ objects total. Its bounded linker resolves external `_start`→`answer` and
 same-object `answer`→`adjust`,
 applies two `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol and duplicate-definition inputs, rejects duplicate/over-limit
-parameters and over-limit calls, emits 368 linked bytes in an 815-byte `ET_EXEC`,
+parameters and over-limit calls, emits 384 linked bytes in an 815-byte `ET_EXEC`,
 executes both linked branch paths plus direct delta-1/delta-2 loop, exact
 indexed-array outcomes (`41:42:0`, `42:0:44`, and `1:2:0`), all four signed
-ordering relations, and a `pointer + -1` load,
+ordering relations, a `pointer + -1` load, and pointer differences `3`/`-3`,
 and runs the final
 ELF twice with status 42 in focused Pi/QEMU TCG runtime.
 Full unit/check and release artifact checks pass. This remains a bounded compiler
 seed, not a general C toolchain or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 432919, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-relational-pointer-final-4x5uh1Ey`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 445551, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-pointer-difference-final-NM4U3tiN`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-relational-pointer-final-4x5uh1Ey/qmp.sock`. Stop it through QMP before
+`build/makos-pi-visible-selfhost-pointer-difference-final-NM4U3tiN/qmp.sock`. Stop it through QMP before
 any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when

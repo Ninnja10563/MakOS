@@ -326,8 +326,9 @@ static size_t assemble(const char *source, size_t source_length,
  * parentheses, left-associative *, +, and -, address-of and dereference of
  * bounded local pointers or the pointer parameter, checked fixed-array
  * indexing, constant- or scalar-variable-element pointer addition in pointer
- * initializers/calls and parenthesized dereferences, signed relational
- * conditions, and a bounded one- or two-argument external call with
+ * initializers/calls and parenthesized dereferences, typed pointer subtraction
+ * in int elements, signed relational conditions, and a bounded one- or
+ * two-argument external call with
  * array-to-pointer decay.  Functions take one or two typed integer or pointer
  * parameters in AAPCS64 x0/x1.  The output follows AAPCS64,
  * including a non-leaf save frame, and is wrapped in a genuine ELF64 ET_REL
@@ -734,6 +735,27 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         relocation->offset = compiler->output;
         ++*compiler->relocation_count;
         return c_emit(compiler, UINT32_C(0x94000000));
+    }
+    uint32_t left_pointer = 0, left_bound = 0;
+    if (c_pointer_info(compiler, identifier, identifier_length,
+                       &left_pointer, &left_bound)) {
+        if (compiler->cursor == compiler->source_length ||
+            compiler->source[compiler->cursor] != '-')
+            return 0;
+        ++compiler->cursor;
+        char right_name[MAX_LABEL_BYTES] = {0};
+        size_t right_name_length = 0;
+        uint32_t right_pointer = 0, right_bound = 0;
+        if (!c_identifier(compiler, right_name, &right_name_length) ||
+            !c_pointer_info(compiler, right_name, right_name_length,
+                            &right_pointer, &right_bound) ||
+            !c_emit(compiler, UINT32_C(0xcb000000) |
+                              (right_pointer << 16) |
+                              (left_pointer << 5) | destination) ||
+            !c_emit(compiler, UINT32_C(0x9342fc00) |
+                              (destination << 5) | destination))
+            return 0;
+        return 1;
     }
     uint32_t source_register = 0;
     struct c_local *local = 0;
@@ -1783,8 +1805,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int adjust(int *pointer, int delta) {\n"
         "    int *next = pointer + delta;\n"
         "    pointer[0] = pointer[0] + delta;\n"
+        "    int distance = next - pointer;\n"
         "    int count = 0;\n"
-        "    while (count < delta) {\n"
+        "    while (count < distance) {\n"
         "        *(pointer + delta) = pointer[0] + count + 1;\n"
         "        count = count + 1;\n"
         "    }\n"
@@ -1812,6 +1835,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int answer(int value) { int values[2] = { value, 0 }; int *outside = values + 2; return *outside; }\n";
     static const char malformed_bounded_variable_add_source[] =
         "int answer(int value) { int values[2] = { value, 0 }; int offset = 1; int *unknown = values + offset; return *unknown; }\n";
+    static const char malformed_pointer_scalar_subtract_source[] =
+        "int difference(int *pointer, int delta) { return pointer - delta; }\n";
     static const char malformed_duplicate_function_source[] =
         "int answer(int value) { return value; } int answer(int value) { return value; }\n";
     static const char malformed_duplicate_parameter_source[] =
@@ -1826,6 +1851,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "int at_most(int value) { if (value <= 5) { return 42; } return 0; }\n";
     static const char signed_pointer_offset_source[] =
         "int previous(int *pointer, int offset) { int *item = pointer + offset; return *item; }\n";
+    static const char pointer_difference_source[] =
+        "int distance(int *end, int *begin) { int count = end - begin; return count; }\n";
     static const char jit_source[] = "mov x0, #42\nret\n";
     static const char marker[] =
         "MAKOS_AARCH64_LINKER_OK sources=2 languages=aarch64-asm,c-subset-v1 "
@@ -1834,12 +1861,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         "symbols=_start,answer,adjust output=/home/user/generated-aarch64.elf "
         "c_source=/home/user/generated-program.c translation_unit_functions=2 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
+        "c_features=multi-function,multi-parameter,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=2 max_call_arguments=2 nonleaf_frame=96 c_operators=mul,sub,add c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
-        "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-        "code_bytes=76,140,152 object_bytes=688,904 intra_object_call=1 linked_bytes=368 output_bytes=815 "
-        "persisted_reopened=1 malformed_c_denied=15 "
+        "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
+        "code_bytes=76,140,168 object_bytes=688,920 intra_object_call=1 linked_bytes=384 output_bytes=815 "
+        "persisted_reopened=1 malformed_c_denied=16 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -1939,6 +1966,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
     malformed_function_length = 0;
+    if (compile_c(malformed_pointer_scalar_subtract_source,
+                  sizeof(malformed_pointer_scalar_subtract_source) - 1,
+                  malformed_code, sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
+    malformed_function_length = 0;
     if (compile_c(malformed_duplicate_parameter_source,
                   sizeof(malformed_duplicate_parameter_source) - 1,
                   malformed_code, sizeof(malformed_code), malformed_function,
@@ -1971,7 +2004,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         (const char *)program_input, program_source_length, program_code,
         sizeof(program_code), program_definitions, &program_definition_count,
         program_relocations, &program_relocation_count);
-    if (main_code_length != 76 || program_code_length != 292 ||
+    if (main_code_length != 76 || program_code_length != 308 ||
         program_definition_count != 2 ||
         !same_name(program_definitions[0].name,
                    program_definitions[0].length, "answer", 6) ||
@@ -1980,7 +2013,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         !same_name(program_definitions[1].name,
                    program_definitions[1].length, "adjust", 6) ||
         program_definitions[1].offset != 140 ||
-        program_definitions[1].size != 152 ||
+        program_definitions[1].size != 168 ||
         main_relocation_count != 1 || main_relocations[0].offset != 52 ||
         program_relocation_count != 1 ||
         program_relocations[0].offset != 92 ||
@@ -2007,9 +2040,15 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         signed_pointer_offset_source, sizeof(signed_pointer_offset_source) - 1,
         relational_jit + 256, 128, relational_function,
         &relational_function_length, 0, 0);
+    relational_function_length = 0;
+    size_t distance_length = compile_c(
+        pointer_difference_source, sizeof(pointer_difference_source) - 1,
+        relational_jit + 384, 128, relational_function,
+        &relational_function_length, 0, 0);
     if (!greater_length || greater_length > 128 ||
         !at_most_length || at_most_length > 128 ||
         !previous_length || previous_length > 128 ||
+        !distance_length || distance_length > 128 ||
         syscall4(SYS_VM_PROTECT, (uintptr_t)relational_jit,
                  PROT_READ | PROT_WRITE | PROT_EXEC, 0, 0) != 0 ||
         syscall4(SYS_VM_PROTECT, (uintptr_t)relational_jit,
@@ -2021,10 +2060,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         (uint64_t (*)(uint64_t))(uintptr_t)(relational_jit + 128);
     uint64_t (*compiled_previous)(uint32_t *, uint64_t) =
         (uint64_t (*)(uint32_t *, uint64_t))(uintptr_t)(relational_jit + 256);
+    uint64_t (*compiled_distance)(uint32_t *, uint32_t *) =
+        (uint64_t (*)(uint32_t *, uint32_t *))(uintptr_t)(relational_jit + 384);
     uint32_t previous_values[2] = {42, 7};
+    uint32_t distance_values[4] = {0, 0, 0, 0};
     if (compiled_greater(6) != 42 || compiled_greater(5) != 0 ||
         compiled_at_most(5) != 42 || compiled_at_most(6) != 0 ||
-        compiled_previous(previous_values + 1, UINT32_MAX) != 42)
+        compiled_previous(previous_values + 1, UINT32_MAX) != 42 ||
+        compiled_distance(distance_values + 3, distance_values) != 3 ||
+        (uint32_t)compiled_distance(distance_values, distance_values + 3) !=
+            UINT32_MAX - 2)
         fail(83);
 
     uint8_t *jit = (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -2055,7 +2100,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         program_object, program_code, program_code_length,
         program_definitions, program_definition_count, program_relocations,
         program_relocation_count);
-    if (main_object_length != 688 || program_object_length != 904 ||
+    if (main_object_length != 688 || program_object_length != 920 ||
         !write_file(main_object_path, sizeof(main_object_path) - 1,
                     main_object, main_object_length) ||
         !write_file(program_object_path, sizeof(program_object_path) - 1,
@@ -2106,7 +2151,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
                    "adjust") ||
         get16(program_object, adjust_symbol + 6) != 1 ||
         get64(program_object, adjust_symbol + 8) != 140 ||
-        get64(program_object, adjust_symbol + 16) != 152)
+        get64(program_object, adjust_symbol + 16) != 168)
         fail(88);
     put16(program_object, adjust_symbol + 6, 0);
     put64(program_object, adjust_symbol + 8, 0);
@@ -2116,7 +2161,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
         fail(88);
     put16(program_object, adjust_symbol + 6, 1);
     put64(program_object, adjust_symbol + 8, 140);
-    put64(program_object, adjust_symbol + 16, 152);
+    put64(program_object, adjust_symbol + 16, 168);
     const uint8_t *duplicate_objects[MAX_LINK_OBJECTS] = {
         main_object, program_object, program_object,
     };
@@ -2129,7 +2174,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(void) {
     size_t linked_length = link_objects(objects, object_lengths, 2, linked_code,
                                         sizeof(linked_code), "_start",
                                         &entry_offset);
-    if (linked_length != 368 || entry_offset != 0) fail(89);
+    if (linked_length != 384 || entry_offset != 0) fail(89);
 
     uint8_t *compiled_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);

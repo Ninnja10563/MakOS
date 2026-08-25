@@ -82,6 +82,10 @@ Constant pointer addition emits a 64-bit address `ADD` and scales an accepted
 0..3 element offset by four. An `int` parameter or non-address-taken scalar
 local may offset an unknown-bound pointer through signed `SXTW #2`; known bounds
 reject one-past-end constants and unproved variable offsets.
+`int *left - int *right` produces the signed element distance by subtracting
+the 64-bit addresses and arithmetic-shifting by two. The result is the subset's
+32-bit `int`; callers must satisfy C's same-array provenance requirement, and
+pointer-minus-scalar is rejected.
 A final unconditional return is required.
 Fixed local `int` arrays may contain one to four exactly initialized elements
 within the same four-slot frame budget. The compiler supports constant indexed
@@ -112,7 +116,8 @@ this seed cannot yet prove their range. Conditions accept signed `==`, `!=`,
 `pointer + -1` load.
 
 This seed has no general pointer arithmetic beyond constant/scalar-variable
-element addition, pointer differences, variable-length/global/multidimensional
+element addition and typed pointer difference, no pointer-provenance analysis
+or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
 nested/general blocks, more than two functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,

@@ -205,16 +205,18 @@ Last updated: 2026-08-25.
   96-byte frame. Up to two arguments use AAPCS64 `x0`/`x1` (`w0`/`w1` for
   integers) and are preserved in x23/x24. The current linked call invokes
   `adjust(values + 1, 1)`; `adjust(int *pointer, int delta)` derives
-  `next = pointer + delta`, updates element zero, loops while `count < delta`,
+  `next = pointer + delta`, computes the signed element count
+  `distance = next - pointer` through 64-bit `SUB`/arithmetic shift-right two,
+  updates element zero, loops while `count < distance`,
   and stores through `*(pointer + delta)`. The compiler concatenates a 140-byte
-  `answer` and 152-byte `adjust` into one 292-byte `.text` with two defined
-  symbols in a 904-byte ELF64 `ET_REL`; the
+  `answer` and 168-byte `adjust` into one 308-byte `.text` with two defined
+  symbols in a 920-byte ELF64 `ET_REL`; the
   assembler produces 76 bytes in a 688-byte
   object. Both persist and reopen. The bounded general linker concatenates up
   to three objects, discovers global definitions/undefined symbols, resolves
   relocations against either same-object definitions or external symbols,
   applies validated `R_AARCH64_CALL26` relocations
-  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 368 code
+  (`_start`→`answer` externally and `answer`→`adjust` internally), and emits 384 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
   and duplicate `answer` definitions. Duplicate parameter names, more than two
@@ -223,13 +225,14 @@ Last updated: 2026-08-25.
   assignment to an undefined variable, address-of an undefined local, and
   untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
   known two-element array at index two, deriving `values + 2` or a variable
-  offset from that known array, and duplicate functions in one
+  offset from that known array, pointer-minus-scalar, and duplicate functions in one
   translation unit also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
   `adjust(forty,1)=42`, `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; the latter
   three also prove the arrays change to `41:42:0`, `42:0:44`, and `1:2:0`.
   Separate RX probes exercise all four signed ordering relations and prove a
-  `pointer + -1` load returns 42. The linked `answer`→`adjust` call passes the
+  `pointer + -1` load returns 42 plus pointer differences of `3` and `-3`.
+  Same-array provenance remains a caller obligation. The linked `answer`→`adjust` call passes the
   stack-backed `values[3] + 1` address, so its same-object call result requires
   real relocation, scaled pointer addition, and callee loads/stores into the
   final two elements of caller-owned memory. Focused
@@ -848,10 +851,12 @@ Last updated: 2026-08-25.
   mutations, known one-past-end denial, and both final-ELF executions. The
   latest focused run adds signed scalar-variable element offsets and all four
   signed ordering relations: it proves two dynamic positive additions, a
-  `SXTW #2` negative-one load, three exact three-element mutations, fifteen
+  `SXTW #2` negative-one load, three exact three-element mutations, all four
+  signed relations, then signed pointer differences of `3`/`-3` used directly
+  and by the linked program. Sixteen
   malformed-C denials, persistence/reopen and both status-42 final-ELF
-  executions. Its exact artifacts are 76/140/152 code bytes, 688/904 object
-  bytes, 368 linked bytes and an 815-byte ELF. A fresh private TCG boot then
+  executions. Its exact artifacts are 76/140/168 code bytes, 688/920 object
+  bytes, 384 linked bytes and an 815-byte ELF. A fresh private TCG boot then
   reached and visibly captured the native 800x600 login dialog. This remains Pi
   functional evidence, not macOS/HVF timing qualification. The
   focused four-vCPU TCG SMP input/network image also
