@@ -27,13 +27,13 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for pushed commit `8c3be72`: PID
-  110844, VNC `127.0.0.1:5901`, session `build/makos-pi-visible-bQVkM0`, private
-  data clone `build/makos-pi-visible-bQVkM0/data.img`, private variables
-  `build/makos-pi-visible-bQVkM0/vars.fd`, QMP
-  `build/makos-pi-visible-bQVkM0/qmp.sock`, serial
-  `build/makos-pi-visible-bQVkM0/serial.log`, and PID file
-  `build/makos-pi-visible-bQVkM0/qemu.pid`. It is the sole QEMU process and
+- Active visible Pi/QEMU 10.0.11 TCG milestone for pushed commit `4c5388c`: PID
+  117838, VNC `127.0.0.1:5901`, session `build/makos-pi-visible-nysliu`, private
+  data clone `build/makos-pi-visible-nysliu/data.img`, private variables
+  `build/makos-pi-visible-nysliu/vars.fd`, QMP
+  `build/makos-pi-visible-nysliu/qmp.sock`, serial
+  `build/makos-pi-visible-nysliu/serial.log`, and PID file
+  `build/makos-pi-visible-nysliu/qemu.pid`. It is the sole QEMU process and
   passes the four-PE EL0 marker, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
   before any later runtime gate.
