@@ -30,6 +30,14 @@ PROCESS_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK"
 RESULT_MARKER = b"MAKOS_AARCH64_PRODUCTION_SMP_OK"
 OVERLAP_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK"
 WATCHER_BLOCKED_MARKER = b"MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK"
+HANDLE_WAITERS_MARKER = (
+    b"MAKOS_AARCH64_INPUT_HANDLE_WAITERS_OK firefox_waiters_at_least=2 "
+    b"routing=exact-handle"
+)
+TARGET_SELECTION_MARKER = b"MAKOS_AARCH64_FIREFOX_INPUT_TARGET_OK"
+TARGET_WAKE_MARKER = (
+    b"MAKOS_AARCH64_INPUT_TARGET_WAKE_OK surface_woken=1 surface_skipped="
+)
 WATCHER_AP_MARKER = b"MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK"
 LEADER_DISPATCH_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK"
 INPUT_PRIORITY_MARKER = b"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK"
@@ -79,6 +87,8 @@ def main() -> int:
     overlap_tids = (0, 0, 0)
     watcher_tid = 0
     watcher_cpu = 0
+    surface_woken = 0
+    surface_skipped = 0
 
     with tempfile.TemporaryDirectory(
         prefix="makos-production-smp-focused-", dir=output_root
@@ -171,7 +181,16 @@ def main() -> int:
                 common.wait_for_output(
                     selector, process, output, WATCHER_BLOCKED_MARKER, 30
                 )
+                common.wait_for_output(
+                    selector, process, output, HANDLE_WAITERS_MARKER, 30
+                )
                 common.send_key(stream, "ctrl-a")
+                common.wait_for_output(
+                    selector, process, output, TARGET_SELECTION_MARKER, 30
+                )
+                common.wait_for_output(
+                    selector, process, output, TARGET_WAKE_MARKER, 30
+                )
                 common.wait_for_output(selector, process, output, WATCHER_AP_MARKER, 30)
                 common.wait_for_output(
                     selector, process, output, LEADER_DISPATCH_MARKER, 30
@@ -235,7 +254,23 @@ def main() -> int:
                     r"source=bounded-handoff affinity=leader-cpu0",
                     decoded,
                 )
-                if not watcher_matches or not priority_matches or not leader_matches:
+                target_matches = re.findall(
+                    r"MAKOS_AARCH64_FIREFOX_INPUT_TARGET_OK tid=(\d+) "
+                    r"handle=(\d+) selection=queued-surface",
+                    decoded,
+                )
+                target_wake_matches = re.findall(
+                    r"MAKOS_AARCH64_INPUT_TARGET_WAKE_OK surface_woken=(\d+) "
+                    r"surface_skipped=(\d+) selection=queued-handle",
+                    decoded,
+                )
+                if (
+                    not watcher_matches
+                    or not priority_matches
+                    or not leader_matches
+                    or not target_matches
+                    or not target_wake_matches
+                ):
                     raise AssertionError("production input-priority fields were malformed")
                 overlap_group, marker_mask, mt1, mt2, mt3 = overlap_matches[-1]
                 if overlap_group != process_matches[-1]:
@@ -243,11 +278,16 @@ def main() -> int:
                 blocked_tid, blocked_group, _blocked_cpu = watcher_matches[-1]
                 priority_tid, priority_cpu = priority_matches[-1]
                 leader_tid = leader_matches[-1]
+                target_tid, target_handle = target_matches[-1]
+                surface_woken, surface_skipped = map(int, target_wake_matches[-1])
                 watcher_tid = int(priority_tid)
                 watcher_cpu = int(priority_cpu)
                 if (
                     blocked_group != process_matches[-1]
-                    or blocked_tid != priority_tid
+                    or target_tid != priority_tid
+                    or int(target_handle) != 7
+                    or surface_woken != 1
+                    or surface_skipped < 1
                     or leader_tid != process_matches[-1]
                     or watcher_tid == int(leader_tid)
                     or watcher_cpu not in (1, 2, 3)
@@ -255,7 +295,7 @@ def main() -> int:
                     raise AssertionError(
                         "Firefox watcher/leader affinity handoff was inconsistent: "
                         f"blocked={watcher_matches[-1]} priority={priority_matches[-1]} "
-                        f"leader={leader_matches[-1]}"
+                        f"target={target_matches[-1]} leader={leader_matches[-1]}"
                     )
                 matches = re.findall(
                     r"MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask=(0x[0-9a-f]+) "
@@ -313,7 +353,9 @@ def main() -> int:
         f"overlap_mask={overlap_mask:#x} overlap_tids={overlap_tids[0]},{overlap_tids[1]},{overlap_tids[2]} "
         f"input_watcher_tid={watcher_tid} input_watcher_cpu={watcher_cpu} "
         "fixture=upstream-musl-pthread role=firefox leader_cpu=0 "
-        "input_priority=watcher-ap,leader-cpu0 key=ctrl-a "
+        "input_priority=watcher-ap,leader-cpu0 key=ctrl-a routing=exact-handle "
+        f"surface_woken={surface_woken} surface_skipped={surface_skipped} "
+        "decoy=blocked-until-destroy "
         "device_mmio_owner=cpu0 ownership=exclusive concurrent=1 block=ap-idle status=42"
     )
     return 0

@@ -36,6 +36,8 @@ set_priority = function_body(PROCESS, "fn set_surface_priority")
 active_priority = function_body(PROCESS, "fn active_surface_priority_tid")
 priority_affinity = function_body(PROCESS, "fn surface_priority_cpu_eligible")
 input_block = function_body(PROCESS, "pub(crate) fn block_current_for_input")
+input_wake = function_body(PROCESS, "pub(crate) fn wake_input_waiters")
+event_ready = function_body(GRAPHICS, "pub fn event_wait_ready")
 futex_wake = function_body(PROCESS, "fn wake_futex_in_state")
 activate_wakes = function_body(PROCESS, "fn activate_futex_wakes")
 dispatch = function_body(ARCH, "fn handle_svc")
@@ -55,7 +57,7 @@ assert "FIREFOX_INPUT_WATCHER_TID.load" in prioritize
 assert prioritize.index("FIREFOX_INPUT_WATCHER_TID.load") < prioritize.index(
     "slot.pid == slot.group_pid"
 )
-assert ".or_else(||" in prioritize
+assert "unwrap_or_else(||" in prioritize
 assert "set_surface_priority(tid)" in prioritize
 assert "saturating_add(SURFACE_PRIORITY_TICKS)" in set_priority
 assert "now > deadline" in active_priority
@@ -75,6 +77,20 @@ assert "set_surface_priority(task.thread)" in activate_wakes
 assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_OK" in activate_wakes
 assert "const SURFACE_PRIORITY_TICKS: u64 = 1_000;" in PROCESS
 assert "FIREFOX_INPUT_WATCHER_TID.store(tid" in PROCESS
+assert "input_wait_handle: u64" in PROCESS
+assert "state.contexts[index].input_wait_handle = surface_handle" in input_block
+assert "crate::graphics::event_wait_ready(handle, owner_pid)" in input_wake
+assert "slot.group_pid != group_pid" in input_wake
+assert "slot.input_wait_handle != handle" in input_wake
+assert "surface_woken" in input_wake and "surface_skipped" in input_wake
+assert "MAKOS_AARCH64_INPUT_TARGET_WAKE_OK" in input_wake
+assert "INPUT_TARGET_WAKE_REPORTED.swap(true" in input_wake
+assert "!surface.created" in event_ready
+assert "surface.owner_pid != owner_pid" in event_ready
+assert "state.surface_event_tails[index] != state.surface_event_heads[index]" in event_ready
+assert "crate::graphics::event_wait_ready(*handle, *owner_pid)" in prioritize
+assert "MAKOS_AARCH64_FIREFOX_INPUT_TARGET_OK" in prioritize
+assert "FIREFOX_INPUT_TARGET_REPORTED.swap(true" in prioritize
 wait_event = dispatch[dispatch.index("SYS_SURFACE_WAIT_EVENT =>") :]
 wait_event = wait_event[: wait_event.index("SYS_SURFACE_BLIT =>")]
 assert "if event.kind == 1" in wait_event
@@ -99,7 +115,7 @@ assert "yields can outpace timer ticks" in PROCESS
 assert INPUT.count("route_surface_key(") == 5  # helper plus 4 keyboard routes
 for token in (
     "production_input_watcher",
-    "makos_call4(140, production_input_surface",
+    "makos_call4(140, surface",
     "event.key != 132",
     "MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK",
 ):
@@ -107,11 +123,17 @@ for token in (
 assert "SessionProcessRole::FirefoxProbe" in PROCESS
 assert "SessionProcessRole::FirefoxProbe" in SECURITY
 assert "CAP_SERVICE_PUBLISH" in SECURITY
-assert "const MAX_SURFACES: usize = 7;" in GRAPHICS
+assert "const MAX_SURFACES: usize = 8;" in GRAPHICS
 assert "const DESKTOP_SURFACES: usize = 6;" in GRAPHICS
 assert "makos_call4(8, 96, 64, 7, 0)" in PTHREAD_PROBE
+assert "makos_call4(8, 96, 64, 8, 0)" in PTHREAD_PROBE
+assert "production_input_decoy_surface" in PTHREAD_PROBE
+assert "decoy=blocked-until-destroy" in PTHREAD_PROBE
 for token in (
     "WATCHER_BLOCKED_MARKER",
+    "HANDLE_WAITERS_MARKER",
+    "TARGET_SELECTION_MARKER",
+    "TARGET_WAKE_MARKER",
     'common.send_key(stream, "ctrl-a")',
     "WATCHER_AP_MARKER",
     "LEADER_DISPATCH_MARKER",
@@ -121,7 +143,7 @@ for token in (
 
 print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_TEST_OK "
-    "trigger=queued-key target=firefox-input-watcher blocked,active=retain-hint fallback=process-leader "
+    "trigger=queued-key target=firefox-input-watcher wait=exact-handle decoy=not-woken blocked,active=retain-hint fallback=process-leader "
     "ready=next-schedule boost=one-shot,stale-deadline handoff=watcher-ap,leader-cpu0,futex-refresh "
     "timer_poll=100hz owner=cpu0 expiry=ticks "
     "fallback=round-robin pointer=unchanged"

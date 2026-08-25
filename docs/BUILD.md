@@ -311,16 +311,19 @@ The kernel's target syscall 148 owns each task's CPU mask. Official-musl patch
 The leader verifies its fixed CPU0 mask; each worker selects and reads back two
 different singleton AP masks, forcing at least one migration, then restores and
 verifies the production AP-pool mask `0xe` before the rendezvous and joins.
-It then creates a real process-owned overflow surface, blocks a non-leader
-pthread in `surface_wait_event`, injects QMP Ctrl-A, and requires that exact
-watcher to dispatch on AP1-3 followed by one leader dispatch on CPU0. Priority
-is one-shot after a successful dispatch; the deadline only expires stale
-hints. The gate also requires an AP CPU mask, nonzero dispatch counters, a
+It then creates two real process-owned overflow surfaces and blocks target and
+decoy pthreads in `surface_wait_event`. Input waits retain their exact handle;
+QMP Ctrl-A must select handle 7, wake exactly that watcher on AP1-3, leave the
+decoy and every unrelated empty-surface waiter blocked, and then dispatch the
+leader once on CPU0. Destroying surface 8 must wake its decoy so the retried
+syscall fails closed and the join completes. Priority is one-shot after a
+successful dispatch; the deadline only expires stale hints. The gate also requires an AP CPU mask, nonzero dispatch counters, a
 simultaneous multi-AP interval with distinct TIDs, exclusive ownership, the
 complete upstream-musl pthread/IPC workload, and status-42 reap. The final
 Raspberry Pi/QEMU 10.0.11 TCG pass records all APs (`cpu_mask=0xe`), live/final
 matching overlap on AP1/AP2 (`overlap_mask=0x6`, TIDs 5/6), watcher TID 8 on
-AP2, and dispatch counts `9867,11100,9833`. The runtime also requires at least
+AP2, dispatch counts `9954,9924,11186`, one targeted wake, and three skipped
+unrelated surface waiters. The runtime also requires at least
 three kernel-recorded affinity changes that exclude the source PE and confirms
 all three workers restore mask `0xe`. AArch64 serial output is protected by an
 IRQ-masked cross-PE lock so these records cannot interleave by byte. This is a

@@ -27,21 +27,24 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG signed-arithmetic self-host milestone: PID
-  630079, user service `makos-visible-selfhost-signed-arithmetic-final2.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG exact-handle Firefox-input milestone: PID
+  651079, user service `makos-visible-firefox-exact-input-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`, private read-only boot
+  `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
   `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and capture `login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `4cbe815d7193b817eabf75d971f02900c57f817ee5357f96ea7fd899a60333d3`.
+  `aa9c7e3d0b524a38ba5fb34fedf695cb2dd35b1e6c4c9589ec3f942fd947013f`.
   It is the sole QEMU process and reports four online PEs,
   `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
   `userspace_scheduler_cpus=4`, with no fatal/panic. The visually inspected
   800x600 login PNG has SHA-256
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 624159 and
+  testing; use QMP `quit` before any later runtime gate. Prior PID 630079 and
+  session `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`
+  were stopped cleanly through QMP before the exact-handle runtime; their files
+  remain. Prior PID 624159 and
   session `build/makos-pi-visible-selfhost-signed-arithmetic-final-CZWWR9Iz`
   were stopped cleanly through QMP before the exact-source final runtime;
   their files remain. Prior PID 614416 and
@@ -438,7 +441,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 630079 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 651079 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
@@ -496,6 +499,21 @@ Preserve existing files and changes.
   structural guards, release image and artifact checks pass. This is Pi/TCG
   functional evidence only; it does not replace the unchanged idle-macOS/HVF
   strict Firefox gate.
+- 2026-08-26 the surface input wait class is now exact-handle rather than a
+  global surface-watcher wake. Scheduler snapshots carry TID, process-group
+  owner PID, and handle; graphics readiness is checked outside the scheduler
+  lock. Queued data wakes only its owning handle, while destroyed handles wake
+  so retry fails closed and teardown joins cannot strand. Firefox priority
+  uses the same queued-handle selection. The upstream-musl production fixture
+  creates target surface 7 and decoy surface 8, blocks both pthreads, and waits
+  for both exact-handle registrations before QMP Ctrl-A. Final Pi/TCG runtime
+  selects handle 7/TID 8 on AP2, reports `surface_woken=1` and
+  `surface_skipped=3`, leaves the decoy blocked until surface 8 destruction,
+  hands off once to the CPU0 leader, and completes the unchanged timed-futex
+  bounds plus status-42 reap. Dispatches are `9954,9924,11186`, with
+  `cpu_mask=0xe` and live/final `overlap_mask=0x6` for TIDs 5/6. Release
+  artifact checks, structural guard, focused runtime, and full
+  `make unit check` pass. This does not qualify strict Firefox timing.
 - The Raspberry Pi was idle when the unchanged Firefox Make target was retried,
   but preflight stopped before QEMU launch: this host does not contain exact
   `build/makos-integrated-a9c604254f094de2.img` or the staged Firefox package,

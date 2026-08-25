@@ -87,7 +87,8 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   software compositor, z-order, visible trail-free cursor, click focus/hit
   testing, fast-outline title-bar drag, close, taskbar minimize/restore, and a
   retained 58x22 terminal rendering real shell command input/output. AArch64
-  adds six surface slots, bounded resizable windows, real virtio-gpu 2D
+  adds six stable desktop surface slots plus two bounded overflow slots,
+  handle-specific event blocking, real virtio-gpu 2D
   scanout with three live modes, Settings, VFS-backed native Text Edit, and an
   isolated native HTTP Browser, isolated Text Edit, VFS-backed Files, live
   System Monitor, persistent user creation in Settings, and signout/login loop.

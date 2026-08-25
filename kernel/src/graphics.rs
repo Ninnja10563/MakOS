@@ -11,7 +11,7 @@ use makos_tty::{
 const MAX_WIDTH: u32 = 720;
 const MAX_HEIGHT: u32 = 420;
 const MAX_PIXELS: usize = MAX_WIDTH as usize * MAX_HEIGHT as usize;
-const MAX_SURFACES: usize = 7;
+const MAX_SURFACES: usize = 8;
 const DESKTOP_SURFACES: usize = 6;
 const CURSOR_WIDTH: usize = 12;
 const CURSOR_HEIGHT: usize = 17;
@@ -286,7 +286,7 @@ static GRAPHICS: LockedState = LockedState {
         framebuffer: FramebufferInfo::EMPTY,
         pixels: [[0; MAX_PIXELS]; MAX_SURFACES],
         surfaces: [Surface::EMPTY; MAX_SURFACES],
-        z_order: [0, 1, 2, 3, 4, 5, 6],
+        z_order: [0, 1, 2, 3, 4, 5, 6, 7],
         focused_surface: None,
         cursor_x: 640,
         cursor_y: 400,
@@ -1633,6 +1633,21 @@ pub fn event_handle_valid(handle: u64) -> bool {
     };
     let pid = current_pid();
     with_lock(|state| state.surfaces[index].created && state.surfaces[index].owner_pid == pid)
+}
+
+/// A blocked surface waiter is ready only for its own queued events. Invalid
+/// or destroyed handles are also ready so the retried syscall can fail closed
+/// and window teardown cannot strand a joining thread.
+pub fn event_wait_ready(handle: u64, owner_pid: u64) -> bool {
+    let Some(index) = handle_index(handle) else {
+        return true;
+    };
+    with_lock(|state| {
+        let surface = state.surfaces[index];
+        !surface.created
+            || surface.owner_pid != owner_pid
+            || state.surface_event_tails[index] != state.surface_event_heads[index]
+    })
 }
 
 /// Routes keys only to surfaces that opted into event delivery. Terminal,

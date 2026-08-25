@@ -157,6 +157,7 @@ struct ContextSlot {
     io_source: makos_readiness::WaitSource,
     io_deadline: u64,
     input_wait: bool,
+    input_wait_handle: u64,
     name: [u8; 16],
 }
 
@@ -176,6 +177,7 @@ impl ContextSlot {
         io_source: makos_readiness::WaitSource::Any,
         io_deadline: 0,
         input_wait: false,
+        input_wait_handle: 0,
         name: [0; 16],
     };
 }
@@ -290,6 +292,9 @@ static SURFACE_MAIN_HANDOFF_PENDING: AtomicBool = AtomicBool::new(false);
 static SURFACE_MAIN_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_PRIORITY_REPORTED: AtomicBool = AtomicBool::new(false);
 static FIREFOX_INPUT_WATCHER_BLOCK_REPORTED: AtomicBool = AtomicBool::new(false);
+static INPUT_HANDLE_WAITERS_REPORTED: AtomicBool = AtomicBool::new(false);
+static INPUT_TARGET_WAKE_REPORTED: AtomicBool = AtomicBool::new(false);
+static FIREFOX_INPUT_TARGET_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_PRIORITY_AP_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_MAIN_DISPATCH_REPORTED: AtomicBool = AtomicBool::new(false);
 static THREAD_CREATE_TRACES: AtomicU64 = AtomicU64::new(0);
@@ -2686,7 +2691,10 @@ pub(crate) fn wake_io_waiters() -> usize {
 /// Suspend current task until a keyboard or surface event arrives. Input has
 /// its own wait class so pointer motion never wakes Firefox pipe/socket/poll
 /// waiters and causes a thundering-herd retry storm.
-pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -> IoBlockResult {
+pub(crate) fn block_current_for_input(
+    frame: &mut crate::arch::ExceptionFrame,
+    surface_handle: u64,
+) -> IoBlockResult {
     let mut captured = crate::arch::UserContext::capture(frame);
     captured.elr = captured.elr.saturating_sub(4);
     let switched = with_state(|state| {
@@ -2705,20 +2713,44 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
             FIREFOX_INPUT_WATCHER_TID.store(tid, Ordering::Release);
         }
         state.contexts[index].input_wait = true;
+        state.contexts[index].input_wait_handle = surface_handle;
         state.contexts[index].context = captured;
         if state.table.block_current_on(scheduler_cpu()) != Some(tid) {
             state.contexts[index].input_wait = false;
+            state.contexts[index].input_wait_handle = 0;
             return Err(IoBlockResult::Failed);
         }
+        let surface_waiters = state
+            .contexts
+            .iter()
+            .filter(|slot| {
+                slot.pid != 0
+                    && slot.group_pid == group_pid
+                    && slot.role == ProcessRole::Firefox
+                    && slot.input_wait
+                    && slot.input_wait_handle != 0
+                    && state.table.get(slot.pid).is_some_and(|info| {
+                        info.state == makos_process_table::ProcessState::Blocked
+                    })
+            })
+            .count();
         let cpu = scheduler_cpu();
         let Some(next) = state.schedule_next_for_cpu(cpu) else {
             if cpu != 0 && crate::arch::smp_probe_scheduler_enabled() {
                 if SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
                     SMP_PROBE_INPUT_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
                 }
-                return Ok((tid, None, firefox_waiter, group_pid, cpu));
+                return Ok((
+                    tid,
+                    None,
+                    firefox_waiter,
+                    group_pid,
+                    cpu,
+                    surface_waiters,
+                ));
             }
             state.contexts[index].input_wait = false;
+            state.contexts[index].input_wait_handle = 0;
             let _ = state.table.wake(tid);
             let _ = state.table.activate_on(cpu, tid);
             return Err(IoBlockResult::Failed);
@@ -2729,10 +2761,17 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
             .find(|slot| slot.pid == next.pid)
             .map(|slot| slot.context)
             .ok_or(IoBlockResult::Failed)?;
-        Ok((tid, Some(context), firefox_waiter, group_pid, cpu))
+        Ok((
+            tid,
+            Some(context),
+            firefox_waiter,
+            group_pid,
+            cpu,
+            surface_waiters,
+        ))
     });
     match switched {
-        Ok((tid, context, firefox_waiter, group_pid, blocked_cpu)) => {
+        Ok((tid, context, firefox_waiter, group_pid, blocked_cpu, surface_waiters)) => {
             let returned_to_idle = context.is_none();
             if let Some(context) = context {
                 context.restore(frame);
@@ -2756,6 +2795,13 @@ pub(crate) fn block_current_for_input(frame: &mut crate::arch::ExceptionFrame) -
                     blocked_cpu,
                 );
             }
+            if surface_waiters >= 2
+                && !INPUT_HANDLE_WAITERS_REPORTED.swap(true, Ordering::AcqRel)
+            {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_INPUT_HANDLE_WAITERS_OK firefox_waiters_at_least=2 routing=exact-handle",
+                );
+            }
             if returned_to_idle && SMP_PROBE_INPUT_WAIT_TID.load(Ordering::Acquire) == tid {
                 SMP_PROBE_INPUT_BLOCKED_MASK
                     .fetch_or(1u64 << scheduler_cpu(), Ordering::AcqRel);
@@ -2775,22 +2821,67 @@ pub(crate) fn complete_input_wait() {
             return;
         };
         slot.input_wait = false;
+        slot.input_wait_handle = 0;
     });
 }
 
 pub(crate) fn wake_input_waiters() -> usize {
-    let count = with_state(|state| {
+    let (waiters, waiter_count) = with_state(|state| {
+        let mut waiters = [(0u64, 0u64, 0u64); MAX_PROCESSES];
         let mut count = 0usize;
-        for index in 0..state.contexts.len() {
-            if !state.contexts[index].input_wait {
-                continue;
-            }
-            if state.table.wake(state.contexts[index].pid) {
+        for slot in &state.contexts {
+            if slot.pid != 0 && slot.input_wait {
+                waiters[count] = (slot.pid, slot.group_pid, slot.input_wait_handle);
                 count += 1;
             }
         }
-        count
+        (waiters, count)
     });
+    let mut ready = [false; MAX_PROCESSES];
+    for index in 0..waiter_count {
+        let (_tid, owner_pid, handle) = waiters[index];
+        ready[index] = handle == 0 || crate::graphics::event_wait_ready(handle, owner_pid);
+    }
+    let (count, surface_woken, surface_skipped) = with_state(|state| {
+        let mut count = 0usize;
+        let mut surface_woken = 0usize;
+        let mut surface_skipped = 0usize;
+        for index in 0..waiter_count {
+            let (pid, group_pid, handle) = waiters[index];
+            let Some(slot) = state.contexts.iter().find(|slot| slot.pid == pid) else {
+                continue;
+            };
+            if !slot.input_wait
+                || slot.group_pid != group_pid
+                || slot.input_wait_handle != handle
+            {
+                continue;
+            }
+            if !ready[index] {
+                if handle != 0 {
+                    surface_skipped += 1;
+                }
+                continue;
+            }
+            if state.table.wake(pid) {
+                count += 1;
+                if handle != 0 {
+                    surface_woken += 1;
+                }
+            }
+        }
+        (count, surface_woken, surface_skipped)
+    });
+    if surface_woken == 1
+        && surface_skipped != 0
+        && !INPUT_TARGET_WAKE_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_INPUT_TARGET_WAKE_OK surface_woken={} surface_skipped={} selection=queued-handle",
+            surface_woken,
+            surface_skipped,
+        );
+    }
     if count != 0 {
         notify_idle_cpus();
     }
@@ -2802,22 +2893,38 @@ pub(crate) fn wake_input_waiters() -> usize {
 /// both sleeping and newly woken watcher state. Fall back to process leader
 /// only before watcher has registered its wait.
 pub(crate) fn prioritize_firefox_surface_thread() -> bool {
-    let tid = with_state(|state| {
-        let input_waiter = state
-            .contexts
-            .iter()
-            .find(|slot| slot.pid != 0 && slot.role == ProcessRole::Firefox && slot.input_wait)
-            .map(|slot| slot.pid);
-        input_waiter
-            .or_else(|| {
+    let (waiters, waiter_count) = with_state(|state| {
+        let mut waiters = [(0u64, 0u64, 0u64); MAX_PROCESSES];
+        let mut count = 0usize;
+        for slot in &state.contexts {
+            if slot.pid != 0
+                && slot.role == ProcessRole::Firefox
+                && slot.input_wait
+                && slot.input_wait_handle != 0
+            {
+                waiters[count] = (slot.pid, slot.group_pid, slot.input_wait_handle);
+                count += 1;
+            }
+        }
+        (waiters, count)
+    });
+    let targeted = waiters[..waiter_count]
+        .iter()
+        .find(|(_tid, owner_pid, handle)| {
+            crate::graphics::event_wait_ready(*handle, *owner_pid)
+        })
+        .copied();
+    let tid = targeted.map(|(tid, _, _)| tid).unwrap_or_else(|| {
+        with_state(|state| {
+            let remembered = {
                 let watcher = FIREFOX_INPUT_WATCHER_TID.load(Ordering::Acquire);
                 state
                     .contexts
                     .iter()
                     .find(|slot| slot.pid == watcher && slot.role == ProcessRole::Firefox)
                     .map(|slot| slot.pid)
-            })
-            .or_else(|| {
+            };
+            remembered.unwrap_or_else(|| {
                 state
                     .contexts
                     .iter()
@@ -2827,9 +2934,19 @@ pub(crate) fn prioritize_firefox_surface_thread() -> bool {
                             && slot.role == ProcessRole::Firefox
                     })
                     .map(|slot| slot.pid)
+                    .unwrap_or(0)
             })
-            .unwrap_or(0)
+        })
     });
+    if let Some((target_tid, _, target_handle)) = targeted
+        && !FIREFOX_INPUT_TARGET_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_FIREFOX_INPUT_TARGET_OK tid={} handle={} selection=queued-surface",
+            target_tid,
+            target_handle,
+        );
+    }
     set_surface_priority(tid)
 }
 
@@ -3026,6 +3143,7 @@ pub fn clone_thread(
             io_source: makos_readiness::WaitSource::Any,
             io_deadline: 0,
             input_wait: false,
+            input_wait_handle: 0,
             name: parent.name,
         };
         state.session_active = true;
@@ -3090,6 +3208,7 @@ pub fn fork_process(frame: &crate::arch::ExceptionFrame) -> Option<u64> {
             io_source: makos_readiness::WaitSource::Any,
             io_deadline: 0,
             input_wait: false,
+            input_wait_handle: 0,
             name: parent.name,
         };
         state.spawned_roots[index] = child_root;
@@ -3645,6 +3764,9 @@ fn reset_production_worker_evidence() {
     SURFACE_MAIN_HANDOFF_REPORTED.store(false, Ordering::Release);
     SURFACE_PRIORITY_REPORTED.store(false, Ordering::Release);
     FIREFOX_INPUT_WATCHER_BLOCK_REPORTED.store(false, Ordering::Release);
+    INPUT_HANDLE_WAITERS_REPORTED.store(false, Ordering::Release);
+    INPUT_TARGET_WAKE_REPORTED.store(false, Ordering::Release);
+    FIREFOX_INPUT_TARGET_REPORTED.store(false, Ordering::Release);
     SURFACE_PRIORITY_AP_REPORTED.store(false, Ordering::Release);
     SURFACE_MAIN_DISPATCH_REPORTED.store(false, Ordering::Release);
     PRODUCTION_WORKER_CPU_MASK.store(0, Ordering::Release);
@@ -3934,6 +4056,7 @@ fn install_loaded_process(
             io_source: makos_readiness::WaitSource::Any,
             io_deadline: 0,
             input_wait: false,
+            input_wait_handle: 0,
             name: [0; 16],
         };
         let index = state
@@ -4947,6 +5070,7 @@ pub(crate) fn exec_current(
         state.contexts[index].io_source = makos_readiness::WaitSource::Any;
         state.contexts[index].io_deadline = 0;
         state.contexts[index].input_wait = false;
+        state.contexts[index].input_wait_handle = 0;
         state.spawned_roots[index] = process.root;
         Some(old_root)
     });
@@ -5336,6 +5460,7 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
         for index in 0..state.contexts.len() {
             if state.contexts[index].group_pid == process.parent_pid
                 && state.contexts[index].input_wait
+                && state.contexts[index].input_wait_handle == 0
             {
                 let _ = state.table.wake(state.contexts[index].pid);
             }

@@ -4,6 +4,23 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 surface-event blocking is now handle-specific instead of
+  a global input thundering herd. Each blocked task records its surface handle;
+  the wake path snapshots scheduler state, checks queue/owner state outside the
+  scheduler lock, and wakes only a task whose exact owned surface has data.
+  Destroyed or invalidated handles remain wakeable so teardown retries fail
+  closed rather than stranding a join. Firefox key priority uses the same
+  queued-handle selection. The upstream-musl production fixture now owns
+  surfaces 7 and 8 and blocks target/decoy pthreads concurrently. QMP Ctrl-A
+  selects handle 7/TID 8 on AP2, wakes exactly one surface waiter while three
+  unrelated surface waiters remain blocked, dispatches the CPU0 leader, and
+  leaves the decoy blocked until surface 8 is destroyed. Final Pi/QEMU 10.0.11
+  TCG evidence reports `cpu_mask=0xe`, dispatches `9954,9924,11186`,
+  `overlap_mask=0x6` with TIDs 5/6, `surface_woken=1`,
+  `surface_skipped=3`, and status 42. Release artifact validation, focused
+  production runtime, structural guard, and full `make unit check` pass. This
+  is functional Pi/TCG evidence only; strict Firefox thresholds are unchanged
+  and still require the missing package on idle macOS/HVF.
 - 2026-08-26 AArch64 now exposes kernel-owned per-thread CPU affinity through
   target syscall 148 and ABI feature bit 22. Get/set are restricted to the
   caller's thread group, reject empty/offline masks, keep process leaders on
@@ -31,7 +48,7 @@ Last updated: 2026-08-26.
   typed-IPC service before the parent timed out. The production-only
   `FirefoxProbe` credential profile adds service publication for the existing
   full pthread/IPC fixture without broadening ordinary Firefox privileges.
-  The compositor has a seventh owned overflow surface for that fixture while
+  The compositor has two bounded owned overflow surfaces for fixtures while
   preserving the six stable launcher/taskbar slots and their geometry. The
   final Raspberry Pi/QEMU 10.0.11 TCG run reports `cpu_mask=0xe`, dispatches
   `9826,11253,9695`, `overlap_mask=0x6` with TIDs 5/6, watcher TID 8 on AP2,
@@ -320,12 +337,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  signed-arithmetic self-host milestone is PID 630079 under the user service
-  `makos-visible-selfhost-signed-arithmetic-final2.service`, with
+  exact-handle Firefox-input milestone is PID 651079 under the user service
+  `makos-visible-firefox-exact-input-final.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`; its boot clone
+  `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm`; its boot clone
   exactly matches the current release image SHA-256
-  `4cbe815d7193b817eabf75d971f02900c57f817ee5357f96ea7fd899a60333d3`.
+  `aa9c7e3d0b524a38ba5fb34fedf695cb2dd35b1e6c4c9589ec3f942fd947013f`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

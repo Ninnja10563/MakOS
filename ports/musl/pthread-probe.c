@@ -52,6 +52,7 @@ static volatile unsigned production_smp_release;
 static volatile unsigned production_affinity_failed;
 static volatile unsigned production_input_ready;
 static long production_input_surface;
+static long production_input_decoy_surface;
 
 struct makos_surface_event {
 	uint32_t kind;
@@ -133,10 +134,13 @@ static void *production_smp_worker(void *argument)
 static void *production_input_watcher(void *argument)
 {
 	struct makos_surface_event event = {0};
-	(void)argument;
-	__atomic_store_n(&production_input_ready, 1, __ATOMIC_RELEASE);
-	long result = makos_call4(140, production_input_surface, (long)&event,
+	long surface = (long)(uintptr_t)argument;
+	unsigned ready = surface == production_input_surface ? 1U : 2U;
+	__atomic_fetch_or(&production_input_ready, ready, __ATOMIC_RELEASE);
+	long result = makos_call4(140, surface, (long)&event,
 		sizeof event, 0);
+	if (surface == production_input_decoy_surface)
+		return result == -1 ? 0 : (void *)(uintptr_t)2;
 	if (result != sizeof event || event.kind != 1 || event.key != 132)
 		return (void *)(uintptr_t)1;
 	return 0;
@@ -172,22 +176,34 @@ static int production_smp_overlap_probe(void)
 	__atomic_store_n(&production_smp_release, 1, __ATOMIC_RELEASE);
 	for (unsigned index = 0; index < 3; index++)
 		if (pthread_join(workers[index], &result) || result) return 3;
+	production_input_decoy_surface = makos_call4(8, 96, 64, 8, 0);
+	if (production_input_decoy_surface <= 0 ||
+	    makos_call4(10, production_input_decoy_surface, 0, 0, 0) != 1)
+		return 4;
 	production_input_surface = makos_call4(8, 96, 64, 7, 0);
 	if (production_input_surface <= 0 ||
 	    makos_call4(10, production_input_surface, 0, 0, 0) != 1)
 		return 4;
 	production_input_ready = 0;
-	if (pthread_create(&input_watcher, 0, production_input_watcher, 0)) return 5;
+	pthread_t decoy_watcher;
+	if (pthread_create(&input_watcher, 0, production_input_watcher,
+	    (void *)(uintptr_t)production_input_surface) ||
+	    pthread_create(&decoy_watcher, 0, production_input_watcher,
+	    (void *)(uintptr_t)production_input_decoy_surface))
+		return 5;
 	for (unsigned attempts = 0; attempts < 100000; attempts++) {
-		if (__atomic_load_n(&production_input_ready, __ATOMIC_ACQUIRE)) break;
+		if (__atomic_load_n(&production_input_ready, __ATOMIC_ACQUIRE) == 3) break;
 		makos_call(1, 0, 0);
 	}
-	if (!__atomic_load_n(&production_input_ready, __ATOMIC_ACQUIRE)) return 6;
+	if (__atomic_load_n(&production_input_ready, __ATOMIC_ACQUIRE) != 3) return 6;
 	if (pthread_join(input_watcher, &result) || result) return 7;
+	if (makos_call4(123, production_input_decoy_surface, 0, 0, 0) != 1 ||
+	    pthread_join(decoy_watcher, &result) || result)
+		return 12;
 	if (makos_call4(123, production_input_surface, 0, 0, 0) != 1) return 8;
 	static const char marker[] =
 		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded affinity=explicit singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned migrations=forced:3\n"
-		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event\n";
+		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event routing=exact-handle decoy=blocked-until-destroy\n";
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;
 }

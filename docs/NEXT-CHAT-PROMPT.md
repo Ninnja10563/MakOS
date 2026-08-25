@@ -71,10 +71,12 @@ system, or substantial self-hosted build.
 Verify GitHub HEAD rather than relying on a copied hash.
 
 Firefox input scheduling now has a deterministic production-role Pi/TCG proof.
-A real non-leader upstream-musl pthread blocks in surface syscall 140, QMP
-Ctrl-A dispatches that exact watcher on AP1-3, and the group leader receives a
-one-shot CPU0 handoff. The final run reports watcher TID 8 on AP2,
-`cpu_mask=0xe`, `overlap_mask=0x6`, dispatches `9867,11100,9833`, and status 42
+A target and decoy upstream-musl pthread block on distinct handles in surface
+syscall 140. QMP Ctrl-A selects handle 7/TID 8 on AP2, wakes exactly one surface
+watcher while three unrelated surface waiters remain blocked, and the group
+leader receives a one-shot CPU0 handoff. The decoy wakes only when surface 8 is
+destroyed, then its retry fails closed and joins. The final run reports
+`cpu_mask=0xe`, `overlap_mask=0x6`, dispatches `9954,9924,11186`, and status 42
 after the complete pthread/typed-IPC workload. Target syscall 148/feature bit
 22 now owns real per-thread CPU masks; official-musl patch 65 translates
 `sched_getaffinity`/`sched_setaffinity`. The fixture verifies the CPU0 leader,
@@ -84,13 +86,13 @@ acts as a priority time slice, fixing observed fork-child starvation. Full
 `make unit check` passes. This is functional Pi/TCG evidence only; strict
 Firefox timing still needs the unchanged idle macOS/HVF gate.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 630079, user
-service `makos-visible-selfhost-signed-arithmetic-final2.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 651079, user
+service `makos-visible-firefox-exact-input-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-firefox-exact-input-final-4JLnogUm`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-selfhost-signed-arithmetic-final2-rB4hMDDS/qmp.sock`. Its
+`build/makos-pi-visible-firefox-exact-input-final-4JLnogUm/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`4cbe815d7193b817eabf75d971f02900c57f817ee5357f96ea7fd899a60333d3`;
+`aa9c7e3d0b524a38ba5fb34fedf695cb2dd35b1e6c4c9589ec3f942fd947013f`;
 the inspected 800x600 login PNG is
 `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
 Stop it through QMP before

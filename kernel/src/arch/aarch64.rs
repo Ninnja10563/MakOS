@@ -3439,7 +3439,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 u64::from(key)
             } else {
                 if crate::aarch64_process::runtime_stats().runnable > 1 {
-                    match crate::aarch64_process::block_current_for_input(frame) {
+                    match crate::aarch64_process::block_current_for_input(frame, 0) {
                         crate::aarch64_process::IoBlockResult::Switched => return,
                         _ => 0,
                     }
@@ -4799,7 +4799,10 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     // Blocking here deadlocks startup before widget Show.
                     0
                 } else if crate::aarch64_process::runtime_stats().runnable > 1 {
-                    match crate::aarch64_process::block_current_for_input(frame) {
+                    match crate::aarch64_process::block_current_for_input(
+                        frame,
+                        frame.registers[0],
+                    ) {
                         crate::aarch64_process::IoBlockResult::Switched => return,
                         _ => 0,
                     }
@@ -4844,7 +4847,10 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     // Dedicated native-event watcher threads use this syscall.
                     // The saved ELR retries the same handle-specific dequeue
                     // after virtio input wakes the input wait class.
-                    match crate::aarch64_process::block_current_for_input(frame) {
+                    match crate::aarch64_process::block_current_for_input(
+                        frame,
+                        frame.registers[0],
+                    ) {
                         crate::aarch64_process::IoBlockResult::Switched => return,
                         _ => 0,
                     }
