@@ -4,6 +4,11 @@
     .type _start,%function
 _start:
     mov x19, x0
+    mov x8, #27
+    svc #0
+    add x0, x0, #2
+    mov x8, #103
+    svc #0
     movz x18, #0x8480
     movk x18, #0x001e, lsl #16
     mov x17, #1

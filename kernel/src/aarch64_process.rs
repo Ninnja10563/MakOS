@@ -204,6 +204,8 @@ static SMP_PROBE_ACTIVE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_PEAK_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_TIDS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static SMP_PROBE_RELEASE: AtomicBool = AtomicBool::new(false);
+static SMP_PROBE_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -392,6 +394,8 @@ pub fn run_smp_userspace_self_test() {
     SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
     SMP_PROBE_PEAK_MASK.store(0, Ordering::Release);
     SMP_PROBE_RELEASE.store(false, Ordering::Release);
+    SMP_PROBE_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RESUME_MASK.store(0, Ordering::Release);
     for tid in &SMP_PROBE_TIDS {
         tid.store(0, Ordering::Release);
     }
@@ -484,8 +488,12 @@ pub fn run_smp_userspace_self_test() {
         SMP_PROBE_TIDS[3].load(Ordering::Acquire),
     ];
     let peak = SMP_PROBE_PEAK_MASK.load(Ordering::Acquire);
+    let idle = SMP_PROBE_IDLE_MASK.load(Ordering::Acquire);
+    let resumed = SMP_PROBE_RESUME_MASK.load(Ordering::Acquire);
     if statuses != [40, 41, 42, 43]
         || peak != 0b1111
+        || idle & 0b1110 != 0b1110
+        || resumed & 0b1110 != 0b1110
         || tids.contains(&0)
         || tids
             .iter()
@@ -496,8 +504,8 @@ pub fn run_smp_userspace_self_test() {
         crate::fatal("AArch64 SMP userspace proof failed");
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_SMP_USER_OK cpus=4 tids={},{},{},{} overlap_mask={:#x} el=0 timer_ppi=per-cpu statuses=40,41,42,43 scheduler_scope=boot-probe desktop_gate=closed free_balance=1",
-        tids[0], tids[1], tids[2], tids[3], peak,
+        "MAKOS_AARCH64_SMP_USER_OK cpus=4 tids={},{},{},{} overlap_mask={:#x} el=0 timer_ppi=per-cpu ap_block_idle=sleep-until wake=timer resume_mask={:#x} statuses=40,41,42,43 scheduler_scope=boot-probe desktop_gate=closed free_balance=1",
+        tids[0], tids[1], tids[2], tids[3], peak, resumed,
     );
     reset_scheduler();
 }
@@ -1039,6 +1047,7 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
     }
     let captured = crate::arch::UserContext::capture(frame);
     let switched = with_state(|state| {
+        let cpu = scheduler_cpu();
         let tid = state.table.current_pid_on(scheduler_cpu()).ok_or(22u64)?;
         let index = state
             .contexts
@@ -1052,6 +1061,10 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             return Err(22);
         }
         let Some(next) = state.schedule_next_for_cpu(scheduler_cpu()) else {
+            if cpu != 0 && state.contexts[index].role == ProcessRole::SmpProbe {
+                SMP_PROBE_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                return Ok(None);
+            }
             state.contexts[index].sleep_deadline = 0;
             let _ = state.table.wake(tid);
             let _ = state.table.activate_on(scheduler_cpu(), tid);
@@ -1063,10 +1076,10 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             .find(|slot| slot.pid == next.pid)
             .map(|slot| slot.context)
             .ok_or(22u64)?;
-        Ok((tid, context))
+        Ok(Some((tid, context)))
     });
     match switched {
-        Ok((tid, context)) => {
+        Ok(Some((tid, context))) => {
             if !SLEEP_BLOCK_REPORTED.swap(true, Ordering::AcqRel) {
                 crate::serial_println!(
                     "MAKOS_AARCH64_SLEEP_BLOCK_OK tid={} deadline={} scheduler=blocked timer_wake=armed",
@@ -1077,6 +1090,7 @@ pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
             context.restore(frame);
             crate::arch::switch_address_space(context.ttbr0);
         }
+        Ok(None) => crate::arch::return_to_kernel(frame, 0),
         Err(errno) => frame.registers[0] = negative_errno(errno),
     }
 }
@@ -1728,6 +1742,9 @@ pub(crate) fn run_secondary_scheduler() -> ! {
 fn smp_probe_enter(tid: u64) {
     let cpu = scheduler_cpu();
     let bit = 1u64 << cpu;
+    if SMP_PROBE_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
+        SMP_PROBE_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
+    }
     SMP_PROBE_TIDS[cpu].store(tid, Ordering::Release);
     let active = SMP_PROBE_ACTIVE_MASK.fetch_or(bit, Ordering::AcqRel) | bit;
     let mut peak = SMP_PROBE_PEAK_MASK.load(Ordering::Acquire);

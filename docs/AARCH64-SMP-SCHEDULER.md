@@ -10,9 +10,12 @@ AP's banked virtual-timer PPI, and runs four independent EL0 processes at once.
 The three AP dispatchers publish their active bits and wait immediately before
 EL0 transition; CPU0 joins that rendezvous and releases all four PEs together.
 Pi/QEMU TCG requires four distinct TIDs, `overlap_mask=0xf`, unique statuses
-40-43, complete address-space reap, and exact frame recovery. This explicit
-release barrier keeps the correctness fixture independent of host emulation
-speed. The gate then closes and APs return to interrupt-masked WFI. General
+40-43, complete address-space reap, and exact frame recovery. Each AP process
+also calls `sleep_until`; with no local successor it remains Blocked, returns
+through the per-CPU kernel record to the idle dispatcher, and resumes after a
+CPU0 timer wake. Runtime requires `resume_mask=0xe`. This explicit release
+barrier keeps the correctness fixture independent of host emulation speed. The
+gate then closes and APs return to interrupt-masked WFI. General
 desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
 the truthful scope marker.
 
@@ -35,9 +38,10 @@ safe general process migration.
 - Initial and exception-time AP selectors now restrict candidates to
   non-leader Firefox workers. Broader affinity/load balancing remains gated
   until device-owning and PID1/UI paths are qualified.
-- Blocking with no AP-eligible successor must return through the per-CPU saved
-  kernel record into an AP idle loop; current blocking paths reactivate the
-  sole local task because CPU0 still owns session dispatch.
+- `sleep_until` with no AP-eligible successor now returns through the per-CPU
+  saved kernel record into the AP idle loop and has timer-wake/resume proof.
+  IPC, futex, input, and general I/O no-successor paths still reactivate or
+  reject the sole local task and need the same idle-return contract.
 - Exit/session teardown must distinguish no local successor from no live
   session. `exit_group` must first stop/ack remote-running siblings; current
   administrative `terminate` correctly rejects a task owned by another CPU.

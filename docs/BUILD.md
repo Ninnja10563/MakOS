@@ -111,9 +111,11 @@ creation requires only Python 3 and does not mount filesystems.
 Every AArch64 boot also runs a bounded EL0 SMP scheduler proof before mounting
 storage. Three AP contexts rendezvous immediately before EL0 transition, CPU0
 joins and releases all four PEs, and four independent processes must overlap,
-return statuses 40-43, reap cleanly, and restore the free-frame count. The
-scheduler closes AP dispatch again before the desktop; this is not yet general
-multicore userspace.
+block on an absolute monotonic sleep with no local successor, return to AP idle,
+resume after CPU0's timer wake, return statuses 40-43, reap cleanly, and restore
+the free-frame count. The marker requires `resume_mask=0xe`. The scheduler
+closes AP dispatch again before the desktop; this is not yet general multicore
+userspace.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

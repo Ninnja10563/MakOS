@@ -43,9 +43,11 @@ Preserve existing files and changes.
   independent ELF processes report TIDs `4,2,3,1`, statuses 40-43 and
   `overlap_mask=0xf`. All roots/frames reap to baseline. Current release/image
   artifact checks, full `make check`, both structural guards, and visible login
-  pass. The gate closes before the desktop; general desktop/Firefox AP
-  scheduling remains pending remote teardown, block-to-idle, device-affinity
-  and contention gates.
+  pass. The next runtime additionally has every AP block in `sleep_until`,
+  return to its idle dispatcher, receive CPU0's timer wake, and resume with
+  `resume_mask=0xe`. The gate closes before the desktop; general desktop/
+  Firefox AP scheduling remains pending other blocking classes, remote
+  teardown, device-affinity and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates

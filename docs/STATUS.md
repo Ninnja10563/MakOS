@@ -11,10 +11,14 @@ Last updated: 2026-08-25.
   overlap across CPU0-3 with distinct TIDs and exit statuses 40-43. The final
   Pi/QEMU 10.0.11 TCG run reports TIDs `4,2,3,1`, `overlap_mask=0xf`, reaps all
   roots, restores exact free-frame balance, closes the AP gate, and reaches the
-  visible login. The current AArch64 release image/artifact check, full
+  visible login. A subsequent probe has every AP block in `sleep_until`, return
+  through its per-CPU kernel record to the idle dispatcher, receive CPU0's
+  timer wake, and resume in EL0 with `resume_mask=0xe`. The current AArch64
+  release image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending block-to-idle, remote
-  group-exit acknowledgement, device affinity and contention proof, so the
+  desktop/Firefox AP scheduling remains gated pending the remaining IPC/futex/
+  input/I/O idle returns, remote group-exit acknowledgement, device affinity
+  and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.
 - 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
