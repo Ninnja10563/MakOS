@@ -76,6 +76,10 @@ one argument. A pointer local may be initialized as `int *pointer = &local`,
 and an address expression may be passed to the external function. `*pointer`
 performs a 32-bit load and `*pointer = expression` a 32-bit store through a
 pointer local or pointer parameter. A final unconditional return is required.
+Fixed local `int` arrays may contain one to four exactly initialized elements
+within the same four-slot frame budget. The compiler supports constant indexed
+loads/stores and rejects indices outside a known local array; passing a bare
+array to the bounded external call decays it to its 64-bit stack address.
 It emits AAPCS64 32-bit `int` code, passing pointer arguments in `x0`, with
 validated forward conditional and signed backward branch fixups
 and a 96-byte non-leaf FP/LR/x19-x23 frame containing four bounded local slots,
@@ -87,7 +91,8 @@ discovers symbols across up to three objects, resolves two
 Unsupported tokens, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
-This seed has no pointer arithmetic, arrays, structs,
+This seed has no pointer arithmetic, variable-length/global/multidimensional
+arrays, structs,
 nested/general blocks, multiple functions per translation unit,
 more than three objects, general relocations, preprocessing, optimization,
 archives, dynamic linking, CLI build driver, or

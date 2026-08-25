@@ -115,29 +115,35 @@ or more assignments, a one-argument function call, and the bounded pointer form
 `int *pointer = &local`. Address expressions may be passed to the bounded
 external call. Dereference expressions load a 32-bit `int` through a pointer
 local or pointer parameter; `*pointer = expression` stores it back.
+Fixed local `int` arrays accept one to four exactly supplied initializer
+expressions, subject to the shared four-slot frame limit. Constant indices are
+bounded to 0..3 and known local-array indices are checked against the declared
+length. Indexed expressions and assignments emit scaled 32-bit loads/stores;
+a bare array call argument decays to its 64-bit stack address in `x0`.
 A final unconditional return is required so every accepted path returns.
 Non-leaf functions preserve FP/LR and x19-x23 in a 96-byte AAPCS64 frame with
 four bounded 32-bit local slots. The
-current `answer` computes `normalized = (value * 3) - 20`, passes
-`&normalized` to `adjust` when it equals 40, and otherwise returns 86. `adjust`
-accepts that pointer in AAPCS64 `x0`, preserves it in `x23`, increments the
-caller's stack-backed value once through dereference, then uses
-`while (count != 1)` to increment it again through dereference and advance the
-counter. Its return reloads the pointee from memory. The compiler
-emits 120/132 code bytes in 728/688-byte `generated-answer.o` and
+current `answer` initializes `values[2]` with `(value * 3) - 20` and zero,
+then decays `values` into the `adjust` call when element zero equals 40;
+otherwise it returns 86. `adjust` accepts that pointer in AAPCS64 `x0`,
+preserves it in `x23`, increments element zero, then uses
+`while (count != 1)` to store element-zero-plus-one into element one and advance
+the counter. Its return reloads element one. The compiler
+emits 128/132 code bytes in 736/688-byte `generated-answer.o` and
 `generated-adjust.o`; the assembler emits 76 code bytes in the 688-byte
 `generated-main.o`. These genuine ELF64 `ET_REL` files persist/reopen. The
 bounded linker discovers definitions and undefined symbols across all three,
-applies two `R_AARCH64_CALL26` relocations, and emits 328 code bytes in the
+applies two `R_AARCH64_CALL26` relocations, and emits 336 code bytes in the
 815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
-`answer(20)=42`, `answer(0)=86`, `adjust(&forty)=42`, and
-`adjust(&zero)=2`, with the direct-call pointees also required to become 42
-and 2. Invalid
+`answer(20)=42`, `answer(0)=86`, `adjust(forty)=42`, and
+`adjust(zero)=2`, with the direct-call arrays also required to become
+`41:42` and `1:2`. Invalid
 relocation type/addend/site, unresolved `adjust`, and duplicate `answer` inputs
 are denied, as are unsupported division, a conditional-only function, a loop
 without a terminal return, assignment to an undefined variable, address-of an
 undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer as an `int`.
+Known local-array out-of-bounds indexing is also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
 both forms, passes 20 to compiled `answer`, and exits with its result 42. Three
@@ -150,7 +156,8 @@ make test-aarch64-selfhost-runtime
 ```
 
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
-has no pointer arithmetic, arrays/structs, nested/general
+has no pointer arithmetic, variable-length/global/multidimensional arrays,
+structs, nested/general
 blocks, multiple functions per translation unit, general object
 count/relocation repertoire, or build driver. It is not a
 full C/Rust compiler, general linker, build system, debugger, or end-to-end

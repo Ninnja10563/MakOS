@@ -30,21 +30,23 @@ for fragment in (
     '"svc #0\\n"',
     '"bl answer\\n"',
     '"int answer(int value) {\\n"',
-    '"    int normalized = (value * 3) - 20;\\n"',
-    '"    if (normalized == 40) {\\n"',
-    '"        return adjust(&normalized);\\n"',
+    '"    int values[2] = { (value * 3) - 20, 0 };\\n"',
+    '"    if (values[0] == 40) {\\n"',
+    '"        return adjust(values);\\n"',
     '"    return 86;\\n"',
     '"int adjust(int *pointer) {\\n"',
-    '"    *pointer = *pointer + 1;\\n"',
+    '"    pointer[0] = pointer[0] + 1;\\n"',
     '"    int count = 0;\\n"',
     '"    while (count != 1) {\\n"',
-    '"        *pointer = *pointer + 1;\\n"',
+    '"        pointer[1] = pointer[0] + 1;\\n"',
     '"        count = count + 1;\\n"',
-    '"    return *pointer;\\n"',
+    '"    return pointer[1];\\n"',
     "static size_t assemble(",
     "static size_t compile_c(",
     "static int c_variable_register(",
     "static int c_pointer_register(",
+    "static int c_pointer_index_register(",
+    "static int c_call_argument(",
     "static struct c_local *c_find_local(",
     "static int c_store_stack_local(",
     "static int c_load_stack_local(",
@@ -81,6 +83,7 @@ for fragment in (
     "malformed_address_source",
     "malformed_pointer_assignment_source",
     "malformed_pointer_return_source",
+    "malformed_array_index_source",
     "compile_c(malformed_c_source",
     "static size_t emit_object(",
     "static int parse_object(",
@@ -97,16 +100,16 @@ for fragment in (
     "addend != 0",
     "link_objects(objects, object_lengths, 2",
     "link_objects(duplicate_objects, duplicate_lengths, 3",
-    "answer_relocations[0].offset != 72",
+    "answer_relocations[0].offset != 80",
     "compiled_answer(20) != 42 || compiled_answer(0) != 86",
-    "compiled_adjust(&forty) != 42 || forty != 42",
-    "compiled_adjust(&zero) != 2 || zero != 2",
-    "main_object_length != 688 || answer_object_length != 728",
+    "compiled_adjust(forty) != 42 || forty[0] != 41 || forty[1] != 42",
+    "compiled_adjust(zero) != 2 || zero[0] != 1 || zero[1] != 2",
+    "main_object_length != 688 || answer_object_length != 736",
     "adjust_object_length != 688",
-    "linked_length != 328",
+    "linked_length != 336",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 malformed_c_denied=7",
+    "persisted_reopened=1 malformed_c_denied=8",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -159,10 +162,10 @@ require(SHELL, "objects=3 object_format=elf64-et-rel")
 require(SHELL, "languages=aarch64-asm,c-subset-v1 compiler=guest-native")
 require(SHELL, "relocations=R_AARCH64_CALL26:2 symbols=_start,answer,adjust")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=parameter,pointer-parameter,local,assignment,pointer,address-of,address-expression,dereference,if,equality,inequality,while,call,return nonleaf_frame=96")
+require(SHELL, "c_features=parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,address-of,address-expression,dereference,if,equality,inequality,while,call,return nonleaf_frame=96")
 require(SHELL, "c_operators=mul,sub,add branch_results=42,86")
-require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,2 code_bytes=76,120,132 object_bytes=688,728,688 linked_bytes=328 output_bytes=815")
-require(SHELL, "malformed_c_denied=7")
+require(SHELL, "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust pointee_results=42,2 array_results=41:42,1:2 code_bytes=76,128,132 object_bytes=688,736,688 linked_bytes=336 output_bytes=815")
+require(SHELL, "malformed_c_denied=8")
 require(SHELL, "malformed_relocation_denied=1 unresolved_symbol_denied=1 duplicate_definition_denied=1")
 require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
@@ -171,7 +174,7 @@ require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
-require(FOCUSED_RUNTIME, "malformed_c_denied=7")
+require(FOCUSED_RUNTIME, "malformed_c_denied=8")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")
 require(FOCUSED_RUNTIME, "executed=2 status=42")

@@ -184,30 +184,34 @@ Last updated: 2026-08-25.
   one-argument cross-object call. It now also accepts either an `int` or
   `int *` parameter, `int *pointer = &local`, address expressions passed across
   the call boundary, dereference loads inside expressions, and
-  `*pointer = expression` stores.
+  `*pointer = expression` stores. Fixed local `int` arrays have one to four
+  exactly initialized elements within the four-slot frame budget. Constant
+  indexing emits bounded 32-bit loads/stores; known local-array bounds are
+  checked at compile time, and a bare array argument decays to its preserved
+  64-bit stack address in AAPCS64 `x0`.
   Address-taken `int` locals occupy bounded 32-bit stack slots and are reloaded
   from memory, while pointer locals use preserved 64-bit registers. Forward
   conditional and signed backward unconditional branches are range-checked
   before patching. Emitted non-leaf functions preserve FP/LR and x19-x23 in a
   96-byte frame. Integer arguments use AAPCS64 `w0`; pointer arguments use
-  `x0` and are preserved in `x23`. The compiler produces 120-byte `answer` and
-  132-byte `adjust` code in 728/688-byte ELF64
+  `x0` and are preserved in `x23`. The compiler produces 128-byte `answer` and
+  132-byte `adjust` code in 736/688-byte ELF64
   `ET_REL` objects; the assembler produces 76 bytes in a 688-byte object. All
   three persist and reopen. The bounded general linker concatenates up to three
   objects, discovers global definitions/undefined symbols, applies two validated
-  `R_AARCH64_CALL26` relocations (`_start`→`answer`→`adjust`), and emits 328 code
+  `R_AARCH64_CALL26` relocations (`_start`→`answer`→`adjust`), and emits 336 code
   bytes in an 815-byte two-`PT_LOAD` `ET_EXEC`. It rejects an out-of-range BL
   site, relocation type 282, a nonzero CALL26 addend, an unresolved `adjust`,
   and duplicate `answer` definitions. Division syntax
   and a non-total conditional function, loop without a terminal return,
   assignment to an undefined variable, address-of an undefined local, and
-  untyped pointer reassignment and returning a pointer as an `int` also fail
-  closed. RX execution of the
+  untyped pointer reassignment, returning a pointer as an `int`, and indexing a
+  known two-element array at index two also fail closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
-  `adjust(&forty)=42`, and `adjust(&zero)=2`; the latter two also prove the
-  pointees change to 42 and 2. The linked `answer`→`adjust` call passes
-  `&normalized`, so its result requires real cross-object stack-address
-  formation and callee dereference loads/stores into caller-owned memory. Focused
+  `adjust(forty)=42`, and `adjust(zero)=2`; the latter two also prove the arrays
+  change to `41:42` and `1:2`. The linked `answer`→`adjust` call passes the
+  stack-backed `values[2]` array, so its result requires real array decay plus
+  callee indexed loads/stores into both elements of caller-owned memory. Focused
   Pi/QEMU 10.0.11 TCG then
   executes/reaps the final ELF twice with status 42 through syscalls 56/57.
   Release artifact validation, focused runtime, structural guard, and full

@@ -141,10 +141,11 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   AAPCS64 integer/pointer expressions, register locals, mutable integer parameter/local
   assignments, equality/inequality control flow, a real backward-branch
   `while`, stack-backed address-taken locals, bounded address-of/dereference
-  loads and stores, typed pointer parameters passed in AAPCS64 `x0`, non-leaf
-  frames, cross-object calls that mutate caller-owned memory, and genuine
-  ELF64 `ET_REL` objects; both linked branch outcomes and direct loop/memory
-  outcomes execute in EL0.
+  loads and stores, fixed local `int` arrays with checked constant indexing,
+  array decay and typed pointer parameters passed in AAPCS64 `x0`, non-leaf
+  frames, cross-object calls that mutate caller-owned array elements, and
+  genuine ELF64 `ET_REL` objects; both linked branch outcomes and direct
+  loop/memory outcomes execute in EL0.
   The assembler emits `_start`. The guest static
   linker resolves `_start`→`answer`→`adjust` across three objects, applies two
   `R_AARCH64_CALL26` relocations, rejects malformed C, invalid relocation type,
