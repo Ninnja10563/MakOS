@@ -65,6 +65,22 @@ watcher TID on AP1-3 plus the group leader on CPU0 before full status-42 reap.
 Its final run selected watcher TID 8 on AP2. This is deterministic wake and
 affinity evidence, not macOS/HVF Firefox latency qualification.
 
+Production thread affinity is now explicit kernel state rather than an
+adapter-reported constant. Native syscall 148 gets or replaces the mask of the
+caller or a same-thread-group TID. Masks must be nonempty subsets of the four
+online CPUs. Firefox and native non-leader threads may choose those CPUs;
+process leaders retain mask `0x1` because desktop and device service remains
+CPU0-owned. Clone gives Firefox workers the production default `0xe`, while
+forked/new process leaders begin at `0x1`. Every normal scheduler selection,
+including surface priority, consults the stored mask. If a caller removes its
+current CPU, the exception path captures its complete context, publishes it
+Ready/unowned, returns an AP with no eligible successor to its dispatcher, and
+sends the scheduler SGI only after publication so an idle target AP rechecks
+its Ready queue. A running remote target also rechecks at its next bounded
+timer preemption. The musl Linux-number adapter maps
+`sched_setaffinity(122)` and `sched_getaffinity(123)` to this native ABI and
+fully clears/copies the caller's bounded `cpu_set_t`.
+
 A third embedded EL0 program proves remote-running group teardown. Its leader
 clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
 worker publishes a release-ordered running flag before spinning in EL0. The
@@ -235,8 +251,8 @@ The offline scheduler foundation adds:
   inner-shareable page invalidation (`TLBI VAE1IS`) for shared process roots.
 
 These changes preserve existing CPU0 wrappers. The boot probe is genuine
-parallel EL0 evidence, but it is not evidence of real Firefox overlap or safe
-general process migration. A separate production-role fixture uses the
+parallel EL0 evidence, but it is not evidence of real Firefox overlap. A
+separate production-role fixture uses the
 upstream musl pthread ELF under the exact Firefox scheduler role to exercise
 clone, futex, pipe, signal, AP block/wake, join, exit, wait, and reap after the
 desktop has initialized. It is explicitly not a substitute for real Firefox.
@@ -245,13 +261,16 @@ desktop has initialized. It is explicitly not a substitute for real Firefox.
 
 - Initial and exception-time AP selectors restrict candidates to non-leader
   Firefox workers after desktop startup. Leaders and all other roles remain on
-  CPU0. Broader affinity/load balancing remains gated until device-owning and
-  PID1/UI paths are qualified.
+  CPU0. Eligible threads may select kernel-owned masks through syscall 148;
+  broader production roles and automatic load balancing remain gated until
+  device-owning and PID1/UI paths are qualified.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
   ownership through a Ready/unowned publication. Six load tasks also contend
   through 288 yields on the shared Ready queue and receive 99 dispatches on
-  each AP with exclusive ownership. Production policy, priorities, repeated
-  automatic migration, and Firefox/desktop contention remain open.
+  each AP with exclusive ownership. The musl production fixture also forces
+  three caller-selected cross-AP migrations and restores its AP-pool masks.
+  Broader production policy/priorities, automatic load-driven migration, and
+  Firefox/desktop contention remain open.
 - `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
   loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit

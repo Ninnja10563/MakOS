@@ -64,6 +64,7 @@ const SYS_TYPED_SERVICE_CONNECT: u64 = 144;
 const SYS_TYPED_SERVICE_ACCEPT: u64 = 145;
 const SYS_TYPED_CHANNEL_SEND: u64 = 146;
 const SYS_TYPED_CHANNEL_RECEIVE: u64 = 147;
+const SYS_THREAD_AFFINITY: u64 = 148;
 const ERROR_INVALID: u64 = (-1i64) as u64;
 
 const ABI_VERSION_1_0: u64 = 0x0001_0000;
@@ -88,6 +89,7 @@ const ABI_FEATURE_VM_REGIONS: u64 = 1 << 17;
 const ABI_FEATURE_EXEC_BY_PATH: u64 = 1 << 18;
 const ABI_FEATURE_PROCESS_STARTUP: u64 = 1 << 19;
 const ABI_FEATURE_TYPED_IPC: u64 = 1 << 21;
+const ABI_FEATURE_CPU_AFFINITY: u64 = 1 << 22;
 const ABI_FEATURES: u64 = ABI_FEATURE_IPC
     | ABI_FEATURE_PROCESS
     | ABI_FEATURE_VM
@@ -108,7 +110,8 @@ const ABI_FEATURES: u64 = ABI_FEATURE_IPC
     | ABI_FEATURE_VM_REGIONS
     | ABI_FEATURE_EXEC_BY_PATH
     | ABI_FEATURE_PROCESS_STARTUP
-    | ABI_FEATURE_TYPED_IPC;
+    | ABI_FEATURE_TYPED_IPC
+    | ABI_FEATURE_CPU_AFFINITY;
 
 static SYSCALL_COUNT: AtomicU64 = AtomicU64::new(0);
 static IPC_PROVEN: AtomicBool = AtomicBool::new(false);
@@ -169,6 +172,18 @@ pub fn dispatch(registers: &mut crate::arch::SavedRegisters, frame: &mut crate::
         ),
         SYS_TYPED_CHANNEL_RECEIVE => {
             typed_channel_receive(registers.rdi, registers.rsi, registers.rdx)
+        }
+        SYS_THREAD_AFFINITY => {
+            if !crate::scheduler::thread_in_current_process(registers.rsi) {
+                (-3i64) as u64
+            } else {
+                match registers.rdi {
+                    0 => 1,
+                    1 if registers.rdx == 1 => 0,
+                    1 => (-22i64) as u64,
+                    _ => (-22i64) as u64,
+                }
+            }
         }
         SYS_EXIT => crate::process::exit_current(registers.rdi),
         SYS_READ_KEY => {
@@ -308,7 +323,7 @@ pub fn dispatch(registers: &mut crate::arch::SavedRegisters, frame: &mut crate::
             0 => ABI_VERSION_1_0,
             1 => SYS_PROCESS_SPAWN_PATH_ARGS,
             2 => ABI_FEATURES,
-            3 => SYS_TYPED_CHANNEL_RECEIVE,
+            3 => SYS_THREAD_AFFINITY,
             _ => ERROR_INVALID,
         },
         SYS_EVENT_CREATE => {

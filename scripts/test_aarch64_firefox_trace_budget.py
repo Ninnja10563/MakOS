@@ -17,7 +17,9 @@ POOL_PATCH = (
 ).read_text()
 
 assert "const THREAD_TRACE_LIMIT: u64 = 8;" in PROCESS
-assert PROCESS.count("< THREAD_TRACE_LIMIT") == 2
+assert PROCESS.count("< THREAD_TRACE_LIMIT") == 4
+assert "THREAD_AFFINITY_TRACES.fetch_add" in PROCESS
+assert "THREAD_AFFINITY_SET_TRACES.fetch_add" in PROCESS
 assert "const FIREFOX_SOCKET_TRACE_LIMIT: u64 = 8;" in SOCKET
 assert SOCKET.count("FIREFOX_SOCKET_TRACE_LIMIT") == 4
 assert "MAKOS_FIREFOX_SOCKET_CREATE_FAIL" in SOCKET

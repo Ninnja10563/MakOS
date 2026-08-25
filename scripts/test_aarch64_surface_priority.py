@@ -59,8 +59,8 @@ assert ".or_else(||" in prioritize
 assert "set_surface_priority(tid)" in prioritize
 assert "saturating_add(SURFACE_PRIORITY_TICKS)" in set_priority
 assert "now > deadline" in active_priority
-assert "slot.pid == slot.group_pid" in priority_affinity
-assert "cpu == 0" in priority_affinity and "cpu != 0" in priority_affinity
+assert "slot.role == ProcessRole::Firefox" in priority_affinity
+assert "slot.affinity_mask & (1u8 << cpu) != 0" in priority_affinity
 assert "FIREFOX_INPUT_WATCHER_BLOCK_REPORTED" in input_block
 assert "MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK" in input_block
 assert "SURFACE_MAIN_HANDOFF_PENDING.store(true" in handoff

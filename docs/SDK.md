@@ -39,6 +39,7 @@ Query `makos_abi_info(0)` against `MAKOS_ABI_VERSION`; query feature mask with
 selector 2. Available wrappers cover console output, VFS open/read/close,
 legacy channels, typed 64-byte IPC messages, capability-gated service routing,
 generation-safe attenuated handle transfer, stat/directory iteration, page mapping, threads with one argument,
+kernel-owned thread-affinity get/set masks,
 kernel events, process exit, process-owned surfaces, connected AF_INET UDP/TCP
 sockets, authenticated package install/query/rollback/removal, and 48 kHz
 stereo PCM. `makos_package_install` accepts legacy `libc` or signed `MAKDEP1`

@@ -33,6 +33,10 @@ WATCHER_BLOCKED_MARKER = b"MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK"
 WATCHER_AP_MARKER = b"MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK"
 LEADER_DISPATCH_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK"
 INPUT_PRIORITY_MARKER = b"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK"
+AFFINITY_MARKER = (
+    b"affinity=explicit singleton=0x2,0x4,0x8 restored=0xe "
+    b"get=kernel-owned migrations=forced:3"
+)
 REAP_MARKER = (
     b"MAKOS_AARCH64_FIREFOX_SMP_REAP_OK fixture=upstream-musl-pthread "
     b"role=firefox status=42"
@@ -175,10 +179,36 @@ def main() -> int:
                 common.wait_for_output(
                     selector, process, output, INPUT_PRIORITY_MARKER, 30
                 )
+                common.wait_for_output(selector, process, output, AFFINITY_MARKER, 20)
                 common.wait_for_output(selector, process, output, RESULT_MARKER, 60)
                 common.wait_for_output(selector, process, output, REAP_MARKER, 20)
 
                 decoded = output.decode(errors="replace")
+                affinity_gets = {
+                    (int(mask, 16), int(cpu))
+                    for _tid, mask, cpu in re.findall(
+                        r"MAKOS_AARCH64_THREAD_AFFINITY_OK tid=(\d+) "
+                        r"operation=get mask=(0x[0-9a-f]+) cpu=(\d+)",
+                        decoded,
+                    )
+                }
+                expected_affinity_gets = {(0x1, 0), (0x2, 1), (0x4, 2), (0x8, 3)}
+                if not expected_affinity_gets.issubset(affinity_gets):
+                    raise AssertionError(
+                        "explicit affinity did not migrate every Firefox worker: "
+                        f"observed={sorted(affinity_gets)}"
+                    )
+                forced_migrations = re.findall(
+                    r"MAKOS_AARCH64_THREAD_AFFINITY_OK tid=(\d+) operation=set "
+                    r"old_mask=(0x[0-9a-f]+) mask=(0x[0-9a-f]+) "
+                    r"source_cpu=(\d+) migrate=1",
+                    decoded,
+                )
+                if len(forced_migrations) < 3:
+                    raise AssertionError(
+                        "three explicit Firefox worker migrations were not observed: "
+                        f"{forced_migrations}"
+                    )
                 process_matches = re.findall(
                     r"MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK pid=(\d+)", decoded
                 )

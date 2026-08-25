@@ -170,6 +170,11 @@ apply_final_fixes()
 		git -C "$source_dir" apply --check "$patch"
 		git -C "$source_dir" apply "$patch"
 	fi
+	if ! grep -q 'M_thread_affinity = 148' "$source_dir/src/internal/makos_syscall.c"; then
+		patch="$port_dir/patches/0065-makos-cpu-affinity.patch"
+		git -C "$source_dir" apply --check "$patch"
+		git -C "$source_dir" apply "$patch"
+	fi
 }
 
 test -d "$source_dir/.git" || {
@@ -222,7 +227,7 @@ complete_series()
 	done
 	git -C "$source_dir" diff --check
 	apply_final_fixes
-	echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=64"
+	echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=65"
 	exit 0
 }
 
@@ -290,7 +295,7 @@ if grep -q 'M_pselect = 109' "$source_dir/src/internal/makos_syscall.c" \
 	fi
 	apply_final_fixes
 	git -C "$source_dir" diff --check
-	echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=64"
+	echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=65"
 	exit 0
 fi
 
@@ -337,7 +342,7 @@ if grep -q 'M_sigprocmask = 108' "$source_dir/src/internal/makos_syscall.c" \
 	git -C "$source_dir" apply "$patch"
 	apply_final_fixes
 	git -C "$source_dir" diff --check
-		echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=64"
+		echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=65"
 	exit 0
 fi
 
@@ -570,4 +575,4 @@ done
 
 apply_final_fixes
 git -C "$source_dir" diff --check
-echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=64"
+echo "MAKOS_MUSL_PATCHES_OK revision=$MUSL_COMMIT patches=65"

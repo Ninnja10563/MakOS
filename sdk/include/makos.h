@@ -27,6 +27,7 @@
 #define MAKOS_FEATURE_PROCESS_STARTUP (UINT64_C(1) << 19)
 #define MAKOS_FEATURE_TTY_SIGNALS (UINT64_C(1) << 20)
 #define MAKOS_FEATURE_TYPED_IPC (UINT64_C(1) << 21)
+#define MAKOS_FEATURE_CPU_AFFINITY (UINT64_C(1) << 22)
 #define MAKOS_TYPED_MESSAGE_VERSION UINT8_C(1)
 #define MAKOS_TYPED_MESSAGE_PAYLOAD_BYTES 52
 #define MAKOS_IPC_RIGHT_SEND UINT8_C(1)
@@ -126,6 +127,8 @@ long makos_process_spawn_path_args(
 long makos_thread_create(void (*entry)(void *), void *argument);
 long makos_thread_join(long tid);
 _Noreturn void makos_thread_exit(int status);
+long makos_thread_get_affinity(long tid);
+long makos_thread_set_affinity(long tid, uint64_t cpu_mask);
 uint64_t makos_abi_info(uint64_t selector);
 long makos_event_create(int initially_signaled);
 long makos_event_signal(long event);

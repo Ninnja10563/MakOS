@@ -67,19 +67,23 @@ Firefox input scheduling now has a deterministic production-role Pi/TCG proof.
 A real non-leader upstream-musl pthread blocks in surface syscall 140, QMP
 Ctrl-A dispatches that exact watcher on AP1-3, and the group leader receives a
 one-shot CPU0 handoff. The final run reports watcher TID 8 on AP2,
-`cpu_mask=0xe`, `overlap_mask=0x6`, dispatches `9826,11253,9695`, and status 42
-after the complete pthread/typed-IPC workload. The stale deadline no longer
+`cpu_mask=0xe`, `overlap_mask=0x6`, dispatches `9867,11100,9833`, and status 42
+after the complete pthread/typed-IPC workload. Target syscall 148/feature bit
+22 now owns real per-thread CPU masks; official-musl patch 65 translates
+`sched_getaffinity`/`sched_setaffinity`. The fixture verifies the CPU0 leader,
+forces and reads back three worker migrations through singleton AP masks, then
+restores mask `0xe` before all joins. The stale deadline no longer
 acts as a priority time slice, fixing observed fork-child starvation. Full
 `make unit check` passes. This is functional Pi/TCG evidence only; strict
 Firefox timing still needs the unchanged idle macOS/HVF gate.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 549619, user
-service `makos-visible-firefox-input-affinity-final.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 606789, user
+service `makos-visible-cpu-affinity-final2.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/qmp.sock`. Its
+`build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`d52ef39b7d81d783f8093c0dbfe58eba001c8262709f204d11542e1aa710edd1`;
+`390864fa24f82b330b75b2aa50e1fbcbffaea8ece41448acccaeb9638308f18c`;
 the inspected 800x600 login PNG is
 `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
 Stop it through QMP before

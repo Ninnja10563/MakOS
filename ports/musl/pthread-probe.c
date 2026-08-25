@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -48,6 +49,7 @@ static unsigned requeue_release;
 static unsigned requeue_completed;
 static volatile unsigned production_smp_ready;
 static volatile unsigned production_smp_release;
+static volatile unsigned production_affinity_failed;
 static volatile unsigned production_input_ready;
 static long production_input_surface;
 
@@ -93,6 +95,35 @@ static void winch_handler(int signal)
 static void *production_smp_worker(void *argument)
 {
 	unsigned index = (unsigned)(uintptr_t)argument;
+	unsigned first_cpu = index + 1;
+	unsigned second_cpu = (index + 1) % 3 + 1;
+	cpu_set_t requested;
+	cpu_set_t observed;
+	CPU_ZERO(&requested);
+	CPU_SET(first_cpu, &requested);
+	if (sched_setaffinity(0, sizeof requested, &requested) ||
+	    sched_getaffinity(0, sizeof observed, &observed) ||
+	    !CPU_ISSET(first_cpu, &observed) || CPU_COUNT(&observed) != 1)
+		__atomic_fetch_or(&production_affinity_failed, 1U << index,
+			__ATOMIC_RELEASE);
+	CPU_ZERO(&requested);
+	CPU_SET(second_cpu, &requested);
+	if (sched_setaffinity(0, sizeof requested, &requested) ||
+	    sched_getaffinity(0, sizeof observed, &observed) ||
+	    !CPU_ISSET(second_cpu, &observed) || CPU_COUNT(&observed) != 1)
+		__atomic_fetch_or(&production_affinity_failed, 1U << index,
+			__ATOMIC_RELEASE);
+	/* Restore the production AP pool after proving a forced migration. */
+	CPU_ZERO(&requested);
+	CPU_SET(1, &requested);
+	CPU_SET(2, &requested);
+	CPU_SET(3, &requested);
+	if (sched_setaffinity(0, sizeof requested, &requested) ||
+	    sched_getaffinity(0, sizeof observed, &observed) ||
+	    !CPU_ISSET(1, &observed) || !CPU_ISSET(2, &observed) ||
+	    !CPU_ISSET(3, &observed) || CPU_COUNT(&observed) != 3)
+		__atomic_fetch_or(&production_affinity_failed, 1U << index,
+			__ATOMIC_RELEASE);
 	__atomic_fetch_or(&production_smp_ready, 1U << index, __ATOMIC_RELEASE);
 	while (!__atomic_load_n(&production_smp_release, __ATOMIC_ACQUIRE))
 		makos_call(1, 0, 0);
@@ -118,6 +149,11 @@ static int production_smp_overlap_probe(void)
 	void *result = 0;
 	production_smp_ready = 0;
 	production_smp_release = 0;
+	production_affinity_failed = 0;
+	cpu_set_t leader_affinity;
+	if (sched_getaffinity(0, sizeof leader_affinity, &leader_affinity) ||
+	    !CPU_ISSET(0, &leader_affinity) || CPU_COUNT(&leader_affinity) != 1)
+		return 10;
 	for (unsigned index = 0; index < 3; index++)
 		if (pthread_create(&workers[index], 0, production_smp_worker,
 		    (void *)(uintptr_t)index))
@@ -129,6 +165,8 @@ static int production_smp_overlap_probe(void)
 	}
 	if (__atomic_load_n(&production_smp_ready, __ATOMIC_ACQUIRE) != 0x7)
 		return 2;
+	if (__atomic_load_n(&production_affinity_failed, __ATOMIC_ACQUIRE))
+		return 11;
 	/* Keep every worker Ready until the kernel observes concurrent AP owners. */
 	for (unsigned attempts = 0; attempts < 1000; attempts++) makos_call(1, 0, 0);
 	__atomic_store_n(&production_smp_release, 1, __ATOMIC_RELEASE);
@@ -148,7 +186,7 @@ static int production_smp_overlap_probe(void)
 	if (pthread_join(input_watcher, &result) || result) return 7;
 	if (makos_call4(123, production_input_surface, 0, 0, 0) != 1) return 8;
 	static const char marker[] =
-		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded\n"
+		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded affinity=explicit singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned migrations=forced:3\n"
 		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event\n";
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;

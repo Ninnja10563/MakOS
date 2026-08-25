@@ -69,7 +69,8 @@
 66/writev -> 17/write (ordered bounded iovec writes, POSIX partial-result semantics)
 48/faccessat -> 36/stat (AT_FDCWD, F_OK/R_OK/W_OK/X_OK, session credentials)
 53/fchmodat -> 36/stat (AT_FDCWD, idempotent existing-mode chmod only; mode mutation returns ENOTSUP)
-123/sched_getaffinity -> native single-vCPU mask (bounded cpuset)
+122/sched_setaffinity -> native per-thread validated CPU mask
+123/sched_getaffinity -> native kernel-owned per-thread CPU mask (bounded cpuset)
 163/getrlimit + 261/prlimit64 -> fixed enforced platform limits (query; incompatible mutation denied)
 165/getrusage -> zero-initial process/thread/child counters until accounting lands
 166/umask -> libc process-local atomic mask

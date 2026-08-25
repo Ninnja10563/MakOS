@@ -229,6 +229,7 @@ unit:
 	python3 scripts/test_aarch64_madvise.py
 	python3 scripts/test_aarch64_scm_rights.py
 	python3 scripts/test_aarch64_typed_ipc.py
+	python3 scripts/test_cpu_affinity.py
 	python3 scripts/test_aarch64_surface_priority.py
 	python3 scripts/test_aarch64_firefox_interaction.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
@@ -279,6 +280,7 @@ check:
 	python3 scripts/test_aarch64_madvise.py
 	python3 scripts/test_aarch64_scm_rights.py
 	python3 scripts/test_aarch64_typed_ipc.py
+	python3 scripts/test_cpu_affinity.py
 	python3 scripts/test_aarch64_surface_priority.py
 	python3 scripts/test_aarch64_firefox_interaction.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py

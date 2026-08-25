@@ -16,7 +16,7 @@ for function in ("pub fn kill(", "pub fn kill_task("):
     assert function in TTY
 assert "may_signal_process" in TTY
 assert "SYS_SIGNAL: u64 = 142" in DISPATCH
-assert "3 => SYS_TYPED_CHANNEL_RECEIVE" in DISPATCH
+assert "3 => SYS_THREAD_AFFINITY" in DISPATCH
 yield_dispatch = DISPATCH[DISPATCH.index("SYS_YIELD =>") : DISPATCH.index("SYS_EXIT =>")]
 assert "finish_signal_delivery(frame);" in yield_dispatch
 for fragment in (
@@ -30,7 +30,7 @@ for fragment in (
 ):
     assert fragment in PATCH
 assert "patches/0064-makos-directed-signals.patch" in APPLY
-assert APPLY.count("patches=64") == 4
+assert APPLY.count("patches=65") == 4
 for fragment in (
     "kill(getpid(), SIGWINCH)",
     "pthread_kill(thread, SIGWINCH)",

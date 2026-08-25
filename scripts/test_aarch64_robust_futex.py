@@ -36,7 +36,7 @@ for fragment in (
 ):
     assert fragment in PATCH
 assert "patches/0063-makos-robust-futex.patch" in APPLY
-assert APPLY.count("patches=64") == 4
+assert APPLY.count("patches=65") == 4
 
 for fragment in (
     "pthread_mutexattr_setrobust(&robust_attribute, PTHREAD_MUTEX_ROBUST)",

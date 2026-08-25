@@ -28,7 +28,7 @@ for symbol in (
     assert symbol in PATCH
 
 assert 'patches/0062-makos-symlinks-timestamps.patch' in APPLY
-assert APPLY.count("patches=64") == 4
+assert APPLY.count("patches=65") == 4
 for operation in (
     "symlink(metadata_target, metadata_link)",
     "readlink(metadata_link, link_output, sizeof link_output)",

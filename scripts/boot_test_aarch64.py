@@ -783,7 +783,7 @@ def main() -> int:
                 b"MAKOS_AARCH64_SCHEDULER_OK processes=2 timer_preemptions=",
                 b"context=x0-x30,elr,spsr,sp_el0,ttbr0,tpidr_el0,q0-q31,fpcr,fpsr isolated_ttbr0=1 spawn=1 concurrent=1 patterns=distinct exit=1 wait=1 reap=1 free_balance=1",
                 b"MAKOS_AARCH64_USER_OK pid=1 el=0 elf=1 svc=1 write=1 abi=1 clock=1 isolation=ttbr0",
-                b"MAKOS_AARCH64_ABI_OK version=1.0 normative_max=57 target_extension_max=147 features=ipc,process,vm,vfs,network,graphics,auth,log,sync,ipv6,selfhost-seed,sockets,packages,vm-regions,exec-path,startup-vectors,tty-signals,typed-ipc truthful=1",
+                b"MAKOS_AARCH64_ABI_OK version=1.0 normative_max=57 target_extension_max=148 features=ipc,process,vm,vfs,network,graphics,auth,log,sync,ipv6,selfhost-seed,sockets,packages,vm-regions,exec-path,startup-vectors,tty-signals,typed-ipc,cpu-affinity truthful=1",
                 b"MAKOS_AARCH64_LOG_OK structured=1 ring=32 pid=1 severity=5 monotonic=1 readback=1",
                 b"MAKOS_STRUCTURED_LOG_PERSIST_OK path=/.makos-system-log format=MAKLOG01 records=",
                 b"MAKOS_AARCH64_PROCESS_OK pid=1 exit=42 scheduler=saved-context address_space=isolated lifecycle=ready,running,zombie,reaped",

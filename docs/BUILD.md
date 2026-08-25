@@ -291,6 +291,11 @@ make test-aarch64-production-smp-runtime
 The shell's `firefox-smp` command executes the upstream musl pthread workload
 under the exact Firefox scheduler role. A production-only three-pthread
 rendezvous holds distinct workers Ready while the shared queue dispatches them.
+The kernel's target syscall 148 owns each task's CPU mask. Official-musl patch
+65 maps Linux AArch64 `sched_getaffinity` and `sched_setaffinity` onto that ABI.
+The leader verifies its fixed CPU0 mask; each worker selects and reads back two
+different singleton AP masks, forcing at least one migration, then restores and
+verifies the production AP-pool mask `0xe` before the rendezvous and joins.
 It then creates a real process-owned overflow surface, blocks a non-leader
 pthread in `surface_wait_event`, injects QMP Ctrl-A, and requires that exact
 watcher to dispatch on AP1-3 followed by one leader dispatch on CPU0. Priority
@@ -300,7 +305,9 @@ simultaneous multi-AP interval with distinct TIDs, exclusive ownership, the
 complete upstream-musl pthread/IPC workload, and status-42 reap. The final
 Raspberry Pi/QEMU 10.0.11 TCG pass records all APs (`cpu_mask=0xe`), live/final
 matching overlap on AP1/AP2 (`overlap_mask=0x6`, TIDs 5/6), watcher TID 8 on
-AP2, and dispatch counts `9826,11253,9695`. AArch64 serial output is protected by an
+AP2, and dispatch counts `9867,11100,9833`. The runtime also requires at least
+three kernel-recorded affinity changes that exclude the source PE and confirms
+all three workers restore mask `0xe`. AArch64 serial output is protected by an
 IRQ-masked cross-PE lock so these records cannot interleave by byte. This is a
 scheduler-role fixture, not real Firefox or
 macOS/HVF performance evidence. Real Firefox must still pass the unchanged

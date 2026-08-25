@@ -62,6 +62,7 @@ const ABI_FEATURE_PACKAGE_TRANSACTIONS: u64 = 1 << 16;
 const ABI_FEATURE_VM_REGIONS: u64 = 1 << 17;
 const ABI_FEATURE_EXEC_BY_PATH: u64 = 1 << 18;
 const ABI_FEATURE_PROCESS_STARTUP: u64 = 1 << 19;
+const ABI_FEATURE_CPU_AFFINITY: u64 = 1 << 22;
 const AF_INET: u64 = 2;
 const SOCK_STREAM: u64 = 1;
 const SOCK_DGRAM: u64 = 2;
@@ -284,7 +285,8 @@ fn abi_self_test() {
                 | ABI_FEATURE_PACKAGE_TRANSACTIONS
                 | ABI_FEATURE_VM_REGIONS
                 | ABI_FEATURE_EXEC_BY_PATH
-                | ABI_FEATURE_PROCESS_STARTUP)
+                | ABI_FEATURE_PROCESS_STARTUP
+                | ABI_FEATURE_CPU_AFFINITY)
             != ABI_FEATURE_SYNC
                 | ABI_FEATURE_LINUX_PERSONALITY
                 | ABI_FEATURE_AUDIO
@@ -297,6 +299,7 @@ fn abi_self_test() {
                 | ABI_FEATURE_VM_REGIONS
                 | ABI_FEATURE_EXEC_BY_PATH
                 | ABI_FEATURE_PROCESS_STARTUP
+                | ABI_FEATURE_CPU_AFFINITY
     {
         write(b"native ABI discovery failed\n");
         syscall(SYS_EXIT, 16, 0, 0);

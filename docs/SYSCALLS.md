@@ -29,13 +29,14 @@ meanings and object model stay architecture-neutral while parity expands.
 | 0 | ABI version (`0x0001_0000`) |
 | 1 | highest normative cross-architecture syscall number (`57`) |
 | 2 | feature bitset |
-| 3 | highest target extension (`147` both targets) |
+| 3 | highest target extension (`148` both targets) |
 
 Feature bits: IPC 0, process 1, VM 2, VFS 3, network 4, graphics 5, auth 6,
 structured log 7, synchronization 8, Linux personality 9, audio 10, IPv6 11,
 Windows personality 12, service supervision 13, self-hosting seed 14, socket
 objects 15, package transactions 16, VM regions 17, exec-by-path 18, process
-startup vectors 19, controlling TTY/signals 20, typed IPC/service routing 21.
+startup vectors 19, controlling TTY/signals 20, typed IPC/service routing 21,
+CPU affinity 22.
 Programs must query features
 before using optional groups.
 
@@ -48,7 +49,7 @@ cover authentication, account, session, and package transaction decisions;
 record metadata attributes each event to current PID.
 
 AArch64 currently reports bits 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 14, 15, 16, 17,
-18, 19, 20, and 21. Calls 56 and 57 now share the immutable static-ELF snapshot
+18, 19, 20, 21, and 22. Calls 56 and 57 now share the immutable static-ELF snapshot
 and loader; bit 19 records the versioned explicit startup-vector path.
 Restricted same-process system-package `execve` remains a target extension.
 
@@ -137,6 +138,7 @@ descriptor below, then builds child-owned vectors and advertises feature bit 19.
 | 145 | `typed_service_accept` | listener handle | oldest pending server endpoint/error |
 | 146 | `typed_channel_send` | endpoint, 64-byte message, optional handle, attenuated rights | 0/error; bounded FIFO and atomic transfer |
 | 147 | `typed_channel_receive` | endpoint, 64-byte output, transferred-handle output | 0/error; sender PID/UID stamped by kernel |
+| 148 | `thread_affinity` | operation (get=0/set=1), TID or 0 for caller, CPU mask | get returns mask; set returns 0/negative errno |
 | 61 | `net_config` | 12-byte IPv4/gateway/DNS output, length | 12/error |
 | 62 | `tty_read` | FD, output, length | bytes or negative errno |
 | 63 | `tty_write` | FD, bytes, length | bytes or negative errno |
@@ -208,6 +210,16 @@ results (`-ENOENT`, `-EIO`, `-EBADF`, `-EAGAIN`, `-EACCES`, `-EBUSY`,
 Legacy calls retain their documented error convention. Calls 12, 13, and 17
 also recognize inherited controlling-terminal descriptors 0, 0-2, and 1-2
 respectively, allowing libc to use ordinary `read`, `close`, and `write` paths.
+
+Call 148 owns affinity in kernel scheduler state and uses negative `ESRCH` or
+`EINVAL`. TID 0 addresses the caller; nonzero TIDs must belong to the caller's
+thread group. AArch64 accepts nonempty subsets of its four online CPUs for
+native and Firefox worker threads, forces a scheduling boundary when a caller
+excludes its current CPU, and sends a scheduler SGI for remote changes. Process
+leaders remain on CPU0 because they own desktop/device service work. x86_64's
+current uniprocessor scheduler truthfully accepts and reports only mask `0x1`.
+The musl adapter maps Linux AArch64 calls 122/123 to this ABI and clears the
+entire caller-provided `cpu_set_t` before copying out the native mask.
 
 TTY C layouts are fixed little-endian ABI records. `termios` is 56 bytes:
 four `uint32_t` flag words, `cc[32]`, then input/output speeds. `winsize` is

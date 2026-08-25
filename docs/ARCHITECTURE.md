@@ -155,6 +155,14 @@ and round-robin selection. Full `x0..x30`, `ELR_EL1`, `SPSR_EL1`, `SP_EL0`, and
 process-owned FDs, TTY state, sockets, surfaces, VM metadata, user frames, page
 tables, and address-space root.
 
+The four-PE QEMU `virt` path has CPU-indexed ownership and a bounded production
+policy after desktop startup. CPU0 retains process leaders and device service;
+Firefox and native worker threads can execute on AP1-3. Each context owns an
+8-bit affinity mask. Native syscall 148 validates same-thread-group access and
+nonempty online masks; exception-time replacement forces Ready/unowned
+publication and a scheduler SGI when migration is required. The current policy
+is deliberately narrower than general work-stealing desktop SMP.
+
 Parent wait reaps exited scheduler slot, process-owned FDs/handles/surfaces,
 user leaf mappings, page tables, and address-space root. Shared kernel identity
 mappings remain untouched; subsequent processes reuse reclaimed frames.

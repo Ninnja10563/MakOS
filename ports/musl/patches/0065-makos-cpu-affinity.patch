@@ -1,0 +1,48 @@
+diff --git a/src/internal/makos_syscall.c b/src/internal/makos_syscall.c
+--- a/src/internal/makos_syscall.c
++++ b/src/internal/makos_syscall.c
+@@ -83,6 +83,7 @@
+ 	L_sched_setscheduler = 119,
+ 	L_sched_getscheduler = 120,
+ 	L_sched_getparam = 121,
++	L_sched_setaffinity = 122,
+ 	L_sched_getaffinity = 123,
+ 	L_sched_yield = 124,
+ 	L_kill = 129,
+@@ -216,6 +217,7 @@
+ 	M_socket_bind = 135,
+ 	M_robust_list = 141,
+ 	M_signal = 142,
++	M_thread_affinity = 148,
+ };
+ 
+ struct makos_metadata {
+@@ -1023,10 +1025,25 @@
+ 	case L_sched_yield:
+ 		return makos_raw(M_yield, 0, 0, 0, 0, 0, 0);
+ 	case L_sched_getaffinity:
+-		if (a < 0 || b < 8 || !c) return -EINVAL;
++	{
++		unsigned long mask;
++		if (a < 0 || b < sizeof mask || !c) return -EINVAL;
++		mask = makos_raw(M_thread_affinity, 0, a, 0, 0, 0, 0);
++		if ((long)mask < 0) return mask;
+ 		memset((void *)c, 0, b);
+-		*(unsigned char *)c = 1;
+-		return 8;
++		memcpy((void *)c, &mask, sizeof mask);
++		return sizeof mask;
++	}
++	case L_sched_setaffinity:
++	{
++		unsigned long mask = 0;
++		const unsigned char *bytes = (const unsigned char *)c;
++		if (a < 0 || b < sizeof mask || !c) return -EINVAL;
++		memcpy(&mask, bytes, sizeof mask);
++		for (long index = sizeof mask; index < b; index++)
++			if (bytes[index]) return -EINVAL;
++		return makos_raw(M_thread_affinity, 1, a, mask, 0, 0, 0);
++	}
+ 	case L_clock_gettime:
+ 		if (a == CLOCK_MONOTONIC) {
+ 			result = makos_raw(M_clock_monotonic, 0, 0, 0, 0, 0, 0);

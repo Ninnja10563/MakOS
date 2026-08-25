@@ -27,33 +27,26 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG Firefox input-affinity milestone:
-  PID 549619, user service
-  `makos-visible-firefox-input-affinity-final.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG CPU-affinity milestone: PID 606789,
+  user service `makos-visible-cpu-affinity-final2.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N`, private boot clone
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/boot.img`, private sparse
-  data image `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/data.img`,
-  private variables
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/vars.fd`, QMP
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/qmp.sock`, serial
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/serial.log`, PID file
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N/qemu.pid`, and QMP
-  framebuffer capture `login.png`. Its boot
-  clone SHA-256 is
-  `d52ef39b7d81d783f8093c0dbfe58eba001c8262709f204d11542e1aa710edd1`,
-  exactly matching `build/makos-aarch64.img`. It is the sole QEMU
-  process and the ordinary config reports `smp_input_probe=0`,
-  `smp_tcp_probe=0`, four online PEs,
-  initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
-  `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
-  `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `97,101,99`, with no fatal/panic. The 800x600 PNG capture SHA-256 is
-  `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`; it was visually
-  inspected and shows the native login with username focus. VNC required QEMU's bundled
-  data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
-  for user testing; the framebuffer capture visibly shows the native login
-  dialog. Use QMP `quit` before any later runtime gate.
+  `build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q`, private read-only boot
+  clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
+  `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and capture `login.png`.
+  Boot clone and `build/makos-aarch64.img` both have SHA-256
+  `390864fa24f82b330b75b2aa50e1fbcbffaea8ece41448acccaeb9638308f18c`.
+  It is the sole QEMU process and reports four online PEs,
+  `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
+  `userspace_scheduler_cpus=4`, with no fatal/panic. The visually inspected
+  800x600 login PNG has SHA-256
+  `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`
+  and shows the native login with username focus. Keep it running for user
+  testing; use QMP `quit` before any later runtime gate. Prior PID 549619 and
+  session `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N` were
+  stopped cleanly through QMP before the affinity runtime; their files remain.
+  Intermediate PID 604562/session
+  `build/makos-pi-visible-cpu-affinity-final-0Fni6SPd` was stopped cleanly
+  through QMP before the bounded-trace qualification rerun; its files remain.
   Prior PID 504710/session
   `build/makos-pi-visible-makstate2-graph-final-5oeaMcSe` was stopped cleanly
   through QMP before the Firefox input-affinity runtime; its private files
@@ -314,8 +307,9 @@ Preserve existing files and changes.
   `MAKOS_AARCH64_SMP_LOAD_RUNTIME_OK accel=tcg tasks=6 worker_cpus=3 cpu_mask=0xe run_queue=shared-ready selection=per-cpu-round-robin ownership=exclusive`.
   Reproducer: `make test-aarch64-smp-load-runtime`. Full `make unit check`, the
   structural guard, release image/artifact build, focused runtime, and visible
-  login pass. Production priorities/affinity, automatic migration and real
-  Firefox/desktop contention remain open.
+  login pass. Explicit per-thread affinity and forced migration now pass as
+  described below; automatic load-driven balancing, broader production roles/
+  priorities and real Firefox/desktop contention remain open.
 - The desktop now opens a bounded production scheduler policy after driver and
   login-UI initialization. Leaders, non-Firefox roles, and all device MMIO stay
   on CPU0; only non-leader Firefox-role threads are AP-eligible. AP sleep, I/O,
@@ -423,12 +417,21 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 549619 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 606789 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- The Firefox input-affinity milestone is the current implementation state;
-  shared-Ready dispatch, forced migration, stateful TCP owner service and
-  CPU0-owned device services remain its foundations. Generated
+- Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
+  Same-thread-group get/set validates online masks; a caller excluding its
+  current PE crosses a real scheduling boundary. Official-musl patch 65 maps
+  Linux AArch64 `sched_getaffinity`/`sched_setaffinity`. The final focused
+  Pi/TCG fixture passes forced singleton migrations for all three Firefox-role
+  workers, restored `0xe` masks, joins, typed IPC and input-priority handling:
+  `cpu_mask=0xe`, dispatches `9867,11100,9833`, `overlap_mask=0x6`, TIDs 5/6,
+  watcher 8/AP2, status 42. Full `make unit check` passes. This is functional
+  Pi/TCG evidence only; unchanged strict Firefox Gate 3 remains first priority
+  on an idle macOS/HVF host.
+- Shared-Ready dispatch, stateful TCP owner service and CPU0-owned device
+  services remain the affinity milestone's foundations. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -464,7 +467,10 @@ Preserve existing files and changes.
   CPU0. Priority hints are role-affine and one-shot after selection; the
   1,000-tick deadline only expires stale hints. This also fixed CPU0-leader
   starvation of a freshly forked Firefox child during the fixture's typed-IPC
-  phase. Final evidence is `cpu_mask=0xe`, dispatches `9826,11253,9695`,
+  phase. The latest fixture also uses real musl affinity calls to verify the
+  CPU0 leader mask, force three worker migrations through singleton AP masks,
+  read them back from kernel state, and restore mask `0xe` before teardown.
+  Final evidence is `cpu_mask=0xe`, dispatches `9867,11100,9833`,
   `overlap_mask=0x6`, TIDs 5/6, watcher 8/AP2, status 42. Full `make unit check`,
   structural guards, release image and artifact checks pass. This is Pi/TCG
   functional evidence only; it does not replace the unchanged idle-macOS/HVF

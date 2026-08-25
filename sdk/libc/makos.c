@@ -46,6 +46,7 @@ enum {
     SYS_TYPED_SERVICE_ACCEPT = 145,
     SYS_TYPED_CHANNEL_SEND = 146,
     SYS_TYPED_CHANNEL_RECEIVE = 147,
+    SYS_THREAD_AFFINITY = 148,
 };
 
 static long syscall4(uint64_t number, uint64_t first, uint64_t second,
@@ -199,6 +200,14 @@ long makos_thread_join(long tid) {
 _Noreturn void makos_thread_exit(int status) {
     syscall4(SYS_THREAD_EXIT, (uint64_t)status, 0, 0, 0);
     __builtin_trap();
+}
+
+long makos_thread_get_affinity(long tid) {
+    return syscall4(SYS_THREAD_AFFINITY, 0, (uint64_t)tid, 0, 0);
+}
+
+long makos_thread_set_affinity(long tid, uint64_t cpu_mask) {
+    return syscall4(SYS_THREAD_AFFINITY, 1, (uint64_t)tid, cpu_mask, 0);
 }
 
 uint64_t makos_abi_info(uint64_t selector) {

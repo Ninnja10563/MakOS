@@ -226,6 +226,18 @@ pub fn current_tid() -> u64 {
     }
 }
 
+pub fn thread_in_current_process(tid: u64) -> bool {
+    let pid = current_pid();
+    let target = if tid == 0 { current_tid() } else { tid };
+    unsafe {
+        let tasks = (&raw const TASKS).cast::<Task>();
+        (0..TASK_COUNT).any(|index| {
+            let task = *tasks.add(index);
+            task.rsp != 0 && task.pid == pid && task.tid == target
+        })
+    }
+}
+
 pub fn address_space(pid: u64) -> Option<u64> {
     unsafe {
         let tasks = (&raw const TASKS).cast::<Task>();

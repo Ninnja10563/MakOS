@@ -146,6 +146,7 @@ struct ContextSlot {
     pid: u64,
     group_pid: u64,
     role: ProcessRole,
+    affinity_mask: u8,
     context: crate::arch::UserContext,
     clear_child_tid: u64,
     robust_list_head: u64,
@@ -164,6 +165,7 @@ impl ContextSlot {
         pid: 0,
         group_pid: 0,
         role: ProcessRole::None,
+        affinity_mask: 0,
         context: crate::arch::UserContext::initial(0, 0, 0, 0),
         clear_child_tid: 0,
         robust_list_head: 0,
@@ -232,10 +234,7 @@ impl SchedulerState {
             } else if slot.is_some_and(|slot| slot.role == ProcessRole::SmpLoad) {
                 cpu != 0 && cpu < SMP_PROBE_AFFINITY.len()
             } else {
-                cpu == 0
-                    || slot.is_some_and(|slot| {
-                        slot.pid != slot.group_pid && slot.role == ProcessRole::Firefox
-                    })
+                slot.is_some_and(|slot| slot.affinity_mask & (1u8 << cpu) != 0)
             }
         });
         if cpu != 0 {
@@ -295,6 +294,8 @@ static SURFACE_PRIORITY_AP_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_MAIN_DISPATCH_REPORTED: AtomicBool = AtomicBool::new(false);
 static THREAD_CREATE_TRACES: AtomicU64 = AtomicU64::new(0);
 static THREAD_EXIT_TRACES: AtomicU64 = AtomicU64::new(0);
+static THREAD_AFFINITY_TRACES: AtomicU64 = AtomicU64::new(0);
+static THREAD_AFFINITY_SET_TRACES: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_ACTIVE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_PEAK_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_TIDS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
@@ -2318,6 +2319,95 @@ pub fn set_task_scheduler(tid: u64, policy: u64, priority: u64) -> bool {
     })
 }
 
+/// Return the kernel-owned CPU mask for a task in the caller's thread group.
+/// A zero TID names the calling thread, matching Linux sched affinity calls.
+pub fn task_affinity(tid: u64) -> Result<u64, i64> {
+    let result = with_state(|state| {
+        let current_tid = state.table.current_pid_on(scheduler_cpu()).ok_or(-3i64)?;
+        let group_pid = state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == current_tid)
+            .map(|slot| slot.group_pid)
+            .ok_or(-3i64)?;
+        let target = if tid == 0 { current_tid } else { tid };
+        let slot = state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == target && slot.group_pid == group_pid)
+            .ok_or(-3i64)?;
+        let process = state.table.get(target).ok_or(-3i64)?;
+        if matches!(process.state, makos_process_table::ProcessState::Zombie) {
+            return Err(-3);
+        }
+        Ok((target, u64::from(slot.affinity_mask)))
+    });
+    match result {
+        Ok((target, mask)) => {
+            if THREAD_AFFINITY_TRACES.fetch_add(1, Ordering::Relaxed) < THREAD_TRACE_LIMIT {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_THREAD_AFFINITY_OK tid={} operation=get mask={:#x} cpu={}",
+                    target,
+                    mask,
+                    scheduler_cpu(),
+                );
+            }
+            Ok(mask)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Replace a task's CPU mask. Process leaders remain CPU0-owned; production
+/// Firefox and native non-leader threads may select any online CPU. The return
+/// value tells the syscall path to yield when the caller excluded its CPU.
+pub fn set_task_affinity(tid: u64, mask: u64) -> Result<bool, i64> {
+    const ONLINE_CPU_MASK: u64 = 0xf;
+    if mask == 0 || mask & !ONLINE_CPU_MASK != 0 {
+        return Err(-22i64);
+    }
+    let cpu = scheduler_cpu();
+    let result = with_state(|state| {
+        let current_tid = state.table.current_pid_on(cpu).ok_or(-3i64)?;
+        let group_pid = state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == current_tid)
+            .map(|slot| slot.group_pid)
+            .ok_or(-3i64)?;
+        let target = if tid == 0 { current_tid } else { tid };
+        let slot = state
+            .contexts
+            .iter_mut()
+            .find(|slot| slot.pid == target && slot.group_pid == group_pid)
+            .ok_or(-3i64)?;
+        if target == group_pid {
+            if mask != 1 {
+                return Err(-22i64);
+            }
+        } else if !matches!(slot.role, ProcessRole::Firefox | ProcessRole::Native) {
+            return Err(-22i64);
+        }
+        let prior = slot.affinity_mask;
+        slot.affinity_mask = mask as u8;
+        let migrate_caller = target == current_tid && mask & (1u64 << cpu) == 0;
+        Ok((target, prior, migrate_caller))
+    });
+    let (target, prior, migrate_caller) = result?;
+    if THREAD_AFFINITY_SET_TRACES.fetch_add(1, Ordering::Relaxed) < THREAD_TRACE_LIMIT {
+        crate::serial_println!(
+            "MAKOS_AARCH64_THREAD_AFFINITY_OK tid={} operation=set old_mask={:#x} mask={:#x} source_cpu={} migrate={}",
+            target,
+            prior,
+            mask,
+            cpu,
+            u8::from(migrate_caller),
+        );
+    }
+    notify_idle_cpus();
+    Ok(migrate_caller)
+}
+
 pub fn wake_task(group_pid: u64, tid: u64) -> bool {
     let woken = with_state(|state| {
         if !state
@@ -2921,6 +3011,11 @@ pub fn clone_thread(
             pid: tid,
             group_pid: parent.group_pid,
             role: parent.role,
+            affinity_mask: if parent.role == ProcessRole::Firefox {
+                0xe
+            } else {
+                parent.affinity_mask
+            },
             context: child_context,
             clear_child_tid: child_tid_address,
             robust_list_head: 0,
@@ -2984,6 +3079,7 @@ pub fn fork_process(frame: &crate::arch::ExceptionFrame) -> Option<u64> {
             pid: child_pid,
             group_pid: child_pid,
             role: parent.role,
+            affinity_mask: 1,
             context: child_context,
             clear_child_tid: 0,
             robust_list_head: 0,
@@ -3620,9 +3716,9 @@ fn production_worker_enter(cpu: usize, tid: u64, group_pid: u64) {
         "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
         group_pid,
         active & 0xe,
-        tids[1],
-        tids[2],
-        tids[3],
+        seen[1],
+        seen[2],
+        seen[3],
     );
 }
 
@@ -3827,6 +3923,7 @@ fn install_loaded_process(
             pid,
             group_pid: pid,
             role,
+            affinity_mask: 1,
             context,
             clear_child_tid: 0,
             robust_list_head: 0,
@@ -5869,11 +5966,8 @@ fn active_surface_priority_tid() -> u64 {
 
 fn surface_priority_cpu_eligible(slot: &ContextSlot, cpu: usize) -> bool {
     slot.role == ProcessRole::Firefox
-        && if slot.pid == slot.group_pid {
-            cpu == 0
-        } else {
-            cpu != 0
-        }
+        && cpu < 4
+        && slot.affinity_mask & (1u8 << cpu) != 0
 }
 
 fn select_surface_priority(
@@ -6005,9 +6099,18 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             return (prior_pid, None, true);
         }
         let priority = select_surface_priority(state, prior_pid, cpu);
-        let next = priority
-            .or_else(|| state.schedule_next_for_cpu(cpu))
-            .unwrap_or_else(|| crate::fatal("AArch64 schedule found no runnable process"));
+        let next = priority.or_else(|| state.schedule_next_for_cpu(cpu));
+        let Some(next) = next else {
+            if cpu == 0 {
+                crate::fatal("AArch64 schedule found no runnable process");
+            }
+            // The current AP task may have just excluded this CPU through its
+            // affinity mask. Publish it Ready/unowned, leave EL0, and let the
+            // outer secondary dispatcher idle until an eligible task arrives.
+            crate::arch::switch_address_space(crate::arch::kernel_root());
+            crate::arch::return_to_kernel(frame, 0);
+            return (prior_pid, None, true);
+        };
         record_smp_load_dispatch(state, next.pid, cpu);
         let index = state
             .contexts

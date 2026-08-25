@@ -2342,6 +2342,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const SYS_TYPED_SERVICE_ACCEPT: u64 = 145;
     const SYS_TYPED_CHANNEL_SEND: u64 = 146;
     const SYS_TYPED_CHANNEL_RECEIVE: u64 = 147;
+    const SYS_THREAD_AFFINITY: u64 = 148;
     const ABI_FEATURE_IPC: u64 = 1 << 0;
     const ABI_FEATURE_PROCESS: u64 = 1 << 1;
     const ABI_FEATURE_VM: u64 = 1 << 2;
@@ -2360,6 +2361,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const ABI_FEATURE_PROCESS_STARTUP: u64 = 1 << 19;
     const ABI_FEATURE_TTY_SIGNALS: u64 = 1 << 20;
     const ABI_FEATURE_TYPED_IPC: u64 = 1 << 21;
+    const ABI_FEATURE_CPU_AFFINITY: u64 = 1 << 22;
     const ABI_FEATURES: u64 = ABI_FEATURE_IPC
         | ABI_FEATURE_PROCESS
         | ABI_FEATURE_VM
@@ -2377,7 +2379,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         | ABI_FEATURE_EXEC_BY_PATH
         | ABI_FEATURE_PROCESS_STARTUP
         | ABI_FEATURE_TTY_SIGNALS
-        | ABI_FEATURE_TYPED_IPC;
+        | ABI_FEATURE_TYPED_IPC
+        | ABI_FEATURE_CPU_AFFINITY;
     const ERROR_INVALID: u64 = u64::MAX;
 
     match frame.registers[8] {
@@ -3355,6 +3358,32 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             finish_signal_delivery(frame);
             return;
         }
+        SYS_THREAD_AFFINITY => {
+            let tid = frame.registers[1];
+            let mut migrate = false;
+            match frame.registers[0] {
+                0 => {
+                    frame.registers[0] = crate::aarch64_process::task_affinity(tid)
+                        .unwrap_or_else(|error| error as u64);
+                }
+                1 => match crate::aarch64_process::set_task_affinity(tid, frame.registers[2]) {
+                    Ok(needs_migration) => {
+                        frame.registers[0] = 0;
+                        migrate = needs_migration;
+                    }
+                    Err(error) => frame.registers[0] = error as u64,
+                },
+                _ => frame.registers[0] = (-22i64) as u64,
+            }
+            finish_signal_delivery(frame);
+            if migrate {
+                crate::aarch64_process::yield_from_exception(frame);
+                // The scheduling boundary publishes the caller Ready before
+                // this SGI asks every other CPU to recheck eligibility.
+                crate::arch::send_scheduler_ipi();
+            }
+            return;
+        }
         _ => {}
     }
 
@@ -4241,7 +4270,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             1 => 57,
             2 => ABI_FEATURES,
             // Highest AArch64 extension implemented by this kernel.
-            3 => SYS_TYPED_CHANNEL_RECEIVE,
+            3 => SYS_THREAD_AFFINITY,
             _ => ERROR_INVALID,
         },
         SYS_STAT => {

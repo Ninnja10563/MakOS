@@ -4,6 +4,22 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 now exposes kernel-owned per-thread CPU affinity through
+  target syscall 148 and ABI feature bit 22. Get/set are restricted to the
+  caller's thread group, reject empty/offline masks, keep process leaders on
+  CPU0, and force a scheduling boundary when a caller excludes its current
+  PE. Official-musl patch 65 translates Linux AArch64
+  `sched_getaffinity`/`sched_setaffinity`; CPython configuration now detects
+  the real API. The upstream-musl Firefox-role fixture verifies leader mask
+  `0x1`, each worker's singleton masks, at least three actual cross-PE
+  migrations, restored AP-pool mask `0xe`, concurrent distinct-TID ownership,
+  all joins, the AP input watcher, and status-42 reap. Final Raspberry
+  Pi/QEMU 10.0.11 TCG evidence reports `cpu_mask=0xe`, dispatches
+  `9867,11100,9833`, `overlap_mask=0x6` with TIDs 5/6, and watcher TID 8 on
+  AP2. Full `make unit check`, both architecture checks, artifact validation,
+  and the focused runtime pass. This remains Pi/TCG functional evidence; the
+  scheduler row remains Partial and unchanged strict Firefox qualification is
+  still pending on an idle macOS/HVF host.
 - 2026-08-26 Firefox surface-key scheduling is now role-affine across the
   production AArch64 SMP policy. A blocked non-leader Firefox native-event
   watcher is selected only on AP1-3, while its bounded main-thread handoff is
@@ -292,12 +308,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. That visible guest
-  was later stopped cleanly. The current visible input-affinity milestone is
-  PID 549619 under `makos-visible-firefox-input-affinity-final.service`, with
+  was later stopped cleanly. The current visible CPU-affinity milestone is
+  PID 606789 under `makos-visible-cpu-affinity-final2.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-firefox-input-affinity-final-WGpssi0N`; its boot clone
+  `build/makos-pi-visible-cpu-affinity-final2-kd98tM5Q`; its boot clone
   exactly matches the current release image SHA-256
-  `d52ef39b7d81d783f8093c0dbfe58eba001c8262709f204d11542e1aa710edd1`.
+  `390864fa24f82b330b75b2aa50e1fbcbffaea8ece41448acccaeb9638308f18c`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial
@@ -701,8 +717,10 @@ Last updated: 2026-08-26.
   queue balances six EL0 load tasks over AP1-3 through 288 yields with even
   `99,99,99` dispatch counts and
   exclusive ownership. After desktop startup, Firefox workers are AP-eligible
-  while leaders and all other roles stay on CPU0; production priorities,
-  automatic migration, and real Firefox/desktop contention remain open.
+  while leaders and all other roles stay on CPU0. Syscall 148 now provides
+  explicit per-thread masks and forced migration for eligible workers;
+  automatic load-driven balancing, broader production roles/priorities, and
+  real Firefox/desktop contention remain open.
   CPU0-only virtio input, virtio-net TX/RX,
   virtio-blk, and virtio-GPU submission now have focused AP runtime evidence
   for keyboard wake, copied UDPv4 DNS send/receive, timer-serviced 4 KiB
