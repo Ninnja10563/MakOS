@@ -23,11 +23,18 @@ Branch: main
 3. Confirm no QEMU is running. Run these gates in order and save complete logs:
 
        make unit check
+       make test-aarch64-selfhost-runtime
        make test-aarch64-native-smp-runtime
        make test-aarch64-production-smp-runtime
        make test-aarch64-cursor-runtime
 
-   The Native gate must report all of the following without borrowing Firefox
+   The self-hosting gate must report
+   `MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5` with ELF64 ET_REL
+   emission, five `R_AARCH64_CALL26` relocations, one-object guest linking,
+   W^X execution result 42, `max_functions=6`, and a denied seventh function.
+   Its final host marker must include `max_functions_per_unit=6`,
+   `six_function_calls=5`, and `six_function_result=42`. The Native gate must
+   report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero
    dispatch counts on AP1/AP2/AP3, a live/final overlap match containing at
    least two distinct nonzero TIDs, kernel-owned affinity get/set/migration and

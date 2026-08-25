@@ -44,7 +44,8 @@ linker resolves external `_start`→`answer`, same-object `answer`→`adjust`, a
 external `adjust`→`combine`,
 applies three `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol, missing-library, and duplicate-definition inputs, rejects duplicate/over-limit
-parameters and over-limit calls, rejects a fourth translation-unit function,
+parameters and over-limit calls, accepts up to six translation-unit functions
+with eight bounded relocations, rejects a seventh function,
 emits 500 linked bytes in an 815-byte `ET_EXEC`, directly executes
 `helper(40)=42`, and separately compiles `sum3(int,int,int)` plus
 `invoke3(int)` into 140 bytes and a parsed 752-byte `ET_REL`, resolves its
@@ -52,6 +53,9 @@ same-object `CALL26` with entry offset 80, and executes both as 42,
 emits a separate 168-byte three-definition arithmetic unit in a parsed 784-byte
 `ET_REL` and executes signed division `6`/`-6`, remainder `2`/`-2`, and unary
 negation `-42`/`42` while rejecting direct literal-zero divisors,
+and separately compiles a six-function `stage1`..`stage6` call chain into a
+parsed ELF64 `ET_REL`, resolves five same-object `CALL26` relocations, enforces
+writable/NX then RX, and executes `stage6(36)=42`,
 executes both linked branch paths plus direct delta-1/delta-2 loop, exact
 indexed-array outcomes (`41:42:0`, `42:0:44`, and `1:2:0`), all four signed
 ordering relations, a `pointer + -1` load, and pointer differences `3`/`-3`,
@@ -113,13 +117,13 @@ built-in/service roles remain Partial. Use
 `docs/MACOS-HVF-TEST-AGENT-PROMPT.md` to hand this large milestone to the
 macOS testing agent; it preserves every strict Firefox threshold.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 699985, user
-service `makos-visible-native-smp-final3.service`, VNC
-`127.0.0.1:5901`, session `build/makos-pi-visible-native-smp-final3-54Bfbyox`, private
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 710770, user
+service `makos-visible-selfhost-six-function-final.service`, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv`, private
 boot/data/vars in that session, and QMP
-`build/makos-pi-visible-native-smp-final3-54Bfbyox/qmp.sock`. Its
+`build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv/qmp.sock`. Its
 boot SHA-256 matches `build/makos-aarch64.img` at
-`f194b48ee3be8a8b939d41f312896f5479fff795965f4fd16a6dcbb8101efd70`;
+`77b56e1ec6a4da109056b332c187229415aa5d2387484ad96bd1b031e33ddb67`;
 the inspected 800x600 login PNG is
 `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
 Stop it through QMP before

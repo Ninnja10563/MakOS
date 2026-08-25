@@ -66,7 +66,7 @@ See `docs/SYSCALLS.md`.
 
 The `selfhost-aarch64` shell command launches a sandboxed EL0 tool that reads
 source from MakFS and writes ELF64 objects and an executable back through the
-normal VFS. Its C subset accepts up to three `int` functions in one translation
+normal VFS. Its C subset accepts up to six `int` functions in one translation
 unit, each with up to three typed `int`/`int *` parameters. Integer parameters
 may be used and assigned in the body.
 The body may declare up to four initialized register locals, use integer
@@ -141,6 +141,12 @@ parameter names, more than three parameters or
 call arguments, malformed relocation types, unresolved symbols, duplicate
 definitions, and malformed object metadata fail closed.
 
+One translation unit may emit up to eight call relocations. The focused
+six-definition `stage1`..`stage6` chain produces five genuine same-object
+`R_AARCH64_CALL26` entries in a parsed ELF64 `ET_REL`, selects `stage6` while
+linking, transitions the code from writable/NX to RX, and executes
+`stage6(36)=42`. A seventh definition fails closed.
+
 Build mode derives `<manifest>.state` and therefore accepts manifest paths up
 to 90 bytes. The exact 120-byte `MAKSTATE2` record contains its nine-byte
 version magic, actual input count, six reserved zero bytes, one manifest
@@ -170,7 +176,7 @@ This seed has no general pointer arithmetic beyond constant/scalar-variable
 element addition and typed pointer difference, no pointer-provenance analysis
 or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
-nested/general blocks, more than three functions per translation unit,
+nested/general blocks, more than six functions per translation unit,
 more than six objects, aggregate linked code beyond 512 bytes, general
 relocations, preprocessing, optimization,
 archives, dynamic linking, transitive dependency/header discovery, variable

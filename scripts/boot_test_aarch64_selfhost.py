@@ -82,6 +82,11 @@ THREE_CLI_REAP_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated-three.build "
     b"source=existing-makfs seeded=0 startup=sysv status=42"
 )
+SIX_FUNCTION_MARKER = (
+    b"MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5 "
+    b"relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
+    b"result=42 max_functions=6 overflow=7-denied"
+)
 EXECUTION_MARKER = (
     b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs sources=4 "
     b"languages=aarch64-asm,c-subset-v1 compiler=guest-native "
@@ -225,6 +230,9 @@ def main() -> int:
                     selector, process, output, FIXTURE_BUILD_MARKER, 60
                 )
                 common.wait_for_output(
+                    selector, process, output, SIX_FUNCTION_MARKER, 60
+                )
+                common.wait_for_output(
                     selector, process, output, LINKER_MARKER, 60
                 )
                 common.wait_for_output(
@@ -353,6 +361,7 @@ def main() -> int:
         "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3 invalidations=object,source,state "
         "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0 "
         "translation_unit_functions=2,1,1 "
+        "max_functions_per_unit=6 six_function_calls=5 six_function_result=42 "
         "c_abi=aapcs64-int32-pointer64 "
         "c_features=multi-function,multi-parameter,three-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
         "max_parameters=3 max_call_arguments=3 nonleaf_frame=96 three_argument_result=42 three_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "

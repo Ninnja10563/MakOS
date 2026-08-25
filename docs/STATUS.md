@@ -4,6 +4,20 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the sandboxed AArch64 guest-native C compiler now accepts up to
+  six function definitions per translation unit instead of three, with a
+  bounded eight-entry call-relocation table. A new source defines `stage1`
+  through `stage6`; the compiler verifies six ordered non-overlapping
+  definitions, emits five genuine same-object `R_AARCH64_CALL26` relocations,
+  wraps them in a parsed ELF64 `ET_REL` with seven symbols, links `stage6` as
+  the entry, enforces writable/NX then RX mappings, and executes
+  `stage6(36)=42`. Seven definitions still fail closed. Focused Pi/QEMU
+  10.0.11 TCG self-host runtime, structural guard, AArch64 release/image
+  artifact validation, unchanged Firefox-role production SMP, ordinary Native
+  SMP, and cursor regressions pass. This advances but does not complete the
+  SDK/self-hosting rows: parameters remain capped at three, build graphs at
+  six objects, linked code at 512 bytes, and no substantial in-guest MakOS
+  build exists yet.
 - 2026-08-26 AArch64 post-desktop production SMP is no longer restricted to
   Firefox-role workers. Non-leader ordinary `Native` application threads now
   share AP1-3 while leaders plus shell, UI, service, and all device MMIO work
@@ -313,7 +327,7 @@ Last updated: 2026-08-26.
   results, followed by three-input cold `0/3` and warm `3/0`. Stale, missing,
   old-version, or malformed state safely forces a full rebuild.
   Each bounded C
-  translation unit accepts up to three
+  translation unit accepts up to six
   AAPCS64 `int` functions, each with up to three typed parameters and up to four
   register locals, unsigned 16-bit constants, parentheses, unary `+`/`-`,
   precedence-correct `*`/signed `/`/`%`/`+`/`-`, mutable parameter/local
@@ -373,8 +387,8 @@ Last updated: 2026-08-26.
   untyped pointer reassignment, returning a pointer/address as an `int`, indexing a
   known two-element array at index two, deriving `values + 2` or a variable
   offset from that known array, pointer-minus-scalar, duplicate functions and
-  a fourth function in one
-  translation unit also fail closed. RX execution of the
+  a seventh function in one
+  translation unit also fails closed. RX execution of the
   fully linked C graph proves `answer(20)=42`, `answer(0)=86`,
   `adjust(forty,1)=42`, `adjust(scaled,2)=44`, and `adjust(zero,1)=2`; the latter
   three also prove the arrays change to `41:42:0`, `42:0:44`, and `1:2:0`.
@@ -394,12 +408,12 @@ Last updated: 2026-08-26.
   mutation paths also require the external C-to-C call. Release artifact validation,
   focused runtime, structural guard, full
   `make unit check`, and a fresh visible Pi/TCG login pass. The current visible
-  Native-SMP milestone is PID 699985 under the user service
-  `makos-visible-native-smp-final3.service`, with
+  self-hosting milestone is PID 710770 under the user service
+  `makos-visible-selfhost-six-function-final.service`, with
   private boot/data/variables and QMP in
-  `build/makos-pi-visible-native-smp-final3-54Bfbyox`; its boot clone
+  `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv`; its boot clone
   exactly matches the current release image SHA-256
-  `f194b48ee3be8a8b939d41f312896f5479fff795965f4fd16a6dcbb8101efd70`.
+  `77b56e1ec6a4da109056b332c187229415aa5d2387484ad96bd1b031e33ddb67`.
   This is a real but deliberately bounded seed, not a
   general C/Rust compiler/linker, transitive dependency/header engine,
   arbitrary graph beyond six inputs, parallel build system, debugger, or substantial

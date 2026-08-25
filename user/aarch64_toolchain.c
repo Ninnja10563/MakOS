@@ -131,7 +131,7 @@ static int decimal(const char *source, size_t source_length, size_t *cursor,
     return digits != 0;
 }
 
-enum { MAX_LABELS = 8, MAX_LABEL_BYTES = 16, MAX_RELOCATIONS = 4 };
+enum { MAX_LABELS = 8, MAX_LABEL_BYTES = 16, MAX_RELOCATIONS = 8 };
 
 struct label {
     char name[MAX_LABEL_BYTES];
@@ -481,12 +481,13 @@ static size_t assemble(const char *source, size_t source_length,
  * to three arguments and array-to-pointer decay.  Functions take up to three
  * typed integer or pointer parameters in AAPCS64 x0-x2.  The output follows AAPCS64,
  * including a non-leaf save frame, and is wrapped in a genuine ELF64 ET_REL
- * object by emit_object(). Unsupported syntax fails closed.
+ * object by emit_object(). A translation unit may contain up to six function
+ * definitions and eight call relocations. Unsupported syntax fails closed.
  */
 enum {
     MAX_C_LOCALS = 4,
     MAX_C_STACK_SLOTS = 4,
-    MAX_C_FUNCTIONS = 3,
+    MAX_C_FUNCTIONS = 6,
     MAX_C_PARAMETERS = 3,
 };
 
@@ -2346,7 +2347,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char malformed_duplicate_function_source[] =
         "int answer(int value) { return value; } int answer(int value) { return value; }\n";
     static const char malformed_too_many_functions_source[] =
-        "int one(int value) { return value; } int two(int value) { return value; } int three(int value) { return value; } int four(int value) { return value; }\n";
+        "int one(int value) { return value; } int two(int value) { return value; } int three(int value) { return value; } int four(int value) { return value; } int five(int value) { return value; } int six(int value) { return value; } int seven(int value) { return value; }\n";
     static const char malformed_duplicate_parameter_source[] =
         "int adjust(int value, int value) { return value; }\n";
     static const char malformed_too_many_parameters_source[] =
@@ -2364,6 +2365,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "int divide(int value) { return value / 3; }\n"
         "int remainder(int value) { return value % 6; }\n"
         "int negate(int value) { return -value; }\n";
+    static const char six_function_source[] =
+        "int stage1(int value) { return value + 1; }\n"
+        "int stage2(int value) { return stage1(value) + 1; }\n"
+        "int stage3(int value) { return stage2(value) + 1; }\n"
+        "int stage4(int value) { return stage3(value) + 1; }\n"
+        "int stage5(int value) { return stage4(value) + 1; }\n"
+        "int stage6(int value) { return stage5(value) + 1; }\n";
     static const char relational_greater_source[] =
         "int greater(int value) { if (value > 5) { return 42; } return 0; }\n";
     static const char relational_at_most_source[] =
@@ -2798,6 +2806,99 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         &signed_arithmetic_entry);
     if (signed_arithmetic_linked_length != 168 || signed_arithmetic_entry != 0)
         fail(88);
+
+    uint8_t six_function_code[512] = {0};
+    struct c_definition six_function_definitions[MAX_C_FUNCTIONS] = {0};
+    size_t six_function_definition_count = 0;
+    struct relocation six_function_relocations[MAX_RELOCATIONS] = {0};
+    size_t six_function_relocation_count = 0;
+    size_t six_function_code_length = compile_c_unit(
+        six_function_source, sizeof(six_function_source) - 1,
+        six_function_code, sizeof(six_function_code),
+        six_function_definitions, &six_function_definition_count,
+        six_function_relocations, &six_function_relocation_count);
+    static const char *const six_function_names[MAX_C_FUNCTIONS] = {
+        "stage1", "stage2", "stage3", "stage4", "stage5", "stage6",
+    };
+    static const char *const six_call_targets[MAX_C_FUNCTIONS - 1] = {
+        "stage1", "stage2", "stage3", "stage4", "stage5",
+    };
+    if (!six_function_code_length || six_function_code_length > 512 ||
+        six_function_definition_count != MAX_C_FUNCTIONS ||
+        six_function_relocation_count != MAX_C_FUNCTIONS - 1)
+        fail(82);
+    for (size_t index = 0; index < MAX_C_FUNCTIONS; ++index) {
+        if (!same_name(six_function_definitions[index].name,
+                       six_function_definitions[index].length,
+                       six_function_names[index], length(six_function_names[index])) ||
+            six_function_definitions[index].size == 0 ||
+            (index == 0 && six_function_definitions[index].offset != 0) ||
+            (index != 0 &&
+             six_function_definitions[index].offset !=
+                 six_function_definitions[index - 1].offset +
+                     six_function_definitions[index - 1].size))
+            fail(82);
+    }
+    for (size_t index = 0; index < MAX_C_FUNCTIONS - 1; ++index) {
+        size_t owner = index + 1;
+        if (!same_name(six_function_relocations[index].name,
+                       six_function_relocations[index].length,
+                       six_call_targets[index], length(six_call_targets[index])) ||
+            six_function_relocations[index].offset <
+                six_function_definitions[owner].offset ||
+            six_function_relocations[index].offset + 4 >
+                six_function_definitions[owner].offset +
+                    six_function_definitions[owner].size)
+            fail(82);
+    }
+    uint8_t six_function_object[OBJECT_CAPACITY] = {0};
+    size_t six_function_object_length = emit_object_definitions(
+        six_function_object, six_function_code, six_function_code_length,
+        six_function_definitions, six_function_definition_count,
+        six_function_relocations, six_function_relocation_count);
+    struct object_view six_function_view;
+    if (!six_function_object_length ||
+        six_function_object_length > OBJECT_CAPACITY ||
+        !parse_object(six_function_object, six_function_object_length,
+                      &six_function_view) ||
+        six_function_view.text_length != six_function_code_length ||
+        six_function_view.rela_count != MAX_C_FUNCTIONS - 1 ||
+        six_function_view.symbol_count != 1 + MAX_C_FUNCTIONS)
+        fail(85);
+    const uint8_t *six_function_objects[MAX_LINK_OBJECTS] = {
+        six_function_object,
+    };
+    size_t six_function_object_lengths[MAX_LINK_OBJECTS] = {
+        six_function_object_length,
+    };
+    uint8_t six_function_linked[512] = {0};
+    size_t six_function_entry = 0;
+    size_t six_function_linked_length = link_objects(
+        six_function_objects, six_function_object_lengths, 1,
+        six_function_linked, sizeof(six_function_linked), "stage6",
+        &six_function_entry);
+    if (six_function_linked_length != six_function_code_length ||
+        six_function_entry != six_function_definitions[5].offset)
+        fail(88);
+    uint8_t *six_function_jit =
+        (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
+    if ((uintptr_t)six_function_jit == UINT64_MAX) fail(83);
+    copy_bytes(six_function_jit, six_function_linked,
+               six_function_linked_length);
+    if (syscall4(SYS_VM_PROTECT, (uintptr_t)six_function_jit,
+                 PROT_READ | PROT_WRITE | PROT_EXEC, 0, 0) != 0 ||
+        syscall4(SYS_VM_PROTECT, (uintptr_t)six_function_jit,
+                 PROT_READ | PROT_EXEC, 0, 0) != 1)
+        fail(83);
+    uint64_t (*compiled_stage6)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)
+            (six_function_jit + six_function_entry);
+    if (compiled_stage6(36) != 42) fail(83);
+    static const char six_function_marker[] =
+        "MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5 "
+        "relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
+        "result=42 max_functions=6 overflow=7-denied\n";
+    write_bytes(six_function_marker, sizeof(six_function_marker) - 1);
 
     uint8_t *relational_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);

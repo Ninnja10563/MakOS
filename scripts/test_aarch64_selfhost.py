@@ -117,8 +117,9 @@ for fragment in (
     "static int c_while(",
     "MAX_C_LOCALS = 4",
     "OBJECT_CAPACITY = 2048",
-    "MAX_C_FUNCTIONS = 3",
+    "MAX_C_FUNCTIONS = 6",
     "MAX_C_PARAMETERS = 3",
+    "MAX_RELOCATIONS = 8",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x1ac00c00)",
     "UINT32_C(0x1b008000)",
@@ -170,6 +171,15 @@ for fragment in (
     '"int divide(int value) { return value / 3; }\\n"',
     '"int remainder(int value) { return value % 6; }\\n"',
     '"int negate(int value) { return -value; }\\n"',
+    "six_function_source",
+    '"int stage1(int value) { return value + 1; }\\n"',
+    '"int stage6(int value) { return stage5(value) + 1; }\\n"',
+    "six_function_definition_count != MAX_C_FUNCTIONS",
+    "six_function_relocation_count != MAX_C_FUNCTIONS - 1",
+    "six_function_view.symbol_count != 1 + MAX_C_FUNCTIONS",
+    'six_function_linked, sizeof(six_function_linked), "stage6"',
+    "compiled_stage6(36) != 42",
+    "MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5",
     "relational_greater_source",
     "relational_at_most_source",
     "signed_pointer_offset_source",
@@ -352,6 +362,8 @@ require(RUNTIME, '"}": "shift-bracket_right"')
 require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
+require(FOCUSED_RUNTIME, "SIX_FUNCTION_MARKER")
+require(FOCUSED_RUNTIME, "max_functions_per_unit=6 six_function_calls=5 six_function_result=42")
 require(FOCUSED_RUNTIME, "FIXTURE_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "WARM_BUILD_MARKER")
 require(FOCUSED_RUNTIME, "SELECTIVE_BUILD_MARKER")

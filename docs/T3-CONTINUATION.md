@@ -27,6 +27,16 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The sandboxed AArch64 guest-native C compiler now accepts six function
+  definitions per translation unit and up to eight bounded call relocations.
+  A separate `stage1`..`stage6` source produces five genuine same-object
+  `R_AARCH64_CALL26` relocations in parsed ELF64 `ET_REL`, links with `stage6`
+  selected, enforces writable/NX then RX, and executes `stage6(36)=42`; seven
+  definitions fail closed. Focused Pi/QEMU 10.0.11 TCG self-host runtime,
+  structural guard, release/image artifacts, unchanged Firefox-role
+  production SMP, Native SMP, and cursor regressions pass. Self-hosting remains
+  Partial: parameters are capped at three, build graphs at six objects, linked
+  code at 512 bytes, and no substantial in-guest MakOS build exists.
 - AArch64 post-desktop production SMP now admits non-leader ordinary Native
   application workers as well as Firefox-role workers to AP1-3. Leaders,
   shell, UI, service, and device MMIO work remain CPU0-only. Separate
@@ -39,15 +49,15 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG Native-SMP milestone: PID 699985,
-  user service `makos-visible-native-smp-final3.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG self-hosting milestone: PID 710770,
+  user service `makos-visible-selfhost-six-function-final.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-native-smp-final3-54Bfbyox`, private read-only boot
+  `build/makos-pi-visible-selfhost-six-function-final-BKg8QbLv`, private read-only boot
   clone `boot.img`, private sparse `data.img`, private `vars.fd`, QMP
   `qmp.sock`, serial `serial.log`, PID file `qemu.pid`, and captures
   `login.ppm`/`login.png`.
   Boot clone and `build/makos-aarch64.img` both have SHA-256
-  `f194b48ee3be8a8b939d41f312896f5479fff795965f4fd16a6dcbb8101efd70`.
+  `77b56e1ec6a4da109056b332c187229415aa5d2387484ad96bd1b031e33ddb67`.
   It is the sole QEMU process and reports four online PEs,
   the GICv2 network route (INTID 76), both input routes (INTIDs 77/78),
   `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, and post-desktop
@@ -56,9 +66,12 @@ Preserve existing files and changes.
   800x600 login PNG has SHA-256
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`
   and shows the native login with username focus. Keep it running for user
-  testing; use QMP `quit` before any later runtime gate. Prior PID 668793 and
-  session `build/makos-pi-visible-network-irq-final-D6pbvEPD` were stopped
-  cleanly through QMP before the Native-SMP runtime; their files remain. Two
+  testing; use QMP `quit` before any later runtime gate. Prior PID 699985 and
+  session `build/makos-pi-visible-native-smp-final3-54Bfbyox` were stopped
+  cleanly through QMP before the six-function self-host runtime; their files
+  remain. Prior PID 668793/session
+  `build/makos-pi-visible-network-irq-final-D6pbvEPD` was also stopped cleanly
+  through QMP before the Native-SMP runtime. Two
   corrected launch attempts for this visible milestone exited before guest
   execution because the first used display-backend syntax for VNC and the
   second omitted QEMU's extracted data directory; no concurrent guest ran and
@@ -436,7 +449,9 @@ Preserve existing files and changes.
   with 64-bit `SUB` and arithmetic shift-right two; direct RX probes prove
   signed element results `3` and `-3`, while pointer-minus-scalar fails closed.
   `adjust` obtains its updated pointee through external `combine`, creating a
-  real C-object-to-C-object call and relocation. A fourth function fails closed; the bounded
+  real C-object-to-C-object call and relocation. A separate six-definition
+  `stage1`..`stage6` chain emits five same-object calls, links from ELF64
+  `ET_REL`, and executes `stage6(36)=42`; a seventh function fails closed. The bounded
   object buffer is now 2 KiB and the persisted source buffer is 768 bytes.
   The bounded
   linker discovers definitions/undefined symbols across all four primary
@@ -463,7 +478,7 @@ Preserve existing files and changes.
   call arguments, missing all-path return, undefined-variable assignment/address target, pointer reassignment,
   pointer/address-as-`int` return, a known two-element array indexed at two, a known
   two-element array advanced by two or an unproved variable amount,
-  pointer-minus-scalar, duplicate or four functions in one translation unit,
+  pointer-minus-scalar, duplicate or seven functions in one translation unit,
   an out-of-range BL site, relocation type 282, a nonzero CALL26 addend,
   unresolved `adjust`, an omitted library object, and duplicate `answer` fail closed. Exact source
   passes release artifact checks, `make unit check`, structural guard, focused
@@ -473,7 +488,7 @@ Preserve existing files and changes.
   header engine, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 699985 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 710770 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - Kernel-owned per-thread affinity is now target syscall 148/feature bit 22.
@@ -645,14 +660,14 @@ Preserve existing files and changes.
    automatic load balancing and repeated migration contention while retaining
    CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
    any focused runtime.
-3. Expand the bounded guest C compiler beyond its current three-function per
-   translation-unit and two-parameter limits. The primary runtime graph now
+3. Expand the bounded guest C compiler beyond its current six-function per
+   translation-unit and three-parameter limits. The primary runtime graph now
    spans four objects (with one same-object call, two cross-object calls, and
    one independent helper) and the build driver accepts two through six
    inputs. Continue beyond signed typed-pointer arithmetic into
    provenance-aware/broader pointer and lvalue expressions,
    variable-length/global/multidimensional arrays, structs and nested/general
-   blocks, then lift the function/parameter bounds, add broader relocation/
+   blocks, then lift the function/parameter bounds further, add broader relocation/
    object support, transitive dependency/header discovery, arbitrary/parallel
    input graphs beyond the six-input bound, and broader command-line build
    control before a substantial

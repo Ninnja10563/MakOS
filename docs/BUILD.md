@@ -147,7 +147,7 @@ a distinct absolute output path, and one valid entry symbol. The parsed paths
 drive all source reads, object writes/reopens, entry-symbol emission/selection,
 and the final executable write. Bad version, relative path, colliding paths,
 and missing-link manifests fail closed before compilation. A bounded C
-translation unit accepts up to three `int` functions, each with up to three typed
+translation unit accepts up to six `int` functions, each with up to three typed
 `int`/`int *` parameters, 0..65535 constants,
 parentheses, unary `+`/`-`, and precedence-correct `*`, signed `/`/`%`, `+`,
 and `-`, up to four register locals,
@@ -219,7 +219,13 @@ offset 80, and executes both `sum3(40,1,1)` and `invoke3(40)` as 42 from RX
 memory. A separate three-definition arithmetic unit emits 168 code bytes in a
 784-byte parsed ELF64 `ET_REL`, links it with entry offset zero, and executes
 positive and negative division (`6`/`-6`), remainder (`2`/`-2`), and negation
-(`-42`/`42`) from RX memory. Invalid
+(`-42`/`42`) from RX memory. A separate six-definition unit forms a call chain
+from `stage6` through `stage1`. It emits five genuine same-object
+`R_AARCH64_CALL26` relocations into a parsed ELF64 `ET_REL`, links with
+`stage6` as the selected entry, transitions through writable/NX to RX, and
+executes `stage6(36)=42`. The compiler and object validator now bound one unit
+at six definitions and eight call relocations; a seven-definition source fails
+closed. Invalid
 relocation type/addend/site, unresolved `adjust`, a missing library object, and
 duplicate `answer` inputs are denied, as are unsupported bitwise syntax,
 literal-zero division/remainder, a conditional-only function, a loop
@@ -228,7 +234,7 @@ undefined local, pointer reassignment outside the typed initializer, and
 returning a pointer or address expression as an `int`.
 Known local-array out-of-bounds indexing, known one-past-end pointer derivation,
 unproved variable offset from a known-bounded local array, pointer-minus-scalar,
-duplicate functions/parameters, a fourth function, and more than three parameters or call arguments
+duplicate functions/parameters, a seventh function, and more than three parameters or call arguments
 are also denied.
 The shell launches the final ELF through syscall 56 with default `argc=1`, then
 syscall 57 with three arguments and one environment string; `_start` validates
@@ -246,7 +252,7 @@ has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
 structs, nested/general
-blocks, more than three functions per translation unit, general object
+blocks, more than six functions per translation unit, general object
 count/relocation repertoire, transitive dependency/header discovery, or
 unbounded input graphs. The
 authenticated shell command `makbuild <manifest>` accepts either a name under
