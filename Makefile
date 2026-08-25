@@ -22,7 +22,7 @@ SOURCE_DATA_IMAGE ?=
 INTEGRATED_OUTPUT_DIR ?= $(BUILD)
 INSTALL_TARGET ?=
 
-.PHONY: all build build-aarch64 image image-x86_64-gpt image-aarch64 image-aarch64-smp-input image-aarch64-smp-tcp image-aarch64-gpt data-aarch64 cpython-aarch64 package-cpython-aarch64 integrated-data-aarch64 test-integrated-data run run-x86_64-gpt run-x86_64-installer run-aarch64 run-aarch64-gpt test test-x86_64-gpt test-x86_64-install test-aarch64 test-aarch64-smp-input-runtime test-aarch64-smp-tcp-runtime test-aarch64-smp-migration-runtime test-aarch64-smp-load-runtime test-makfs4-guest-fsck test-aarch64-cursor-runtime test-aarch64-firefox-runtime test-aarch64-ipv6-runtime test-aarch64-package-runtime test-aarch64-gpt test-aarch64-install test-cpython-aarch64 unit check release clean
+.PHONY: all build build-aarch64 image image-x86_64-gpt image-aarch64 image-aarch64-smp-input image-aarch64-smp-tcp image-aarch64-gpt data-aarch64 cpython-aarch64 package-cpython-aarch64 integrated-data-aarch64 test-integrated-data run run-x86_64-gpt run-x86_64-installer run-aarch64 run-aarch64-gpt test test-x86_64-gpt test-x86_64-install test-aarch64 test-aarch64-smp-input-runtime test-aarch64-smp-tcp-runtime test-aarch64-smp-migration-runtime test-aarch64-smp-load-runtime test-aarch64-selfhost-runtime test-makfs4-guest-fsck test-aarch64-cursor-runtime test-aarch64-firefox-runtime test-aarch64-ipv6-runtime test-aarch64-package-runtime test-aarch64-gpt test-aarch64-install test-cpython-aarch64 unit check release clean
 
 all: image
 
@@ -150,6 +150,9 @@ test-aarch64-smp-migration-runtime: image-aarch64
 
 test-aarch64-smp-load-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_smp_migration.py
+
+test-aarch64-selfhost-runtime: image-aarch64
+	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_selfhost.py
 
 test-makfs4-guest-fsck: image-aarch64
 	python3 scripts/test_makfs4_guest_fsck.py

@@ -27,23 +27,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG shared-run-queue milestone:
-  PID 261990, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-load-LhlxSbON`, private data clone
-  `build/makos-pi-visible-load-LhlxSbON/data.img`, private variables
-  `build/makos-pi-visible-load-LhlxSbON/vars.fd`, QMP
-  `build/makos-pi-visible-load-LhlxSbON/qmp.sock`, serial
-  `build/makos-pi-visible-load-LhlxSbON/serial.log`, PID file
-  `build/makos-pi-visible-load-LhlxSbON/qemu.pid`, and QMP framebuffer capture
-  `build/makos-pi-visible-load-LhlxSbON/login.png`. It is the sole QEMU
+- Active visible Pi/QEMU 10.0.11 TCG self-host-linker milestone:
+  PID 275664, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-selfhost-ItzH84jx`, private data clone
+  `build/makos-pi-visible-selfhost-ItzH84jx/data.img`, private variables
+  `build/makos-pi-visible-selfhost-ItzH84jx/vars.fd`, QMP
+  `build/makos-pi-visible-selfhost-ItzH84jx/qmp.sock`, serial
+  `build/makos-pi-visible-selfhost-ItzH84jx/serial.log`, PID file
+  `build/makos-pi-visible-selfhost-ItzH84jx/qemu.pid`, and QMP framebuffer
+  capture `build/makos-pi-visible-selfhost-ItzH84jx/login.png`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
-  `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load counters `99,100,98`, with no
+  `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load counters `100,100,97`, with no
   fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 261990/session `build/makos-pi-visible-load-LhlxSbON` was stopped
+  cleanly through QMP before the self-hosting build/runtime work; its files remain.
   Prior PID 248288/session `build/makos-pi-visible-migration-wHSJuT` was stopped
   cleanly through QMP before the focused shared-queue work; its files remain.
   Prior PID 241019/session `build/makos-pi-visible-tcp-5o5pxp` was stopped
@@ -227,7 +229,17 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 261990 is the sole QEMU and no runtime-test harness is
+- 2026-08-25 the guest-native AArch64 toolchain now emits two genuine ELF64
+  `ET_REL` objects with section/symbol/string tables. It persists and reopens
+  both through MakFS, resolves `_start` against separately defined `answer`,
+  validates and applies `R_AARCH64_CALL26`, and emits a 559-byte `ET_EXEC`.
+  A copied object with relocation type 282 is rejected before the valid link.
+  The exact final source passes release artifact checks, `make unit check`, the
+  structural guard, and focused Pi/QEMU 10.0.11 TCG runtime with two status-42
+  executions. Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows
+  remain Partial because this is a bounded static linker, not a C/Rust compiler,
+  general linker/build system/debugger, or substantial in-guest MakOS build.
+- At this handoff PID 275664 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -314,9 +326,9 @@ Preserve existing files and changes.
 2. Continue the AArch64 userspace SMP row with automatic load balancing and
    repeated migration contention, retaining CPU0-exclusive device ownership. Stop the visible QEMU
    through QMP before any focused runtime.
-3. Continue the first genuine self-hosting seed toward a general linker/compiler
-   and a substantial in-guest build. Preserve real implementation requirements—
-   no fake/spoofed apps.
+3. Expand the bounded guest ET_REL linker toward more symbols/relocations and a
+   real compiler/build step, then a substantial in-guest build. Preserve real
+   implementation requirements—no fake/spoofed apps.
 
 ## Operating constraints
 

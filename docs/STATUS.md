@@ -139,22 +139,35 @@ Last updated: 2026-08-25.
   scheduling remains gated pending production policy, automatic migration and
   Firefox/desktop contention, so the scheduler audit row remains Partial and
   still reports one desktop scheduler CPU.
-- 2026-08-25 AArch64 syscall 57 now has parity with the versioned normative
+- 2026-08-25 the AArch64 guest-native toolchain now crosses the first genuine
+  object/link boundary. Two sources are written and reread through MakFS. The
+  bounded assembler emits separate 680-byte and 568-byte ELF64 `ET_REL` files
+  with `.text`, `.rela.text`, `.symtab`, `.strtab`, and `.shstrtab`; both are
+  persisted and reopened. The guest linker resolves undefined `answer` in the
+  `_start` object against the second object, validates the placeholder/range,
+  applies `R_AARCH64_CALL26`, and emits a 559-byte two-`PT_LOAD` ELF64
+  `ET_EXEC`. A copied object with relocation type 282 is rejected before the
+  valid link. Focused Pi/QEMU 10.0.11 TCG then executes and reaps the final ELF
+  twice with status 42, once through syscall 56 and once through syscall 57.
+  The current release image/artifact check, focused runtime, structural guard,
+  and full `make unit check` pass. This remains a bounded static-linker seed,
+  not a general-purpose linker, C/Rust compiler, build system, debugger, or
+  substantial in-guest MakOS build, so self-hosting remains Partial.
+- 2026-08-25 AArch64 syscall 57 has parity with the versioned normative
   startup-vector ABI. The kernel requires the exact 336-byte version-1
   descriptor, copies and validates up to eight arguments, eight environment
   entries and 256 string bytes, rejects malformed/unused offsets and invalid
   strings, and builds child-owned SysV stack vectors before scheduling. The
-  guest-native two-pass assembler now supports labels, compare, conditional
+  guest-native two-pass assembler supports labels, compare, conditional
   branches, 64-bit loads and byte loads in addition to move/SVC/return. Its
-  persisted 428-byte ELF inspects startup registers itself: Pi/QEMU 10.0.11 TCG
+  linked ELF inspects startup registers itself: Pi/QEMU 10.0.11 TCG
   passes syscall 56 with `argc=1`, syscall 57 with `argc=3`/`envc=1`, three
   malformed-descriptor denials, two status-42 wait/reaps, and truthful ABI bit
   19. `make unit`, `make check`, release image/artifact validation, and focused
   structural guards pass. The broad Pi/TCG boot continued through later musl
   and MicroPython gates, then stopped at the unchanged Settings resize mismatch
   (`560x360` observed versus required `450x290`); it is not recorded as a full
-  broad-gate pass. This still is not a C/Rust compiler, general linker/build
-  system, or substantial in-guest MakOS build, so self-hosting remains Partial.
+  broad-gate pass.
 - 2026-08-25 repository imported and pushed to
   `https://github.com/Ninnja10563/MakOS.git` on `main` at commit `346b0df`.
   Source, docs, scripts, ports, SDK, tests, and manifests are tracked. Generated
@@ -734,8 +747,10 @@ Last updated: 2026-08-25.
   full gate pass. A later unchanged run additionally passed the new guest
   assembler, persisted-ELF loader/execution/status-42 lifecycle, typed IPC,
   musl and Python before slow TCG again produced Settings resize `560x360`
-  instead of the required `450x290` marker. Thresholds and expected geometry remain
-  unchanged. This is functional Pi evidence only, not Apple-HVF performance
+  instead of the required `450x290` marker. A later focused run passed the new
+  two-object ELF64 `ET_REL` linker and both final-ELF executions. Thresholds
+  and expected geometry remain unchanged. This is functional Pi evidence only,
+  not Apple-HVF performance
   qualification; `/dev/zram0` supplied 1.8 GiB swap and KVM was unavailable to
   the unprivileged user. The focused four-vCPU TCG SMP input/network image also
   passed three runs with CPU0-owned UDP TX, DNS RX wake, and exact frame

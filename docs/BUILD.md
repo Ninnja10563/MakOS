@@ -94,16 +94,31 @@ open gates.
 `OVMF_CODE=/path/to/OVMF_CODE.fd` overrides firmware discovery.
 `QEMU_SYSTEM_X86_64=/path/to/qemu-system-x86_64` overrides QEMU discovery.
 `AAVMF_CODE`, `AAVMF_VARS`, and `QEMU_SYSTEM_AARCH64` override AArch64 tools.
+`MAKOS_QEMU_DATA_DIR` supplies QEMU's `-L` data directory to the focused
+self-hosting runtime when using an extracted, non-system QEMU installation.
 
-After login, `selfhost-aarch64` runs the first guest-native toolchain gate. It
-writes A64 source to MakFS, assembles and persists
-`/home/user/generated-aarch64.elf`, then launches that file through the kernel's
-validated AArch64 syscall-56 path with default `argc=1`, then through syscall 57
-with a version-1 descriptor containing three arguments and one environment
-string. The generated program checks both startup forms itself and exits 42;
-the shell also requires rejection of a bad version, a nonzero unused offset,
-and a truncated descriptor. This is a bounded assembler seed, not yet a
-complete compiler/linker or an end-to-end OS build.
+After login, `selfhost-aarch64` runs the guest-native assembler/static-linker
+gate. It writes and rereads two A64 sources from MakFS, emits
+`/home/user/generated-main.o` and `/home/user/generated-answer.o` as ELF64
+`ET_REL` files with real section and symbol tables, persists and reopens both,
+resolves the undefined `answer` global, validates and applies
+`R_AARCH64_CALL26`, and writes `/home/user/generated-aarch64.elf`. Before the
+valid link it corrupts a copied relocation type and requires fail-closed
+rejection. The shell launches the final ELF through validated syscall 56 with
+default `argc=1`, then syscall 57 with three arguments and one environment
+string; generated `_start` validates both forms, calls the separately linked
+`answer`, and exits 42. The shell also requires three malformed startup-vector
+denials.
+
+Run the focused gate with:
+
+```sh
+make test-aarch64-selfhost-runtime
+```
+
+The gate is a bounded A64 assembler/static-linker seed, not a general-purpose
+linker, C/Rust compiler, build system, debugger, or end-to-end in-guest OS
+build.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.

@@ -2530,14 +2530,14 @@ def main() -> int:
                 send_command(stream, "selfhost-aarch64")
                 wait_for_output(
                     selector, process, output,
-                    b"MAKOS_AARCH64_ASSEMBLER_OK source=/home/user/generated.s output=/home/user/generated-aarch64.elf",
+                    b"MAKOS_AARCH64_LINKER_OK sources=2 objects=2 format=elf64-et-rel linker=guest-native relocation=R_AARCH64_CALL26 symbols=_start,answer output=/home/user/generated-aarch64.elf persisted_reopened=1 malformed_object_denied=1",
                 )
                 wait_for_output(
                     selector, process, output, b"MAKOS_AARCH64_EXEC_SPAWN",
                 )
                 wait_for_output(
                     selector, process, output,
-                    b"MAKOS_AARCH64_SELFHOST_SEED_OK source=guest-makfs assembler=guest-native output=elf64-aarch64 persisted=1 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_denied=3 executed=2 status=42",
+                    b"MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs assembler=guest-native linker=guest-native objects=2 object_format=elf64-et-rel relocation=R_AARCH64_CALL26 symbols=_start,answer persisted_reopened=1 malformed_object_denied=1 output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3 executed=2 status=42",
                 )
                 send_command(stream, "abi-startup")
                 wait_for_output(

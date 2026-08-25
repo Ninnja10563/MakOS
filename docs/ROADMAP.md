@@ -127,7 +127,7 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   PE32+ section loading with W^X/NX is verified. DLL imports/relocations, NT
   syscall ABI, registry/GUI, and general Windows binaries remain.
 
-## M10 — self-hosting — initial code-generation seed verified
+## M10 — self-hosting — bounded relocatable-linker seed verified
 
 - Native compiler/assembler/linker/build/debug package set.
 - Rebuild reproducible substantial MakOS subset inside MakOS.
@@ -136,5 +136,10 @@ Each exit criterion requires code, automated evidence, docs, and accurate
   and executes generated result. It additionally emits a minimal static ELF64
   file into MakFS; VFS exec-by-path validates/maps it in a fresh address space,
   builds a versioned argc/argv/envp/auxv startup stack, executes result 42
-  concurrently in PID7/PID8, and reaps both. Full C/Rust compiler, general assembler/
-  linker, build system, debugger, package delivery, and in-OS MakOS rebuild remain.
+  concurrently in PID7/PID8, and reaps both. On AArch64, two guest-read sources
+  now become separately persisted/reopened ELF64 `ET_REL` files; a bounded
+  guest static linker resolves `_start`/`answer`, applies
+  `R_AARCH64_CALL26`, rejects a corrupted relocation type, emits `ET_EXEC`, and
+  executes the result twice under Pi/QEMU TCG. Full C/Rust compiler, general
+  assembler/linker, build system, debugger, package delivery, and an in-OS
+  MakOS rebuild remain.

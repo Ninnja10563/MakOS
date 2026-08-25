@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural guard for the guest-native AArch64 assembler/exec path."""
+"""Structural guard for guest-native AArch64 assembly, ET_REL, and linking."""
 
 from pathlib import Path
 
@@ -12,6 +12,7 @@ ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
 SECURITY = (ROOT / "kernel/src/security.rs").read_text()
 BUILD = (ROOT / "kernel/build.rs").read_text()
 RUNTIME = (ROOT / "scripts/boot_test_aarch64.py").read_text()
+FOCUSED_RUNTIME = (ROOT / "scripts/boot_test_aarch64_selfhost.py").read_text()
 
 
 def require(source: str, fragment: str) -> None:
@@ -20,19 +21,33 @@ def require(source: str, fragment: str) -> None:
 
 
 for fragment in (
+    '"_start:\\n"',
     '"cmp x0, #1\\n"',
     '"b.eq success\\n"',
     '"ldr x3, [x1, #8]\\n"',
     '"ldrb w4, [x3]\\n"',
     '"mov x8, #5\\n"',
     '"svc #0\\n"',
+    '"bl answer\\n"',
+    '"answer:\\n"',
     "static size_t assemble(",
-    "EM_AARCH64",
+    "static size_t emit_object(",
+    "static int parse_object(",
+    "static size_t link_objects(",
+    "R_AARCH64_CALL26 = 283",
+    "(UINT64_C(2) << 32) | R_AARCH64_CALL26",
+    "main_object[corrupt_info] = (uint8_t)(R_AARCH64_CALL26 - 1)",
+    "main_object[corrupt_info] = saved_type",
+    "format=elf64-et-rel",
+    "persisted_reopened=1 malformed_object_denied=1",
     "PF_R | PF_X",
     "deliberately NX",
     "PROT_READ | PROT_WRITE | PROT_EXEC",
-    "MAKOS_AARCH64_ASSEMBLER_OK",
+    "MAKOS_AARCH64_LINKER_OK",
     "/home/user/generated.s",
+    "/home/user/generated-answer.s",
+    "/home/user/generated-main.o",
+    "/home/user/generated-answer.o",
     "/home/user/generated-aarch64.elf",
 ):
     require(TOOLCHAIN, fragment)
@@ -62,15 +77,21 @@ for fragment in (
     require(ARCH, fragment)
 
 require(BUILD, "../user/aarch64_toolchain.c")
-require(SHELL, "MAKOS_AARCH64_SELFHOST_SEED_OK")
+require(SHELL, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH")
 require(SHELL, "SYS_PROCESS_SPAWN_PATH_ARGS")
 require(SHELL, "malformed.argv_offsets[7] = 1")
 require(SHELL, "sizeof(startup) - 1")
-require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_denied=3")
+require(SHELL, "objects=2 object_format=elf64-et-rel")
+require(SHELL, "relocation=R_AARCH64_CALL26 symbols=_start,answer")
+require(SHELL, "malformed_object_denied=1")
+require(SHELL, "abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3")
 require(PROCESS, "SessionProcessRole::Toolchain")
 require(SECURITY, "SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE")
 require(RUNTIME, 'send_command(stream, "selfhost-aarch64")')
-require(RUNTIME, "MAKOS_AARCH64_SELFHOST_SEED_OK")
+require(RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
+require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
+require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
+require(FOCUSED_RUNTIME, "malformed_object_denied=1 executed=2 status=42")
 
 print("AArch64 guest self-hosting structural test passed")

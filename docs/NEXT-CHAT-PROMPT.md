@@ -10,22 +10,30 @@ branch `main`; verify `git status`, local/remote HEAD, source/test state, and al
 QEMU/process state before acting. Never restart project, overwrite user changes,
 run concurrent QEMU, or claim full completion while audit has Partial/Missing rows.
 
-Current verified milestone: GitHub import `346b0df`; current-source cursor runtime
-passes seven positions with zero scanout pixel changes, virtio-GPU cursor plane,
-host cursor hidden. Typed IPC is complete at core scope: 12/12 unit tests,
-structural guard, full `make unit && make check`, and isolated full HVF marker
-`MAKOS_AARCH64_TYPED_IPC_RUNTIME_OK service=same-domain fifo=1 transfer=attenuated cleanup=process-exit-before-reap`.
-No QEMU was running at handoff.
+Current verified milestones: cursor runtime passes seven positions with zero
+scanout pixel changes, virtio-GPU cursor plane, and host cursor hidden. Typed IPC
+passes 12/12 unit tests, structural guard, full unit/check, and isolated full HVF
+runtime. The guest-native AArch64 toolchain now emits/persists/reopens two ELF64
+`ET_REL` objects, resolves `_start`/`answer`, applies `R_AARCH64_CALL26`, rejects
+a malformed relocation, emits `ET_EXEC`, and executes it twice with status 42 in
+focused Pi/QEMU TCG runtime. Full unit/check and release artifact checks pass.
+Verify GitHub HEAD rather than relying on a copied hash.
+
+One visible Pi/QEMU TCG login milestone is running at handoff: PID 275664, VNC
+`127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-ItzH84jx`, private
+data/vars in that session, and QMP
+`build/makos-pi-visible-selfhost-ItzH84jx/qmp.sock`. Stop it through QMP before
+any runtime test; never run concurrent QEMU.
 
 Highest priority: rerun unchanged `make test-aarch64-firefox-runtime` only when
 no visible QEMU runs and host load/memory pressure is low. Two latest runs painted
 in 248584/255543 ms but missed unchanged Ctrl-A bound at 10971/14363 ms while host
 load was 7.66 with 163 MiB free and 6.6 GiB compressed. Do not weaken thresholds.
 If idle-host rerun still fails, diagnose scheduler/input wake path from evidence.
-Then boot a meaningful visible login milestone for user testing and record its
-PID/session/private data clone/QMP in handoff.
+After any runtime work, boot a meaningful visible login milestone for user
+testing and record its PID/session/private data clone/QMP in handoff.
 
 After Firefox, advance highest-impact verified Partial/Missing audit requirement,
-preferably AArch64 userspace SMP scheduling or first genuine guest self-hosting
-step. Implement real behavior, add proportionate tests, run relevant unit/static/
+preferably AArch64 userspace SMP scheduling or the next genuine guest compiler/
+linker/build step. Implement real behavior, add proportionate tests, run relevant unit/static/
 runtime gates, update audit/status/handoff precisely, commit, and push `main`.

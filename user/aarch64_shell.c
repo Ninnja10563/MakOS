@@ -418,7 +418,7 @@ static void run_selfhost_probe(void) {
     while ((status = syscall4(SYS_PROCESS_WAIT, toolchain, 0, 0, 0)) == UINT64_MAX)
         syscall4(SYS_YIELD, 0, 0, 0, 0);
     if (status != 42) {
-        write_text("selfhost-aarch64: assembler failed\n");
+        write_text("selfhost-aarch64: assembler/linker failed\n");
         return;
     }
     uint64_t generated = syscall4(SYS_PROCESS_SPAWN_PATH, (uintptr_t)output_path,
@@ -471,7 +471,7 @@ static void run_selfhost_probe(void) {
     while ((status = syscall4(SYS_PROCESS_WAIT, generated, 0, 0, 0)) == UINT64_MAX)
         syscall4(SYS_YIELD, 0, 0, 0, 0);
     if (status == 42)
-        write_text("MAKOS_AARCH64_SELFHOST_SEED_OK source=guest-makfs assembler=guest-native output=elf64-aarch64 persisted=1 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_denied=3 executed=2 status=42\n");
+        write_text("MAKOS_AARCH64_SELFHOST_LINK_OK source=guest-makfs assembler=guest-native linker=guest-native objects=2 object_format=elf64-et-rel relocation=R_AARCH64_CALL26 symbols=_start,answer persisted_reopened=1 malformed_object_denied=1 output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 argv=3 env=1 malformed_startup_denied=3 executed=2 status=42\n");
     else
         write_text("selfhost-aarch64: startup-vector program failed\n");
 }
