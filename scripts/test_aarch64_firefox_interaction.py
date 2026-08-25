@@ -56,6 +56,10 @@ for fragment in (
     '"MAKOS_FIREFOX_SUSTAINED_INTERACTION_OK "',
     'process_resident_bytes(process.pid)',
     'rb".* resident_pages=([0-9]+) resident_kib=([0-9]+)"',
+    'os.environ.get("MAKOS_AARCH64_FIREFOX_SMP_REQUIRED") == "1"',
+    'rb"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK "',
+    '"Firefox did not overlap distinct worker TIDs on multiple guest CPUs"',
+    '"MAKOS_FIREFOX_SMP_OVERLAP_OK "',
 ):
     assert fragment in BOOT, fragment
 
@@ -63,6 +67,7 @@ for fragment in (
     "MAKOS_AARCH64_FIREFOX_CLIPBOARD=1",
     "MAKOS_AARCH64_FIREFOX_LINK_CLICK=1",
     "MAKOS_AARCH64_FIREFOX_LINK_URI=https://www.iana.org/help/example-domains",
+    "MAKOS_AARCH64_FIREFOX_SMP_REQUIRED=1",
 ):
     assert fragment in MAKEFILE, fragment
 

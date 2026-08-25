@@ -28,6 +28,7 @@ READY_MARKER = (
 )
 PROCESS_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK"
 RESULT_MARKER = b"MAKOS_AARCH64_PRODUCTION_SMP_OK"
+OVERLAP_MARKER = b"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK"
 REAP_MARKER = (
     b"MAKOS_AARCH64_FIREFOX_SMP_REAP_OK fixture=upstream-musl-pthread "
     b"role=firefox status=42"
@@ -66,6 +67,8 @@ def main() -> int:
     serial_log = ROOT / "build/makos-production-smp-focused-serial.log"
     cpu_mask = 0
     dispatches = (0, 0, 0)
+    overlap_mask = 0
+    overlap_tids = (0, 0, 0)
 
     with tempfile.TemporaryDirectory(
         prefix="makos-production-smp-focused-", dir=output_root
@@ -154,28 +157,63 @@ def main() -> int:
                 )
                 common.send_command(stream, "firefox-smp")
                 common.wait_for_output(selector, process, output, PROCESS_MARKER, 30)
+                common.wait_for_output(selector, process, output, OVERLAP_MARKER, 60)
                 common.wait_for_output(selector, process, output, RESULT_MARKER, 60)
                 common.wait_for_output(selector, process, output, REAP_MARKER, 20)
 
                 decoded = output.decode(errors="replace")
+                process_matches = re.findall(
+                    r"MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK pid=(\d+)", decoded
+                )
+                overlap_matches = re.findall(
+                    r"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK group_pid=(\d+) "
+                    r"cpu_mask=(0x[0-9a-f]+) tids=(\d+),(\d+),(\d+)",
+                    decoded,
+                )
+                if not process_matches or not overlap_matches:
+                    raise AssertionError("production SMP overlap fields were malformed")
+                overlap_group, marker_mask, mt1, mt2, mt3 = overlap_matches[-1]
+                if overlap_group != process_matches[-1]:
+                    raise AssertionError("production SMP overlap group did not match launch")
                 matches = re.findall(
                     r"MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask=(0x[0-9a-f]+) "
-                    r"dispatches=(\d+),(\d+),(\d+) worker_role=firefox "
+                    r"dispatches=(\d+),(\d+),(\d+) overlap_mask=(0x[0-9a-f]+) "
+                    r"overlap_tids=(\d+),(\d+),(\d+) worker_role=firefox "
                     r"leader_cpu=0 run_queue=shared-ready ownership=exclusive "
                     r"block=ap-idle status=42",
                     decoded,
                 )
                 if not matches:
                     raise AssertionError("production SMP result fields were malformed")
-                mask_text, d1, d2, d3 = matches[-1]
+                mask_text, d1, d2, d3, overlap_text, t1, t2, t3 = matches[-1]
                 cpu_mask = int(mask_text, 16)
                 dispatches = (int(d1), int(d2), int(d3))
+                overlap_mask = int(overlap_text, 16) & 0xE
+                overlap_tids = (int(t1), int(t2), int(t3))
+                marker_overlap_mask = int(marker_mask, 16) & 0xE
+                marker_overlap_tids = (int(mt1), int(mt2), int(mt3))
+                if marker_overlap_mask != overlap_mask or marker_overlap_tids != overlap_tids:
+                    raise AssertionError("production SMP live/final overlap evidence disagreed")
                 if cpu_mask & 0xE == 0:
                     raise AssertionError(
                         f"Firefox-role worker never ran on a secondary CPU: {mask_text}"
                     )
                 if sum(dispatches) == 0:
                     raise AssertionError("production AP dispatch counter stayed at zero")
+                active_tids = [
+                    overlap_tids[cpu - 1]
+                    for cpu in range(1, 4)
+                    if overlap_mask & (1 << cpu)
+                ]
+                if (
+                    overlap_mask.bit_count() < 2
+                    or any(tid == 0 for tid in active_tids)
+                    or len(active_tids) != len(set(active_tids))
+                ):
+                    raise AssertionError(
+                        "production Firefox-role workers did not overlap as distinct TIDs: "
+                        f"mask={overlap_mask:#x} tids={overlap_tids}"
+                    )
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
         finally:
@@ -190,8 +228,9 @@ def main() -> int:
         "MAKOS_AARCH64_PRODUCTION_SMP_RUNTIME_OK "
         f"accel={accel} cpu_mask={cpu_mask:#x} worker_cpus={worker_cpus} "
         f"dispatches={dispatches[0]},{dispatches[1]},{dispatches[2]} "
+        f"overlap_mask={overlap_mask:#x} overlap_tids={overlap_tids[0]},{overlap_tids[1]},{overlap_tids[2]} "
         "fixture=upstream-musl-pthread role=firefox leader_cpu=0 "
-        "device_mmio_owner=cpu0 ownership=exclusive block=ap-idle status=42"
+        "device_mmio_owner=cpu0 ownership=exclusive concurrent=1 block=ap-idle status=42"
     )
     return 0
 

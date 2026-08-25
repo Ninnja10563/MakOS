@@ -246,6 +246,11 @@ impl SchedulerState {
                     if owner_count != 1 || self.table.current_pid_on(cpu) != Some(info.pid) {
                         crate::fatal("AArch64 production worker acquired duplicate CPU ownership");
                     }
+                    // The outer EL0-entry call can survive many in-exception
+                    // yield/block switches. Refresh the active owner at every
+                    // selection so overlap evidence never retains the TID that
+                    // originally entered that call after it migrated away.
+                    PRODUCTION_WORKER_ACTIVE_TIDS[cpu].store(info.pid, Ordering::Release);
                     PRODUCTION_WORKER_CPU_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
                     PRODUCTION_WORKER_DISPATCHES[cpu].fetch_add(1, Ordering::AcqRel);
                 }
@@ -338,6 +343,13 @@ static PRODUCTION_WORKER_REPORTED_MASK: AtomicU64 = AtomicU64::new(0);
 static PRODUCTION_WORKER_GROUP_PID: AtomicU64 = AtomicU64::new(0);
 static PRODUCTION_WORKER_DISPATCHES: [AtomicU64; 4] =
     [const { AtomicU64::new(0) }; 4];
+static PRODUCTION_WORKER_ACTIVE_CPU_MASK: AtomicU64 = AtomicU64::new(0);
+static PRODUCTION_WORKER_ACTIVE_TIDS: [AtomicU64; 4] =
+    [const { AtomicU64::new(0) }; 4];
+static PRODUCTION_WORKER_OVERLAP_CPU_MASK: AtomicU64 = AtomicU64::new(0);
+static PRODUCTION_WORKER_OVERLAP_TIDS: [AtomicU64; 4] =
+    [const { AtomicU64::new(0) }; 4];
+static PRODUCTION_WORKER_OVERLAP_REPORTED: AtomicBool = AtomicBool::new(false);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -3512,18 +3524,85 @@ fn reset_production_worker_evidence() {
     PRODUCTION_WORKER_CPU_MASK.store(0, Ordering::Release);
     PRODUCTION_WORKER_REPORTED_MASK.store(0, Ordering::Release);
     PRODUCTION_WORKER_GROUP_PID.store(0, Ordering::Release);
+    PRODUCTION_WORKER_ACTIVE_CPU_MASK.store(0, Ordering::Release);
+    PRODUCTION_WORKER_OVERLAP_CPU_MASK.store(0, Ordering::Release);
+    PRODUCTION_WORKER_OVERLAP_REPORTED.store(false, Ordering::Release);
     for dispatches in &PRODUCTION_WORKER_DISPATCHES {
         dispatches.store(0, Ordering::Release);
     }
+    for tid in &PRODUCTION_WORKER_ACTIVE_TIDS {
+        tid.store(0, Ordering::Release);
+    }
+    for tid in &PRODUCTION_WORKER_OVERLAP_TIDS {
+        tid.store(0, Ordering::Release);
+    }
 }
 
-fn production_worker_evidence() -> (u64, [u64; 4]) {
+fn production_worker_evidence() -> (u64, [u64; 4], u64, [u64; 4]) {
     (
         PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
         core::array::from_fn(|cpu| {
             PRODUCTION_WORKER_DISPATCHES[cpu].load(Ordering::Acquire)
         }),
+        PRODUCTION_WORKER_OVERLAP_CPU_MASK.load(Ordering::Acquire),
+        core::array::from_fn(|cpu| {
+            PRODUCTION_WORKER_OVERLAP_TIDS[cpu].load(Ordering::Acquire)
+        }),
     )
+}
+
+/// Publish the interval in which an AP is executing the tracked Firefox
+/// process group. The TID store precedes the active-bit RMW, and TIDs remain
+/// published after exit, so an observer of two set bits can recover the two
+/// distinct dispatch owners even if one AP returns immediately afterward.
+fn production_worker_enter(cpu: usize, tid: u64, group_pid: u64) {
+    if cpu == 0
+        || cpu >= PRODUCTION_WORKER_ACTIVE_TIDS.len()
+        || group_pid != PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)
+    {
+        return;
+    }
+    let cpu_bit = 1u64 << cpu;
+    PRODUCTION_WORKER_ACTIVE_TIDS[cpu].store(tid, Ordering::Release);
+    let active = PRODUCTION_WORKER_ACTIVE_CPU_MASK.fetch_or(cpu_bit, Ordering::AcqRel) | cpu_bit;
+    if (active & 0xe).count_ones() < 2
+        || PRODUCTION_WORKER_OVERLAP_REPORTED.swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+    let tids: [u64; 4] = core::array::from_fn(|candidate| {
+        PRODUCTION_WORKER_ACTIVE_TIDS[candidate].load(Ordering::Acquire)
+    });
+    let mut seen = [0u64; 4];
+    for candidate in 1..PRODUCTION_WORKER_ACTIVE_TIDS.len() {
+        if active & (1u64 << candidate) == 0 {
+            continue;
+        }
+        let candidate_tid = tids[candidate];
+        if candidate_tid == 0 || seen[..candidate].contains(&candidate_tid) {
+            crate::fatal("AArch64 Firefox overlap contained an invalid TID owner");
+        }
+        seen[candidate] = candidate_tid;
+        PRODUCTION_WORKER_OVERLAP_TIDS[candidate].store(candidate_tid, Ordering::Release);
+    }
+    PRODUCTION_WORKER_OVERLAP_CPU_MASK.store(active & 0xe, Ordering::Release);
+    crate::serial_println!(
+        "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
+        group_pid,
+        active & 0xe,
+        tids[1],
+        tids[2],
+        tids[3],
+    );
+}
+
+fn production_worker_leave(cpu: usize, group_pid: u64) {
+    if cpu != 0
+        && cpu < PRODUCTION_WORKER_ACTIVE_TIDS.len()
+        && group_pid == PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)
+    {
+        PRODUCTION_WORKER_ACTIVE_CPU_MASK.fetch_and(!(1u64 << cpu), Ordering::AcqRel);
+    }
 }
 
 /// AP dispatch loop for boot probes and the bounded production policy. Process
@@ -3584,12 +3663,15 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                     PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
                 );
             }
+            production_worker_enter(cpu, pid, group_pid);
         }
         crate::arch::switch_address_space(context.ttbr0);
         let _ = crate::arch::enter_user_context(&context);
         crate::arch::switch_address_space(crate::arch::kernel_root());
         if boot_probe {
             smp_probe_leave();
+        } else if role == ProcessRole::Firefox && pid != group_pid {
+            production_worker_leave(cpu, group_pid);
         }
     }
 }
@@ -4825,13 +4907,17 @@ pub fn wait(pid: u64) -> Option<u64> {
         && pid == group_pid
         && pid == PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)
     {
-        let (cpu_mask, dispatches) = production_worker_evidence();
+        let (cpu_mask, dispatches, overlap_mask, overlap_tids) = production_worker_evidence();
         crate::serial_println!(
-            "MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask={:#x} dispatches={},{},{} worker_role=firefox leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle status={}",
+            "MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=firefox leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle status={}",
             cpu_mask,
             dispatches[1],
             dispatches[2],
             dispatches[3],
+            overlap_mask,
+            overlap_tids[1],
+            overlap_tids[2],
+            overlap_tids[3],
             status,
         );
     }

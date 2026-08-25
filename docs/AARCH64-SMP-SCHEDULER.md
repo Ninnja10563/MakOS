@@ -36,6 +36,21 @@ CPU0, while non-leader Firefox-role threads are AP-eligible on the shared Ready
 queue. Device MMIO remains CPU0-owned. The production scheduler scope remains
 bounded; this is not general desktop SMP scheduling.
 
+The production gate now records actual simultaneous execution, not only the
+set of CPUs used over a process lifetime. Each AP publishes the currently
+selected Firefox TID before its active bit; every in-exception yield/block
+switch refreshes that TID at the scheduler selection point. The first snapshot
+with at least two AP bits validates distinct nonzero owners and is retained
+through process reap. A production-only three-pthread rendezvous qualifies the
+mechanism on Pi/QEMU TCG: all APs dispatch workers, AP1/AP3 overlap with TIDs
+6/5 (`overlap_mask=0xa`), the live snapshot matches the final aggregate, and
+the process exits 42. The strict real-Firefox Make target requires equivalent
+evidence from the launched Firefox group while preserving every existing
+latency and interaction limit. Until that target passes on idle macOS/HVF, the
+fixture is not real-Firefox qualification. Because several PEs can log during
+this interval, PL011 formatted and raw writes use an IRQ-masked cross-PE lock;
+the final repeat emits intact records.
+
 A third embedded EL0 program proves remote-running group teardown. Its leader
 clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
 worker publishes a release-ordered running flag before spinning in EL0. The

@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = (ROOT / "crates/process-table/src/lib.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
+SERIAL = (ROOT / "kernel/src/serial.rs").read_text()
 PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
 INPUT = (ROOT / "kernel/src/aarch64_virtio_input.rs").read_text()
 TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
@@ -33,6 +34,7 @@ INPUT_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_input.py").read_text()
 TCP_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_tcp.py").read_text()
 MIGRATION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_smp_migration.py").read_text()
 PRODUCTION_RUNTIME = (ROOT / "scripts/boot_test_aarch64_production_smp.py").read_text()
+MUSL_PTHREAD_PROBE = (ROOT / "ports/musl/pthread-probe.c").read_text()
 INPUT_CONFIG = (ROOT / "boot/MAKOS-SMP-INPUT.CFG").read_text()
 TCP_CONFIG = (ROOT / "boot/MAKOS-SMP-TCP.CFG").read_text()
 
@@ -78,6 +80,15 @@ for token in (
     assert token in ARCH, token
 
 assert ARCH.count("crate::aarch64_process::ipc_control_allowed()") == 4
+for token in (
+    "static SERIAL_LOCK: AtomicBool",
+    "struct SerialGuard",
+    '"msr daifset, #0xf"',
+    "compare_exchange_weak(false, true, Ordering::Acquire",
+    "SERIAL_LOCK.store(false, Ordering::Release)",
+    '"msr daif, {saved}"',
+):
+    assert token in SERIAL, token
 assert ARCH.count("crate::aarch64_virtio_input::poll()") == 1
 assert "crate::aarch64_virtio_input::poll()" not in PROCESS
 assert "crate::aarch64_virtio_input::poll()" not in TTY
@@ -174,9 +185,16 @@ for token in (
     "PRODUCTION_WORKER_REPORTED_MASK",
     "PRODUCTION_WORKER_GROUP_PID",
     "PRODUCTION_WORKER_DISPATCHES",
+    "PRODUCTION_WORKER_ACTIVE_CPU_MASK",
+    "PRODUCTION_WORKER_ACTIVE_TIDS",
+    "PRODUCTION_WORKER_OVERLAP_CPU_MASK",
+    "PRODUCTION_WORKER_OVERLAP_TIDS",
+    "fn production_worker_enter(",
+    "fn production_worker_leave(",
     "AArch64 production worker acquired duplicate CPU ownership",
     "MAKOS_AARCH64_PRODUCTION_SMP_READY",
     "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK",
+    "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK",
     "MAKOS_AARCH64_PRODUCTION_SMP_OK",
     "pid == PRODUCTION_WORKER_GROUP_PID.load(Ordering::Acquire)",
     "pub fn spawn_firefox_smp_probe()",
@@ -429,8 +447,17 @@ for token in (
     assert token in SHELL, token
 
 for token in (
+    "production_smp_overlap_probe",
+    'strcmp(argv[1], "production-smp")',
+    "MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3",
+    "__atomic_fetch_or(&production_smp_ready",
+):
+    assert token in MUSL_PTHREAD_PROBE, token
+
+for token in (
     "MAKOS_AARCH64_PRODUCTION_SMP_READY",
     "MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK",
+    "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK",
     "MAKOS_AARCH64_PRODUCTION_SMP_OK",
     "MAKOS_AARCH64_FIREFOX_SMP_REAP_OK",
     "worker_cpus=",
@@ -439,6 +466,7 @@ for token in (
     "leader_cpu=0",
     "device_mmio_owner=cpu0",
     "ownership=exclusive",
+    "concurrent=1",
     "block=ap-idle",
     "status=42",
 ):

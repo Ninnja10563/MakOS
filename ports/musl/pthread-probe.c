@@ -46,6 +46,8 @@ static pthread_cond_t requeue_condition;
 static unsigned requeue_ready;
 static unsigned requeue_release;
 static unsigned requeue_completed;
+static volatile unsigned production_smp_ready;
+static volatile unsigned production_smp_release;
 
 struct robust_probe_head {
 	volatile void *volatile head;
@@ -61,12 +63,51 @@ struct robust_probe_node {
 static struct robust_probe_head robust_head;
 static struct robust_probe_node robust_node;
 
+static long makos_call(long number, long first, long second);
+
 static void winch_handler(int signal)
 {
 	if (signal == SIGWINCH) {
 		winch_tid = syscall(SYS_gettid);
 		winch_count++;
 	}
+}
+
+static void *production_smp_worker(void *argument)
+{
+	unsigned index = (unsigned)(uintptr_t)argument;
+	__atomic_fetch_or(&production_smp_ready, 1U << index, __ATOMIC_RELEASE);
+	while (!__atomic_load_n(&production_smp_release, __ATOMIC_ACQUIRE))
+		makos_call(1, 0, 0);
+	return 0;
+}
+
+static int production_smp_overlap_probe(void)
+{
+	pthread_t workers[3];
+	void *result = 0;
+	production_smp_ready = 0;
+	production_smp_release = 0;
+	for (unsigned index = 0; index < 3; index++)
+		if (pthread_create(&workers[index], 0, production_smp_worker,
+		    (void *)(uintptr_t)index))
+			return 1;
+	for (unsigned attempts = 0; attempts < 100000; attempts++) {
+		if (__atomic_load_n(&production_smp_ready, __ATOMIC_ACQUIRE) == 0x7)
+			break;
+		makos_call(1, 0, 0);
+	}
+	if (__atomic_load_n(&production_smp_ready, __ATOMIC_ACQUIRE) != 0x7)
+		return 2;
+	/* Keep every worker Ready until the kernel observes concurrent AP owners. */
+	for (unsigned attempts = 0; attempts < 1000; attempts++) makos_call(1, 0, 0);
+	__atomic_store_n(&production_smp_release, 1, __ATOMIC_RELEASE);
+	for (unsigned index = 0; index < 3; index++)
+		if (pthread_join(workers[index], &result) || result) return 3;
+	static const char marker[] =
+		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded\n";
+	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 4;
+	return 0;
 }
 
 struct pipe_worker_args {
@@ -475,7 +516,7 @@ static int scm_rights_probe(void)
 	return 0;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	pthread_t thread;
 	void *result = 0;
@@ -522,6 +563,9 @@ int main(void)
 	sigset_t winch_set;
 	sigset_t empty_set;
 	sigset_t observed_set;
+	if (argc == 2 && !strcmp(argv[1], "production-smp") &&
+	    production_smp_overlap_probe())
+		return 255;
 	main_parent_pid = getppid();
 	if (main_parent_pid <= 0 || main_parent_pid == getpid()) return 221;
 	main_tid = syscall(SYS_gettid);

@@ -2367,6 +2367,41 @@ def main() -> int:
                         raise AssertionError("Firefox PID marker missing")
                     firefox_pid = firefox_process_match.group(1)
                     firefox_output = output[firefox_output_start:]
+                    if os.environ.get("MAKOS_AARCH64_FIREFOX_SMP_REQUIRED") == "1":
+                        overlap_matches = re.findall(
+                            rb"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK "
+                            rb"group_pid=([0-9]+) cpu_mask=(0x[0-9a-f]+) "
+                            rb"tids=([0-9]+),([0-9]+),([0-9]+)",
+                            firefox_output,
+                        )
+                        valid_overlap = None
+                        for group_pid, mask_text, tid1, tid2, tid3 in overlap_matches:
+                            cpu_mask = int(mask_text, 16) & 0xE
+                            tids = (int(tid1), int(tid2), int(tid3))
+                            active_tids = [
+                                tids[cpu - 1]
+                                for cpu in range(1, 4)
+                                if cpu_mask & (1 << cpu)
+                            ]
+                            if (
+                                group_pid == firefox_pid
+                                and cpu_mask.bit_count() >= 2
+                                and all(tid != 0 for tid in active_tids)
+                                and len(active_tids) == len(set(active_tids))
+                            ):
+                                valid_overlap = (cpu_mask, active_tids)
+                                break
+                        if valid_overlap is None:
+                            raise AssertionError(
+                                "Firefox did not overlap distinct worker TIDs on multiple guest CPUs"
+                            )
+                        print(
+                            "MAKOS_FIREFOX_SMP_OVERLAP_OK "
+                            f"group_pid={firefox_pid.decode()} "
+                            f"cpu_mask={valid_overlap[0]:#x} "
+                            f"worker_cpus={valid_overlap[0].bit_count()} "
+                            "tids=distinct concurrent=1 ownership=exclusive"
+                        )
                     if (
                         b"process-exit arch=aarch64 pid=" + firefox_pid + b" "
                         in firefox_output

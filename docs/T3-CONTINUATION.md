@@ -27,27 +27,33 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG production-SMP milestone:
-  PID 286742, user service `makos-visible-production-smp.service`, VNC
+- Active visible Pi/QEMU 10.0.11 TCG Firefox-overlap milestone:
+  PID 314733, user service `makos-visible-firefox-overlap.service`, VNC
   `127.0.0.1:5901`, session
-  `build/makos-pi-visible-production-smp-nL4neGKM`, private boot clone
-  `build/makos-pi-visible-production-smp-nL4neGKM/boot.img`, private data clone
-  `build/makos-pi-visible-production-smp-nL4neGKM/data.img`, private variables
-  `build/makos-pi-visible-production-smp-nL4neGKM/vars.fd`, QMP
-  `build/makos-pi-visible-production-smp-nL4neGKM/qmp.sock`, serial
-  `build/makos-pi-visible-production-smp-nL4neGKM/serial.log`, PID file
-  `build/makos-pi-visible-production-smp-nL4neGKM/qemu.pid`, and QMP framebuffer
-  capture `build/makos-pi-visible-production-smp-nL4neGKM/login.png`. It is the sole QEMU
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3`, private boot clone
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3/boot.img`, private data clone
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3/data.img`, private variables
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3/vars.fd`, QMP
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3/qmp.sock`, serial
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3/serial.log`, PID file
+  `build/makos-pi-visible-firefox-overlap-XO3FP0e3/qemu.pid`, and QMP framebuffer
+  capture `build/makos-pi-visible-firefox-overlap-XO3FP0e3/login.png`. Its boot
+  clone SHA-256 is
+  `6ac00398dddaf92c85e604399f2275ee1295582219e22b5d985c7e11810e3193`,
+  exactly matching `build/makos-aarch64.img`. It is the sole QEMU
   process and the ordinary config reports `smp_input_probe=0`,
   `smp_tcp_probe=0`, four online PEs,
   initial boot-probe `userspace_scheduler_cpus=1`, post-desktop
   `userspace_scheduler_cpus=4` under the bounded Firefox-worker policy,
   `MAKOS_LOGIN_UI_OK`, and `MAKOS_AARCH64_BOOT_OK`, plus shared-queue load
-  counters `77,107,116`, with no
+  counters `99,101,97`, with no
   fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; the framebuffer capture visibly shows the native login
   dialog. Use QMP `quit` before any later runtime gate.
+  Prior PID 286742/session
+  `build/makos-pi-visible-production-smp-nL4neGKM` was stopped cleanly through
+  QMP before Firefox-overlap qualification; its private files remain.
   Prior PID 275664/session `build/makos-pi-visible-selfhost-ItzH84jx` was
   stopped cleanly through QMP before the production-SMP work; its files remain.
   Prior PID 261990/session `build/makos-pi-visible-load-LhlxSbON` was stopped
@@ -231,10 +237,18 @@ Preserve existing files and changes.
   on CPU0; only non-leader Firefox-role threads are AP-eligible. AP sleep, I/O,
   input, IPC, and futex no-successor cases publish Blocked/unowned state and
   return to WFI. Firefox requests three TaskController workers. A focused
-  upstream-musl pthread fixture runs under that exact role and passes Pi/QEMU
-  10.0.11 TCG on AP1-3: `cpu_mask=0xe`, exclusive ownership, dispatch counters
-  `24,1713,157`, and status 42. Reproducer:
+  upstream-musl pthread fixture runs under that exact role. Its production-only
+  three-worker rendezvous proves a simultaneous distinct-TID interval and the
+  final Pi/QEMU 10.0.11 TCG pass reports AP1-3 dispatch, `cpu_mask=0xe`,
+  `overlap_mask=0xa`, live TIDs 6/5 on AP1/AP3, exclusive ownership, dispatch
+  counters `9787,11024,9493`, and status 42. Reproducer:
   `make test-aarch64-production-smp-runtime`. This is not real Firefox evidence.
+  Strict `make test-aarch64-firefox-runtime` now requires equivalent live
+  overlap from the launched Firefox group while retaining every existing
+  latency/interaction/resource threshold. The first repeat exposed stale TID
+  telemetry across an in-exception yield; every scheduler selection now
+  refreshes the AP owner. The next repeat exposed byte-spliced PL011 lines;
+  AArch64 formatted/raw serial records now use an IRQ-masked cross-PE lock.
   Qualification also exposed an IRQ window in the EL1-to-EL0 restore
   trampoline; EL1 stays masked until target SPSR takes effect at `ERET`.
   Subsequent 297-selection load gates and focused production runtime pass.
@@ -261,7 +275,7 @@ Preserve existing files and changes.
   executions. Reproducer: `make test-aarch64-selfhost-runtime`. The audit rows
   remain Partial because this is a bounded static linker, not a C/Rust compiler,
   general linker/build system/debugger, or substantial in-guest MakOS build.
-- At this handoff PID 286742 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 314733 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
 - The shared-Ready-queue milestone is the current implementation state; forced
@@ -345,8 +359,8 @@ Preserve existing files and changes.
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
-2. Use the bounded production policy in the next genuine Firefox macOS/HVF run
-   to require overlapping Firefox TIDs on multiple guest CPUs. Then continue
+2. The strict target now requires overlapping distinct Firefox TIDs on multiple
+   guest CPUs; inspect that evidence in the next genuine macOS/HVF run. Then continue
    automatic load balancing and repeated migration contention while retaining
    CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
    any focused runtime.

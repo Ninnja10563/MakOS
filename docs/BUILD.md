@@ -85,6 +85,12 @@ through the MakOS system clipboard, clears the URL bar, pastes, and requires a
 second exact-URI page completion. It then left-clicks the real `example.com`
 document link and requires exact `https://www.iana.org/help/example-domains`
 completion, built-in-root TLS, Firefox pointer routing, and changed page pixels.
+The Make target also requires a kernel-published live interval in which at
+least two distinct, nonzero TIDs from the launched Firefox process group own
+different guest APs simultaneously. Missing, single-CPU, stale-group, or
+duplicate-TID evidence fails the run. This adds SMP proof without changing the
+existing paint, Ctrl-A, first-input, navigation, interaction, resource, or
+survival thresholds.
 Focused `test-aarch64-ipv6-runtime` runs the full two-boot workload and adds
 post-login proof for validated RA/SLAAC, AF_INET6 sockaddr ABI, NDP resolution,
 and checksum-valid UDPv6 transmit. QEMU user networking does not return UDPv6
@@ -149,10 +155,15 @@ make test-aarch64-production-smp-runtime
 ```
 
 The shell's `firefox-smp` command executes the upstream musl pthread workload
-under the exact Firefox scheduler role. The gate requires an AP CPU mask,
-nonzero dispatch counters, exclusive ownership, AP block/idle/wake behavior,
-and status-42 reap. The Raspberry Pi/QEMU 10.0.11 TCG pass records all APs
-(`cpu_mask=0xe`). This is a scheduler-role fixture, not real Firefox or
+under the exact Firefox scheduler role. A production-only three-pthread
+rendezvous holds distinct workers Ready while the shared queue dispatches them.
+The gate requires an AP CPU mask, nonzero dispatch counters, a simultaneous
+multi-AP interval with distinct TIDs, exclusive ownership, AP block/idle/wake
+behavior, and status-42 reap. The final Raspberry Pi/QEMU 10.0.11 TCG pass
+records all APs (`cpu_mask=0xe`) and live/final matching overlap on AP1/AP3
+(`overlap_mask=0xa`, TIDs 6/5). AArch64 serial output is protected by an
+IRQ-masked cross-PE lock so these records cannot interleave by byte. This is a
+scheduler-role fixture, not real Firefox or
 macOS/HVF performance evidence. Real Firefox must still pass the unchanged
 strict Gate 3 on the intended idle host.
 

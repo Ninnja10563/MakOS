@@ -12,16 +12,27 @@ Last updated: 2026-08-25.
   successor publishes Blocked/unowned state and returns to its WFI dispatcher
   for sleep, I/O, input, IPC, and futex waits. Firefox's TaskController request
   is restored from one to three workers. The focused `firefox-smp` command runs
-  the upstream musl pthread workload under the exact production Firefox role;
-  Pi/QEMU 10.0.11 TCG reports `cpu_mask=0xe`, all three APs, exclusive ownership,
-  final status 42, and dispatch counts `24,1713,157`. This fixture exercises
+  the upstream musl pthread workload under the exact production Firefox role.
+  A production-only three-worker rendezvous now keeps distinct pthreads Ready
+  long enough to prove a simultaneous AP execution interval rather than merely
+  accumulating per-CPU dispatch counters. The final Pi/QEMU 10.0.11 TCG pass
+  reports `cpu_mask=0xe`, `overlap_mask=0xa`, distinct live TIDs 6/5 on AP1/AP3,
+  exclusive ownership, final status 42, and dispatch counts
+  `9787,11024,9493`. This fixture exercises
   clone/futex/pipe/signal/block/wake/join/exit/wait/reap but is explicitly not
   real Firefox or macOS/HVF performance evidence. A pre-fix repeat exposed an
   IRQ window inside the EL1-to-EL0 restore trampoline at `0x48000164`; EL1 IRQs
   now stay masked until the target SPSR is installed atomically by `ERET`.
   Subsequent load gates complete all 297 selections and the focused production
-  runtime passes. Release image/artifact validation and final `make unit check`
-  pass. The broad Pi/TCG harness reaches later desktop/libc/application gates
+  runtime passes. The strict real-Firefox Make target now sets
+  `MAKOS_AARCH64_FIREFOX_SMP_REQUIRED=1` and rejects a run unless its launched
+  Firefox group publishes at least two simultaneous AP owners with distinct,
+  nonzero TIDs; all paint, Ctrl-A, input, TLS, URI, interaction, resource, and
+  survival thresholds remain unchanged. Qualification also exposed byte-level
+  PL011 record interleaving. AArch64 formatted/raw serial writes now hold an
+  IRQ-masked cross-PE lock, and the repeated overlap run emits intact live and
+  final evidence lines. Release image/artifact validation and final
+  `make unit check` pass. The broad Pi/TCG harness reaches later desktop/libc/application gates
   but retains the pre-existing Settings resize mismatch (`560x360` observed,
   exact `450x290` required), so it is not recorded as a full broad-gate pass.
   Real Firefox overlap plus the unchanged idle-macOS/HVF Gate 3 remain required,
