@@ -19,10 +19,17 @@ while CPU0 leaves WFI; CPU0 idles inside the syscall and APs return to their
 dispatchers until the 20 ms timer expiry. Runtime requires
 `futex_idle_mask=0xe` and `futex_resume_mask=0xe`. This explicit release
 barrier keeps the correctness fixture independent of host emulation speed. A
-zero-descriptor 20 ms `poll` also blocks each AP with its PC rewound to the SVC,
+zero-descriptor 200 ms `poll` also blocks each AP with its PC rewound to the SVC,
 returns to idle, wakes on the shared deadline, retries, and observes timeout;
-runtime requires `io_idle_mask=0xe` and `io_resume_mask=0xe`. The gate then
-closes and APs return to interrupt-masked WFI. General
+runtime requires `io_idle_mask=0xe` and `io_resume_mask=0xe`. A second embedded
+EL0 program then creates an auto-reset event and clones a shared-VM thread. Its
+leader is fixed to AP1 and blocks in `event_wait` with no local successor; AP1
+returns through its private kernel record to idle. CPU0 enters the child on its
+validated RW/NX thread stack, signals the process-owned handle, and executes
+thread-only exit with no CPU0 successor. AP1 resumes the exact leader, which
+closes the handle and exits 44. Runtime requires `ipc_idle_mask=0x2`,
+`ipc_resume_mask=0x2`, status-0 child return, parent reap, and exact frame
+recovery. The gate then closes and APs return to interrupt-masked WFI. General
 desktop userspace still runs on CPU0, so `userspace_scheduler_cpus=1` remains
 the truthful scope marker.
 
@@ -45,12 +52,12 @@ safe general process migration.
 - Initial and exception-time AP selectors now restrict candidates to
   non-leader Firefox workers. Broader affinity/load balancing remains gated
   until device-owning and PID1/UI paths are qualified.
-- `sleep_until`, timed poll/I/O, and timed futex waits with no AP-eligible
+- `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
-  loop and have timer-wake/resume proof. IPC and input no-successor paths still
-  reactivate or reject the sole local task and need the same idle-return
-  contract. Other I/O wait sources share the proved scheduler path but still
-  need device-triggered runtime coverage.
+  loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit
+  also returns to its calling CPU's kernel record when no local successor
+  exists. Input no-successor behavior and device-triggered I/O still need
+  runtime coverage.
 - Exit/session teardown must distinguish no local successor from no live
   session. `exit_group` must first stop/ack remote-running siblings; current
   administrative `terminate` correctly rejects a task owned by another CPU.

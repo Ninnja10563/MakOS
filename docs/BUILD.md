@@ -116,10 +116,14 @@ resume after CPU0's timer wake, return statuses 40-43, reap cleanly, and restore
 the free-frame count. They also perform a 20 ms timed futex wait with CPU0 in
 WFI and APs back in their idle dispatchers. The marker requires
 `idle_mask=0xe`, `resume_mask=0xe`, `futex_idle_mask=0xe`, and
-`futex_resume_mask=0xe`. A zero-descriptor 20 ms `poll` must also return APs to
+`futex_resume_mask=0xe`. A zero-descriptor 200 ms `poll` must also return APs to
 idle, retry the original SVC after timer wake, and report
-`io_idle_mask=0xe`/`io_resume_mask=0xe`. The scheduler closes AP dispatch again
-before the desktop; this is not yet general multicore userspace.
+`io_idle_mask=0xe`/`io_resume_mask=0xe`. A second EL0 fixture creates an
+auto-reset event, clones a shared-VM thread, blocks its leader on AP1, signals
+from the child on CPU0, and requires AP1 idle/resume masks `0x2`, child
+thread-return status 0, parent status 44, and balanced frames. The scheduler
+closes AP dispatch again before the desktop; this is not yet general multicore
+userspace.
 
 The UEFI loader allocates the direct kernel handoff span as `LOADER_CODE`.
 Current AAVMF releases may enforce execute-never on `LOADER_DATA`; using that

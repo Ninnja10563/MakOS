@@ -12,7 +12,7 @@ _start:
     adrp x0, futex_word
     add x0, x0, :lo12:futex_word
     mov x1, #0
-    mov x2, #20
+    mov x2, #200
     mov x3, #0
     mov x4, #0
     mov x8, #91

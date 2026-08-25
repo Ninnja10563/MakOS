@@ -1003,8 +1003,8 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
     if active_root == 0
         || context.ttbr0 != active_root
         || !(USER_ADDRESS_BASE..USER_IMAGE_LIMIT).contains(&context.elr)
-        || !matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
-        || context.sp_el0 & 15 != 0
+        || (!matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
+            && !user_stack_pointer_valid_in(context.ttbr0, context.sp_el0))
         || context.spsr != 0
     {
         crate::fatal("AArch64 EL0 entry precondition failed");
@@ -1015,6 +1015,19 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
     disable_interrupts();
     stop_scheduler_timer();
     status
+}
+
+fn user_stack_pointer_valid_in(root: u64, stack_pointer: u64) -> bool {
+    if stack_pointer & 15 != 0 || !(USER_ADDRESS_BASE..=USER_ADDRESS_LIMIT).contains(&stack_pointer)
+    {
+        return false;
+    }
+    let stack_page = (stack_pointer - 1) & !(PAGE_SIZE - 1);
+    let Some(slot) = user_page_slot(root, stack_page) else {
+        return false;
+    };
+    let entry = unsafe { slot.read_volatile() };
+    entry & 0b11 == TABLE_DESCRIPTOR && entry & (0b11 << 6) == AP_USER_RW && entry & UXN != 0
 }
 
 pub fn destroy_user_address_space(root: u64) -> usize {
@@ -3212,7 +3225,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_EVENT_WAIT => {
             let handle = frame.registers[0];
             frame.registers[0] = 1;
-            if !crate::security::has_capability(crate::security::CAP_IPC)
+            if !crate::aarch64_process::ipc_control_allowed()
                 || !crate::ipc::wait_event_from_exception(handle, frame)
             {
                 frame.registers[0] = ERROR_INVALID;
@@ -3731,18 +3744,18 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             crate::aarch64_process::current_pid() == 1 && crate::security::session_active(),
         ),
         SYS_EVENT_CREATE => {
-            if crate::security::has_capability(crate::security::CAP_IPC) {
+            if crate::aarch64_process::ipc_control_allowed() {
                 crate::ipc::create_event(frame.registers[0] != 0).unwrap_or(ERROR_INVALID)
             } else {
                 ERROR_INVALID
             }
         }
         SYS_EVENT_SIGNAL => u64::from(
-            crate::security::has_capability(crate::security::CAP_IPC)
+            crate::aarch64_process::ipc_control_allowed()
                 && crate::ipc::signal_event(frame.registers[0]),
         ),
         SYS_HANDLE_CLOSE => u64::from(
-            crate::security::has_capability(crate::security::CAP_IPC)
+            crate::aarch64_process::ipc_control_allowed()
                 && crate::ipc::close(frame.registers[0]),
         ),
         SYS_FD_DUP => crate::vfs::duplicate(frame.registers[0]).unwrap_or(ERROR_INVALID),

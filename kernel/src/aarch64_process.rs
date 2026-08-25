@@ -51,6 +51,8 @@ static TOOLCHAIN_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-toolchain.elf"));
 static SMP_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-probe.elf"));
+static SMP_IPC_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-ipc-probe.elf"));
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -212,6 +214,8 @@ static SMP_PROBE_FUTEX_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_AFFINITY: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static SMP_PROBE_IO_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_IO_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_IPC_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_IPC_RESUME_MASK: AtomicU64 = AtomicU64::new(0);
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -560,6 +564,138 @@ pub fn run_smp_userspace_self_test() {
     reset_scheduler();
 }
 
+pub fn run_smp_ipc_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_IPC_IDLE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_IPC_RESUME_MASK.store(0, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+
+    let leader = spawn_process(0, SMP_IPC_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 SMP IPC probe spawn failed"))
+        .0;
+    // Force the event waiter onto AP1. Its clone remains Ready because only
+    // the leader TID is eligible there; CPU0 admits the clone after observing
+    // its fully published context.
+    SMP_PROBE_AFFINITY[1].store(leader, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+
+    let clone_deadline = crate::arch::counter_deadline_millis(20_000);
+    let child = loop {
+        let child = with_state(|state| {
+            state
+                .contexts
+                .iter()
+                .find(|slot| slot.pid != 0 && slot.pid != leader && slot.group_pid == leader)
+                .map(|slot| slot.pid)
+        });
+        if let Some(child) = child
+            && SMP_PROBE_IPC_IDLE_MASK.load(Ordering::Acquire) & 0b0010 != 0
+        {
+            break child;
+        }
+        if crate::arch::counter_deadline_expired(clone_deadline) {
+            let (leader_info, child_info, cpu0, cpu1) = with_state(|state| {
+                (
+                    state.table.get(leader),
+                    child.and_then(|tid| state.table.get(tid)),
+                    state.table.current_pid_on(0),
+                    state.table.current_pid_on(1),
+                )
+            });
+            crate::serial_println!(
+                "MAKOS_AARCH64_SMP_IPC_DIAGNOSTIC leader={:?} child={:?} cpu0={:?} cpu1={:?} idle_mask={:#x} resume_mask={:#x}",
+                leader_info,
+                child_info,
+                cpu0,
+                cpu1,
+                SMP_PROBE_IPC_IDLE_MASK.load(Ordering::Acquire),
+                SMP_PROBE_IPC_RESUME_MASK.load(Ordering::Acquire),
+            );
+            crate::fatal("AArch64 SMP IPC clone publication timeout");
+        }
+        core::hint::spin_loop();
+    };
+
+    SMP_PROBE_AFFINITY[0].store(child, Ordering::Release);
+    notify_idle_cpus();
+    let context = with_state(|state| {
+        let process = state
+            .schedule_next_for_cpu(0)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP IPC signaler absent"));
+        if process.pid != child {
+            crate::fatal("AArch64 SMP IPC signaler affinity violated");
+        }
+        state
+            .contexts
+            .iter()
+            .find(|slot| slot.pid == child)
+            .unwrap_or_else(|| crate::fatal("AArch64 SMP IPC signaler context absent"))
+            .context
+    });
+    smp_probe_enter(child);
+    crate::arch::switch_address_space(context.ttbr0);
+    let child_status = crate::arch::enter_user_context(&context);
+    crate::arch::switch_address_space(crate::arch::kernel_root());
+    smp_probe_leave();
+    if child_status != 0 {
+        crate::fatal("AArch64 SMP IPC signaler status invalid");
+    }
+
+    let completion_deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let complete = with_state(|state| {
+            state
+                .table
+                .get(leader)
+                .is_some_and(|info| info.state == makos_process_table::ProcessState::Zombie)
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(completion_deadline) {
+            crate::fatal("AArch64 SMP IPC completion timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+
+    let (resource, status) = with_state(|state| {
+        let WaitResult::Reaped {
+            resource,
+            exit_status,
+            ..
+        } = state.table.wait(0, leader)
+        else {
+            crate::fatal("AArch64 SMP IPC leader reap failed");
+        };
+        if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == leader) {
+            *slot = ContextSlot::EMPTY;
+        }
+        (resource, exit_status)
+    });
+    cleanup_reaped(leader, resource, status);
+    let idle = SMP_PROBE_IPC_IDLE_MASK.load(Ordering::Acquire);
+    let resumed = SMP_PROBE_IPC_RESUME_MASK.load(Ordering::Acquire);
+    if status != 44
+        || idle & 0b0010 == 0
+        || resumed & 0b0010 == 0
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 SMP IPC userspace proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_SMP_IPC_OK waiter_cpu=1 signaler_cpu=0 event=auto-reset cross-task=1 ipc_idle_mask={:#x} ipc_resume_mask={:#x} child_exit=thread-return parent_exit=44 free_balance=1 scheduler_scope=boot-probe desktop_gate=closed",
+        idle,
+        resumed,
+    );
+    reset_scheduler();
+}
+
 pub fn run_desktop_shell() -> ! {
     reset_scheduler();
     let (pid, process) = spawn_process(0, SHELL_ELF, 0, ProcessRole::Shell)
@@ -671,29 +807,40 @@ pub fn wake_task(group_pid: u64, tid: u64) -> bool {
 pub fn block_current_for_ipc(frame: &mut crate::arch::ExceptionFrame) -> bool {
     let captured = crate::arch::UserContext::capture(frame);
     let next = with_state(|state| {
-        let tid = state.table.current_pid_on(scheduler_cpu())?;
+        let cpu = scheduler_cpu();
+        let tid = state.table.current_pid_on(cpu)?;
         let index = state.contexts.iter().position(|slot| slot.pid == tid)?;
         state.contexts[index].context = captured;
-        if state.table.block_current_on(scheduler_cpu()) != Some(tid) {
+        if state.table.block_current_on(cpu) != Some(tid) {
             return None;
         }
-        let Some(next) = state.schedule_next_for_cpu(scheduler_cpu()) else {
+        let Some(next) = state.schedule_next_for_cpu(cpu) else {
+            if cpu != 0 && state.contexts[index].role == ProcessRole::SmpProbe {
+                SMP_PROBE_IPC_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                return Some(None);
+            }
             let _ = state.table.wake(tid);
-            let _ = state.table.activate_on(scheduler_cpu(), tid);
+            let _ = state.table.activate_on(cpu, tid);
             return None;
         };
         state
             .contexts
             .iter()
             .find(|slot| slot.pid == next.pid)
-            .map(|slot| slot.context)
+            .map(|slot| Some(slot.context))
     });
-    let Some(context) = next else {
-        return false;
-    };
-    context.restore(frame);
-    crate::arch::switch_address_space(context.ttbr0);
-    true
+    match next {
+        Some(Some(context)) => {
+            context.restore(frame);
+            crate::arch::switch_address_space(context.ttbr0);
+            true
+        }
+        Some(None) => {
+            crate::arch::return_to_kernel(frame, 0);
+            true
+        }
+        None => false,
+    }
 }
 
 /// Suspend current EL0 task until pipe readiness changes or timeout expires.
@@ -1774,6 +1921,13 @@ pub fn process_control_allowed() -> bool {
         })
 }
 
+pub fn ipc_control_allowed() -> bool {
+    // The only pre-login exception is immutable kernel-embedded boot-fixture
+    // code used to exercise this path before PID1 receives session caps.
+    crate::security::has_capability(crate::security::CAP_IPC)
+        || current_app_role() == ProcessRole::SmpProbe
+}
+
 fn with_state<R>(function: impl FnOnce(&mut SchedulerState) -> R) -> R {
     while PROCESSES
         .lock
@@ -1840,6 +1994,9 @@ fn smp_probe_enter(tid: u64) {
     }
     if SMP_PROBE_IO_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
         SMP_PROBE_IO_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
+    }
+    if SMP_PROBE_IPC_IDLE_MASK.load(Ordering::Acquire) & bit != 0 {
+        SMP_PROBE_IPC_RESUME_MASK.fetch_or(bit, Ordering::AcqRel);
     }
     SMP_PROBE_TIDS[cpu].store(tid, Ordering::Release);
     let active = SMP_PROBE_ACTIVE_MASK.fetch_or(bit, Ordering::AcqRel) | bit;
@@ -3438,7 +3595,8 @@ fn exit_thread_from_exception(status: u64, frame: &mut crate::arch::ExceptionFra
         context.restore(frame);
         crate::arch::switch_address_space(context.ttbr0);
     } else {
-        crate::fatal("AArch64 thread exit left no runnable task");
+        crate::arch::switch_address_space(crate::arch::kernel_root());
+        crate::arch::return_to_kernel(frame, status);
     }
 }
 

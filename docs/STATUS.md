@@ -9,20 +9,26 @@ Last updated: 2026-08-25.
   GICv2 SGI to three WFI APs. Each AP enables its banked virtual-timer PPI; four
   independent ELF processes rendezvous immediately before EL0 entry and then
   overlap across CPU0-3 with distinct TIDs and exit statuses 40-43. The final
-  Pi/QEMU 10.0.11 TCG run reports TIDs `4,2,3,1`, `overlap_mask=0xf`, reaps all
+  Pi/QEMU 10.0.11 TCG run reports TIDs `1,2,3,4`, `overlap_mask=0xf`, reaps all
   roots, restores exact free-frame balance, closes the AP gate, and reaches the
   visible login. A subsequent probe has every AP block in `sleep_until`, return
   through its per-CPU kernel record to the idle dispatcher, receive CPU0's
   timer wake, and resume in EL0 with `resume_mask=0xe`. The same fixed-affinity
   processes then execute timed futex waits: CPU0 idles in the syscall, all APs
   return to idle, and the 20 ms timeout resumes them with
-  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. A zero-descriptor timed `poll`
+  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. A zero-descriptor 200 ms `poll`
   additionally proves the retry-PC I/O path with
-  `io_idle_mask=0xe`/`io_resume_mask=0xe`. The current AArch64 release
+  `io_idle_mask=0xe`/`io_resume_mask=0xe`. A separate embedded EL0 program now
+  creates a process-owned auto-reset event and clones a shared-VM thread. The
+  leader blocks on AP1 with no eligible successor; CPU0 runs the child on its
+  validated RW/NX stack, signals the event, and returns through thread-only
+  exit with no local successor. AP1 resumes and the parent exits 44. Runtime
+  reports `ipc_idle_mask=0x2`/`ipc_resume_mask=0x2` with exact frame balance.
+  The current AArch64 release
   image/artifact check, full
   `make check`, and both SMP structural guards pass. General
-  desktop/Firefox AP scheduling remains gated pending IPC/input idle returns,
-  remote group-exit acknowledgement, device affinity
+  desktop/Firefox AP scheduling remains gated pending input/device-triggered
+  idle returns, remote group-exit acknowledgement, device affinity
   and contention proof, so the
   scheduler audit row remains Partial and still reports one desktop scheduler
   CPU.

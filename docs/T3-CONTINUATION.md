@@ -27,13 +27,14 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for pushed commit `4c5388c`: PID
-  117838, VNC `127.0.0.1:5901`, session `build/makos-pi-visible-nysliu`, private
-  data clone `build/makos-pi-visible-nysliu/data.img`, private variables
-  `build/makos-pi-visible-nysliu/vars.fd`, QMP
-  `build/makos-pi-visible-nysliu/qmp.sock`, serial
-  `build/makos-pi-visible-nysliu/serial.log`, and PID file
-  `build/makos-pi-visible-nysliu/qemu.pid`. It is the sole QEMU process and
+- Active visible Pi/QEMU 10.0.11 TCG milestone for the current verified source
+  (exact pushed commit recorded after the final regression commit): PID 139418,
+  VNC `127.0.0.1:5901`, session `build/makos-pi-visible-7HlrvV`, private data
+  clone `build/makos-pi-visible-7HlrvV/data.img`, private variables
+  `build/makos-pi-visible-7HlrvV/vars.fd`, QMP
+  `build/makos-pi-visible-7HlrvV/qmp.sock`, serial
+  `build/makos-pi-visible-7HlrvV/serial.log`, and PID file
+  `build/makos-pi-visible-7HlrvV/qemu.pid`. It is the sole QEMU process and
   passes the four-PE EL0 marker, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`. Keep it running for user testing; use QMP `quit`
   before any later runtime gate.
@@ -47,10 +48,17 @@ Preserve existing files and changes.
   return to its idle dispatcher, receive CPU0's timer wake, and resume with
   `resume_mask=0xe`. A fixed-affinity timed-futex phase also idles CPU0 in the
   syscall, returns every AP to idle, and proves the 20 ms timer wake with
-  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. A timed zero-descriptor `poll`
-  proves I/O retry after AP idle with `io_idle_mask=0xe`/`io_resume_mask=0xe`.
+  `futex_idle_mask=0xe`/`futex_resume_mask=0xe`. A 200 ms timed zero-descriptor
+  `poll` proves I/O retry after AP idle with
+  `io_idle_mask=0xe`/`io_resume_mask=0xe`. A second embedded EL0 process creates
+  an auto-reset event, clones a shared-VM child, blocks its leader on AP1, and
+  returns AP1 to idle. CPU0 enters the child through a validated RW/NX stack;
+  the child signals the event and thread-exits without a local successor. AP1
+  resumes the parent, which closes the handle and exits 44. Runtime requires
+  `ipc_idle_mask=0x2`/`ipc_resume_mask=0x2`, child status 0, exact reap/frame
+  balance, and a subsequent visible boot/login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending IPC/input and device-triggered blocking proof, remote
+  remains pending input/device-triggered blocking proof, remote
   teardown, device-affinity and contention gates.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child

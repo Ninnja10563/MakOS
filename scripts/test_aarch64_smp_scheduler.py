@@ -36,8 +36,11 @@ for token in (
     "if cpu_index() == 0",
     "SMP_USER_SCHEDULER_ENABLED.store(true, Ordering::Release);",
     "SMP_USER_SCHEDULER_ENABLED.store(false, Ordering::Release);",
+    "user_stack_pointer_valid_in(context.ttbr0, context.sp_el0)",
 ):
     assert token in ARCH, token
+
+assert ARCH.count("crate::aarch64_process::ipc_control_allowed()") == 4
 
 for token in (
     "fn scheduler_cpu() -> usize",
@@ -62,6 +65,10 @@ for token in (
     "FutexBlockResult::BspIdle",
     "SMP_PROBE_IO_IDLE_MASK",
     "SMP_PROBE_IO_RESUME_MASK",
+    "SMP_PROBE_IPC_IDLE_MASK",
+    "SMP_PROBE_IPC_RESUME_MASK",
+    "pub fn run_smp_ipc_self_test()",
+    "MAKOS_AARCH64_SMP_IPC_OK",
     "return_to_kernel(frame, 0)",
     "statuses != [40, 41, 42, 43]",
     "peak != 0b1111",

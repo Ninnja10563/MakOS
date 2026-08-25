@@ -270,11 +270,12 @@ pub fn wait_event_from_exception(handle: u64, frame: &mut crate::arch::Exception
     if !should_block {
         return true;
     }
+    let pid = current_pid();
     let tid = current_tid();
     if crate::aarch64_process::block_current_for_ipc(frame) {
         crate::serial_println!(
             "MAKOS_AARCH64_IPC_WAIT_OK pid={} tid={} handle={} state=blocked wake=event",
-            current_pid(),
+            pid,
             tid,
             handle,
         );
