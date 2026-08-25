@@ -27,21 +27,22 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `c474181`:
-  PID 203938, VNC `127.0.0.1:5901`, session
-  `build/makos-pi-visible-w5JUu3`, private data clone
-  `build/makos-pi-visible-w5JUu3/data.img`, private variables
-  `build/makos-pi-visible-w5JUu3/vars.fd`, QMP
-  `build/makos-pi-visible-w5JUu3/qmp.sock`, serial
-  `build/makos-pi-visible-w5JUu3/serial.log`, and PID file
-  `build/makos-pi-visible-w5JUu3/qemu.pid`. It is the sole QEMU process and the
+- Active visible Pi/QEMU 10.0.11 TCG milestone for core commit `0868b79`:
+  PID 214025, VNC `127.0.0.1:5901`, session
+  `build/makos-pi-visible-JZAZKK`, private data clone
+  `build/makos-pi-visible-JZAZKK/data.img`, private variables
+  `build/makos-pi-visible-JZAZKK/vars.fd`, QMP
+  `build/makos-pi-visible-JZAZKK/qmp.sock`, serial
+  `build/makos-pi-visible-JZAZKK/serial.log`, and PID file
+  `build/makos-pi-visible-JZAZKK/qemu.pid`. It is the sole QEMU process and the
   ordinary config reports `smp_input_probe=0`, four online PEs,
   `userspace_scheduler_cpus=1`, `MAKOS_LOGIN_UI_OK`, and
   `MAKOS_AARCH64_BOOT_OK`, with no fatal/panic. VNC required QEMU's bundled
   data path via `-L build/host-tools/qemu-root/usr/share/qemu`. Keep it running
   for user testing; use QMP `quit` before any later runtime gate.
-  The prior PID 193461/session `build/makos-pi-visible-ncttcL` was stopped
-  cleanly through QMP before focused testing; its private session files remain.
+  Prior PID 193461/session `build/makos-pi-visible-ncttcL` and PID
+  203938/session `build/makos-pi-visible-w5JUu3` were stopped cleanly through
+  QMP before focused testing/building; their private session files remain.
 - A bounded four-PE AArch64 EL0 scheduler proof now passes on Pi/QEMU 10.0.11
   TCG: a GICv2 SGI wakes the AP gate, each AP enables its banked virtual-timer
   PPI, the four contexts rendezvous immediately before EL0 entry, and four
@@ -91,8 +92,8 @@ Preserve existing files and changes.
   complementary owner/join masks, first-owner-wins status, single-root reap,
   exact frame balance, and subsequent login.
   The gate closes before the desktop; general desktop/Firefox AP scheduling
-  remains pending stateful TCP TX, block read/write and production service
-  contention, and GPU service-affinity/contention gates.
+  remains pending stateful TCP TX and GPU service-affinity/contention gates,
+  plus migration and load balancing.
   An opt-in seventh fixture runs after real virtio-input initialization. AP1
   blocks in EL0 `read_key` and returns to its idle dispatcher; the focused QMP
   harness sends a genuine Ctrl-K through virtio-keyboard, CPU0 drains the used
@@ -119,22 +120,28 @@ Preserve existing files and changes.
   pending; the AP UDP completion wait is bounded EL1 `WFE`, not scheduler-idle
   proof. Full `make check`, `make unit`, release/image artifact checks, and the
   SMP structural guard pass for the UDP ownership work.
-  The focused image now runs a ninth fixture before networking. AP1 opens the
-  real mode-0644 persistent `/boot-count.txt` and calls syscall 97 `fsync`.
-  An eight-slot bounded copied-request queue hands the request to CPU0, which
-  alone performs the real virtio-blk FLUSH; low-level ring submission fatals
-  off CPU0. Two Pi/TCG runs passed with exactly one AP request, one CPU0 owner
-  completion, one successful FLUSH, status 65, and exact frame balance. One
-  intervening unchanged run failed in the earlier EL1 exit-group rendezvous
-  before block initialization; its immediate exact repeat passed the combined
-  block/network/input/boot gate. The final marker is
-  `MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0 device=virtio-blk request=fsync ring_activity=real mmio_owner=cpu0 transport=bounded-copy-queue owner_completions=1 ap_requests=1 flush_completions=1 wait=bounded-el1-wfe status=65 read_write_proxy=structural free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed`.
-  The queue implements copied 512-byte/4 KiB reads and writes, but those paths
-  currently have compile/structural coverage only. Production service-point
-  contention and AP scheduler-idle block completion remain open. Full
-  `make check`, `make unit`, release/image artifact checks, the updated SMP
-  structural guard, the final combined runtime, and the ordinary visible login
-  pass for core commit `c474181`.
+  The focused image runs a ninth fixture before networking. The kernel creates
+  a private mode-0600 uid/gid-1000 inode and binds the immutable AP1 probe to
+  the minimum file-write capability before login. AP1 uses normal VFS/MakFS4
+  calls to write and `fsync` 4 KiB, close, reopen, read and byte-verify 4 KiB;
+  the kernel removes the inode afterward. An eight-slot bounded copied-request
+  queue hands every request to CPU0's production 100 Hz timer bottom half.
+  Low-level ring submission fatals off CPU0; a timer interrupt over direct CPU0
+  I/O observes the owner lock and defers one tick instead of recursing. The
+  combined Pi/TCG pass reports 33/33 requests/completions: 18 reads, 10 writes,
+  5 flushes, all 33 timer-serviced, status 65, content/inode cleanup, and exact
+  frame balance. The marker is
+  `MAKOS_AARCH64_SMP_BLOCK_OK requester_cpu=1 service_cpu=0 device=virtio-blk requests=read4k,write4k,fsync ring_activity=real mmio_owner=cpu0 transport=bounded-copy-queue service_point=cpu0-timer-bottom-half owner_completions=33 ap_requests=33 read_completions=18 write_completions=10 flush_completions=5 timer_completions=33 wait=bounded-el1-wfe status=65 file=/home/user/.smp-block-io lifecycle=create,write,fsync,reopen,read,verify,remove free_balance=1 scheduler_scope=opt-in-boot-probe desktop_gate=closed`.
+  Two initial production-service runs used an unnecessary fixed five guest
+  seconds of CPU0 evidence. The first reached the successful block marker but
+  not the later input readiness marker; its exact repeat entered the block
+  phase but exhausted the same unchanged 90-second TCG window before its
+  marker. A one-guest-second window retains
+  100 timer opportunities and the exact timer/owner equality requirement; its
+  run passed block, network, injected input, and final boot. Full `make unit`
+  and `make check`, release/image artifact checks, the updated structural
+  guard, focused runtime, and ordinary visible login pass for core commit
+  `0868b79`.
 - 2026-08-25 AArch64 normative syscall 57 startup-vector parity is implemented.
   The exact 336-byte version-1 descriptor is copied and validated before child
   allocation. The guest-native two-pass assembler emits code that validates
@@ -144,10 +151,11 @@ Preserve existing files and changes.
   structural guards pass. The broad Pi/TCG harness later hit the preserved
   Settings resize mismatch (`560x360` versus exact `450x290`), so it is not a
   full broad-gate pass.
-- At this handoff PID 203938 is the sole QEMU and no runtime-test harness is
+- At this handoff PID 214025 is the sole QEMU and no runtime-test harness is
   active. Check process state before every runtime gate and stop the visible
   guest through its recorded QMP socket; never start concurrent QEMU.
-- Core block-service commit `c474181` is ready for GitHub `main`. Generated
+- Core production block-service commit `0868b79` is the implementation state
+  for GitHub `main`. Generated
   `build/`, `target/`, nested targets, `outputs/`, logs, QEMU variable stores,
   Python caches, and `.DS_Store` are intentionally ignored rather than uploaded.
 - Cursor uses virtio-GPU hardware cursor plane. Marker:
@@ -221,10 +229,10 @@ Preserve existing files and changes.
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
 2. Continue the AArch64 userspace SMP row with the next real service-ownership
-   gate. Exercise copied block read/write from an AP and establish a production
-   CPU0 service point under contention, or implement stateful CPU0 TCP service
-   without sharing mutable connection state across PEs; GPU ownership remains
-   open. Stop the visible QEMU through QMP before any focused runtime.
+   gate. Implement stateful CPU0 TCP service without sharing mutable connection
+   state across PEs, or qualify GPU service ownership/contention; then add
+   forced migration and load balancing. Stop the visible QEMU through QMP
+   before any focused runtime.
 3. Boot a fresh visible login milestone after the next verified behavior change
    and record PID/session/data clone/QMP. Preserve real implementation
    requirements—no fake/spoofed apps.

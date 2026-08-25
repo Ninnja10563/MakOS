@@ -83,9 +83,9 @@ Last updated: 2026-08-25.
   CPU0 I/O with the owner lock held. The passing combined Pi/TCG gate reports
   33 requests/completions: 18 reads, 10 writes, 5 flushes, and all 33 timer
   serviced, with status 65 and exact frame balance. Two initial runs with an
-  unnecessary fixed five-guest-second CPU0 evidence window passed the block
-  marker but exhausted the unchanged 90-second Pi/TCG harness window before
-  the later input readiness marker; reducing that evidence window to one guest
+  unnecessary fixed five-guest-second CPU0 evidence window exhausted the
+  unchanged 90-second Pi/TCG harness window: the first after the block marker,
+  the repeat during the block phase. Reducing that evidence window to one guest
   second retained 100 timer opportunities and every counter requirement, then
   passed block, network, input, and boot. The AP request wait is bounded EL1
   `WFE`, not scheduler-idle proof.
@@ -689,10 +689,11 @@ Last updated: 2026-08-25.
   rendezvous and never reached block initialization; the exact immediate
   repeat passed block, network, input, and boot completion. The subsequent
   production timer-service gate completed 33 AP filesystem requests (18 reads,
-  10 writes, 5 flushes). Its first two five-guest-second evidence runs reached
-  the block marker but consumed the focused harness window before the later
-  input readiness marker; a one-guest-second window retained exact timer-owner
-  counter proof and passed the complete unchanged 90-second combined gate.
+  10 writes, 5 flushes). The first five-guest-second evidence run reached the
+  block marker but consumed the focused harness window before the later input
+  readiness marker; its exact repeat entered the block phase but exhausted the
+  same window before the marker. A one-guest-second window retained exact
+  timer-owner counter proof and passed the complete unchanged 90-second gate.
 - Passed 2026-08-14: QEMU 11.0.3 `pc` + bundled OVMF x86_64,
   Apple Silicon M3 host, TCG emulation.
 - Test uses four vCPUs, 256 MiB RAM, RTL8139, two ATA disks, PS/2 keyboard,
