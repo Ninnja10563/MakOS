@@ -25,6 +25,15 @@ Last updated: 2026-08-26.
   pending on an idle Apple Silicon macOS/HVF host. The older integrated
   `a9c604254f094de2` image does not contain patch `0057` and is not accepted as
   qualification for this increment.
+  A fresh visible login from implementation commit
+  `4f72dbb09227dbd2ab6dc117d2c799d69d055353` is the sole QEMU: PID 926500,
+  service `makos-visible-firefox-handoff-final.service`, private session
+  `build/makos-pi-visible-firefox-handoff-final-wstXm6dk`, read-only boot clone,
+  blank sparse data image, private vars, QMP socket, and serial log. QMP reports
+  running. The boot clone SHA-256 is
+  `80f706777cfd92c7938e33088a4572c9b5829c7b5faf0313df65040e92579dbc`;
+  the 800x600 login PPM SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
 - 2026-08-26 the bounded AArch64 production scheduler now admits non-leader
   `ProcessRole::Python` threads to the same kernel-owned AP1-3 placement,
   affinity, blocking/wake, and timer-migration policy already used by Firefox

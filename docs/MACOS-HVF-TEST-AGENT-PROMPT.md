@@ -12,7 +12,7 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required implementation baseline: d73c1d8cd20d883a7957fd5dfa5802438d69b84b
+Required implementation baseline: 4f72dbb09227dbd2ab6dc117d2c799d69d055353
 
 Verify that the checked-out `main` contains this exact implementation commit.
 Do not test an older commit. A later documentation-only handoff commit is
@@ -115,25 +115,45 @@ acceptable if this baseline is its ancestor.
    production gate must retain its exact-role,
    exact-group, surface-wake, IRQ, and CPU0 device-ownership assertions and add
    the equivalent `role=firefox` automatic-placement/migration proof before its
-   explicit affinity phase. Both production gates must observe
+   explicit affinity phase. It must also report
+   `MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_ARM_OK` for the exact watcher/group,
+   `MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK` with
+   `source=watcher-post-enqueue wake=sgi bounded_ticks=1000`, the same watcher,
+   group, and CPU0 leader, then `MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK`. Its
+   final marker must contain `handoff=watcher-post-enqueue-syscall:149`.
+   Rejection or fallback-only evidence is not a pass. Both production gates
+   must observe
    `MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,python,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle`.
    The cursor gate must retain seven positions,
    zero changed scanout pixels, the virtio-GPU cursor plane, and hidden host
    cursor.
-4. Run the strict real-Firefox gate only when the host is idle and memory
-   pressure is low, and only if the exact integrated image and staged Firefox
-   package required by the Make target are present. The currently documented
-   image is `build/makos-integrated-a9c604254f094de2.img`; verify its identity
-   from the repository documentation and target preflight. Do not substitute a
-   different image or Pi/TCG timing. Run exactly:
+4. The historical `build/makos-integrated-a9c604254f094de2.img` predates
+   Firefox patch `0057` and is not valid for this increment. Apply the complete
+   pinned Firefox patch series to the pinned ESR source, require
+   `ports/firefox/test-widget.sh` to pass, rebuild and stage the genuine MakOS
+   Firefox binaries, package them, and create a new content-addressed integrated
+   image from a private clone of the intended data image. Never overwrite the
+   source data image. Record the new package/image identities and manifest.
+   If those prerequisites cannot be built, return the exact blocker and do not
+   run the old image.
+
+   Run the strict real-Firefox gate only when the host is idle and memory
+   pressure is low, and only against that newly rebuilt image. Point
+   `AARCH64_FIREFOX_PACKAGE_IMAGE` at its content-addressed path (or stage it at
+   `build/makos-integrated-firefox-handoff149.img`). Do not substitute Pi/TCG
+   timing. Run exactly, with the variable only when the image uses another
+   content-addressed filename:
 
        make test-aarch64-firefox-runtime
 
    Do not weaken the 10,000 ms Ctrl-A limit or any paint, first-input,
    navigation, clipboard, selection, scrolling, form, CPU, RSS, resident-page,
    survival, exact-URI, TLS/HTTP, multi-TID overlap, automatic-placement, or
-   load-migration assertion. If preflight
-   reports that the required image/package is absent, record that as not run,
+   load-migration assertion. Require both
+   `MAKOS_WIDGET_MAIN_HANDOFF_OK source=post-enqueue syscall=149` and
+   `MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK`; fallback-only evidence is a
+   failure. If preflight reports that the required image/package is absent,
+   record that as not run,
    not as a failure or pass. If the unchanged idle-host run fails, preserve the
    serial log, harness output, QMP/session paths, screenshots, timing evidence,
    host load/memory evidence, and the first failing assertion for scheduler or

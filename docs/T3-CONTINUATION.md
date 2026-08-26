@@ -47,6 +47,18 @@ Preserve existing files and changes.
   gate. The high-pressure paint/Ctrl-A evidence remains
   248584/10971 ms and 255543/14363 ms against the unchanged 10000 ms Ctrl-A
   limit.
+- Active visible Firefox-handoff milestone from implementation commit
+  `4f72dbb09227dbd2ab6dc117d2c799d69d055353`: PID 926500, sole QEMU, user
+  service `makos-visible-firefox-handoff-final.service`, private session
+  `build/makos-pi-visible-firefox-handoff-final-wstXm6dk`, read-only
+  `boot.img`, blank sparse `data.img`, private `vars.fd`, `qmp.sock`,
+  `serial.log`, and `login.ppm`. QMP reports running; the guest reached
+  `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
+  `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
+  `80f706777cfd92c7938e33088a4572c9b5829c7b5faf0313df65040e92579dbc`;
+  login PPM SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
+  Stop it through QMP before any runtime gate; never start concurrent QEMU.
 - The bounded AArch64 production scheduler now includes non-leader Python-role
   threads in the Firefox/Native AP1-3 placement, affinity, block/wake, and
   timer-migration policy. Leaders and all device MMIO remain CPU0-owned. The
@@ -847,20 +859,17 @@ Preserve existing files and changes.
   dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 899613 in
-  `build/makos-pi-visible-python-smp-final-muepCbzb` is the sole
+- At this handoff PID 926500 in
+  `build/makos-pi-visible-firefox-handoff-final-wstXm6dk` is the sole
   QEMU and no runtime-test harness is active. It runs under
-  `makos-visible-python-smp-final.service` with private read-only
+  `makos-visible-firefox-handoff-final.service` with private read-only
   `boot.img`, blank sparse `data.img`, private `vars.fd`, QMP `qmp.sock`,
-  serial `serial.log`, PID file `qemu.pid`, QMP login capture `login.ppm`, and
-  inspection-only `login.png`.
+  serial `serial.log`, and QMP login capture `login.ppm`.
   The guest reached `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
   `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
-  `7240a6ed1e8bfc84533e62a8ef28126fd0025ef553f3dae3c883cd2d8b3d6dd9`;
+  `80f706777cfd92c7938e33088a4572c9b5829c7b5faf0313df65040e92579dbc`;
   login capture SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
-  PNG SHA-256 is
-  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
   The Pi-local QEMU build has no VNC backend. Stop this guest through its QMP
   socket before any runtime gate; never start concurrent QEMU.
 - Prior PID 850875 in
