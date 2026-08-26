@@ -174,13 +174,14 @@ for fragment in (
     "static int c_patch_branch(",
     "static int c_declaration(",
     "static int c_assignment(",
-    "static int c_assignment_block_body(",
+    "static int c_control_block_body(",
     "static int c_if_statement(",
     "static int c_while(",
     "MAX_C_LOCALS = 4",
     "OBJECT_CAPACITY = 2048",
     "MAX_C_FUNCTIONS = 6",
     "MAX_C_PARAMETERS = 6",
+    "MAX_C_BLOCK_DEPTH = 4",
     "MAX_RELOCATIONS = 8",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x1ac00c00)",
@@ -260,13 +261,19 @@ for fragment in (
     "branch_assignment_source",
     '"int choose(int value) { int result = 0; if (value > 5) { result = value + 2; } else { result = value - 2; } return result; }\\n"',
     '"int bump(int value) { int result = value; if (value < 5) { result = result + 1; } return result; }\\n"',
-    "MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else",
+    '"int nested(int value) { int result = 0; if (value > 0) { if (value > 5)',
+    '"int accumulate(int value) { int result = 0; while (value > 0) { if (value > 2)',
+    "MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else,nested-if,nested-loop",
     "compiled_choose(40) != 42",
     "compiled_choose(4) != 2",
     "compiled_bump(4) != 5",
     "compiled_bump(8) != 8",
+    "compiled_nested(40) != 42",
+    "compiled_nested(4) != 2",
+    "compiled_accumulate(4) != 6",
     "malformed_empty_else_source",
     "malformed_branch_declaration_source",
+    "malformed_block_depth_source",
     "relational_greater_source",
     "relational_at_most_source",
     "signed_pointer_offset_source",
@@ -334,7 +341,7 @@ for fragment in (
     "compiled_negate(UINT32_MAX - 41) != 42",
     "image_length != 815",
     "format=elf64-et-rel",
-    "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=20",
+    "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
     "duplicate_definition_denied=1",
     "PF_R | PF_X",
@@ -466,7 +473,7 @@ require(SHELL, "build_manifest=/home/user/generated.build")
 require(SHELL, "build_driver=makbuild-v1 build_inputs=4")
 require(SHELL, "translation_unit_functions=2,1,1")
 require(SHELL, "c_abi=aapcs64-int32-pointer64")
-require(SHELL, "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,if-assignment,if-else,equality,inequality,relational,while,call,return")
+require(SHELL, "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,if-assignment,if-else,nested-control,equality,inequality,relational,while,call,return")
 require(SHELL, "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112")
 require(SHELL, "three_argument_result=42 three_argument_link=et-rel,same-object")
 require(SHELL, "six_argument_result=42 six_argument_link=et-rel,same-object")
@@ -485,7 +492,7 @@ require(SHELL, "relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44")
 require(SHELL, "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608")
 require(SHELL, "intra_object_calls=1 cross_object_calls=2 linked_bytes=500")
 require(SHELL, "output_bytes=815 helper_result=42 persisted_reopened=1")
-require(SHELL, "malformed_c_denied=20")
+require(SHELL, "malformed_c_denied=21")
 require(SHELL, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(SHELL, "malformed_relocation_denied=1")
 require(SHELL, "unresolved_symbol_denied=1 duplicate_definition_denied=1")
@@ -504,9 +511,9 @@ require(FOCUSED_RUNTIME, "MAKOS_AARCH64_LINKER_OK")
 require(FOCUSED_RUNTIME, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(FOCUSED_RUNTIME, "SIX_FUNCTION_MARKER")
 require(FOCUSED_RUNTIME, "max_functions_per_unit=6 six_function_calls=5 six_function_result=42")
-require(FOCUSED_RUNTIME, "branch_blocks=if,if-else branch_block_body=bounded-assignment")
-require(FOCUSED_RUNTIME, "branch_block_results=42,2,5,8 branch_block_object=elf64-et-rel")
-require(FOCUSED_RUNTIME, "malformed_branch_blocks=empty-else,branch-declaration-denied")
+require(FOCUSED_RUNTIME, "branch_blocks=if,if-else,nested-if,nested-loop branch_block_body=bounded-control-assignment branch_block_max_depth=4")
+require(FOCUSED_RUNTIME, "branch_block_results=42,2,5,8,42,2,1,6 branch_block_object=elf64-et-rel")
+require(FOCUSED_RUNTIME, "malformed_branch_blocks=empty-else,branch-declaration-denied,depth-5-denied")
 require(FOCUSED_RUNTIME, "SIX_ARGUMENT_MARKER")
 require(FOCUSED_RUNTIME, "BRANCH_BLOCK_MARKER")
 require(FOCUSED_RUNTIME, "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112")
@@ -564,7 +571,7 @@ require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
 require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=bounded-macro-if-expressions macros=6 conditional_depth=2 macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source")
 require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap,macro-parameters,macro-arity,macro-recursion,macro-token-op-denied transitive_header_execution=42")
-require(FOCUSED_RUNTIME, "malformed_c_denied=20")
+require(FOCUSED_RUNTIME, "malformed_c_denied=21")
 require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")
 require(FOCUSED_RUNTIME, "duplicate_definition_denied=1")

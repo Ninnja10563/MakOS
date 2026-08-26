@@ -4,14 +4,35 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the guest-native AArch64 C seed now generates bounded nested
+  control flow to depth four. Branch and loop bodies may contain assignments,
+  nested `if`/`else`, and nested `while`; declarations inside those bodies
+  remain fail-closed. A four-function source emits/parses one genuine ELF64
+  `ET_REL` with five symbols and no relocations, links `choose`, `bump`,
+  `nested`, and `accumulate` independently, enforces writable/NX then RX, and
+  executes results `42,2,5,8,42,2,1,6`. A fifth nested control level is denied.
+  The first stronger fixture correctly failed because its local 512-byte proof
+  buffer was too small; restoring the combined `while`→`if`/`else` case with a
+  bounded 1024-byte proof buffer passes rather than narrowing the test. Final
+  structural, release/image, and full `make unit check` gates pass. Final
+  Pi/QEMU 10.0.11 TCG self-host evidence runs all 15 processes with placements
+  `4,3,8`, dispatches `170,172,178`, 39 migrations, zero drops, and status 42.
+  Immediately chained Firefox-role and Native/Python gates each once missed an
+  unchanged final-marker window after reaching their expected deep workload;
+  identical clean-QEMU reruns pass: Firefox-role dispatches
+  `11044,13916,10809`, two automatic migrations, watcher AP1, exact Ctrl-A and
+  status 42; Native dispatches `13536,16795,13361`, three migrations and status
+  42; Python-role dispatches `18326,13846,13692`, two migrations and status 42.
+  Cursor proof remains seven positions and zero changed scanout pixels. These are Pi functional results,
+  not macOS/HVF Firefox timing evidence; no Firefox threshold changed.
 - 2026-08-26 the guest-native AArch64 C seed now compiles bounded conditional
   mutation blocks: `if (condition) { assignments; }` and the corresponding
   `if`/`else`, followed by later statements and a terminal return. A focused
   two-function source emits a genuine ELF64 `ET_REL`, validates three symbols
   and no relocations, links `choose` and `bump` as separate entries, enforces
   writable/NX then RX mappings, and executes results `42,2,5,8`. Empty `else`
-  bodies and declaration-bearing branch bodies fail closed; nested and general
-  blocks remain unsupported. The structural guard, AArch64 release/image
+  bodies and declaration-bearing branch bodies fail closed; broader general
+  blocks remained unsupported at that increment. The structural guard, AArch64 release/image
   build, and full `make unit check` pass. The first focused Pi/QEMU 10.0.11 TCG
   run proved the new branch marker but a later existing three-input warm-cache
   child exited 81; its identical unchanged rerun passed all 15 processes with

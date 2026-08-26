@@ -522,6 +522,7 @@ static size_t assemble(const char *source, size_t source_length,
  *       if (expression == expression) { return expression; }
  *       if (expression == expression) { assignment; }
  *       if (expression == expression) { assignment; } else { assignment; }
+ *       if (expression == expression) { nested if/while/assignment; }
  *       while (expression != expression) { identifier = expression; }
  *       return expression;
  *   }
@@ -544,6 +545,7 @@ enum {
     MAX_C_STACK_SLOTS = 4,
     MAX_C_FUNCTIONS = 6,
     MAX_C_PARAMETERS = 6,
+    MAX_C_BLOCK_DEPTH = 4,
 };
 
 struct c_definition {
@@ -1307,19 +1309,30 @@ static int c_assignment(struct c_compiler *compiler) {
     return !local || c_store_stack_local(compiler, local->stack_index, 0);
 }
 
-static int c_assignment_block_body(struct c_compiler *compiler) {
-    size_t assignments = 0;
+static int c_control_block_body(struct c_compiler *compiler, size_t depth);
+static int c_if_statement(struct c_compiler *compiler, size_t depth);
+static int c_while(struct c_compiler *compiler, size_t depth);
+
+static int c_control_block_body(struct c_compiler *compiler, size_t depth) {
+    size_t statements = 0;
     for (;;) {
         c_space(compiler);
         if (compiler->cursor == compiler->source_length) return 0;
         if (compiler->source[compiler->cursor] == '}') break;
-        if (!c_assignment(compiler)) return 0;
-        ++assignments;
+        if (c_keyword(compiler, "if")) {
+            if (!c_if_statement(compiler, depth)) return 0;
+        } else if (c_keyword(compiler, "while")) {
+            if (!c_while(compiler, depth)) return 0;
+        } else if (!c_assignment(compiler)) {
+            return 0;
+        }
+        ++statements;
     }
-    return assignments != 0 && c_punct(compiler, '}');
+    return statements != 0 && c_punct(compiler, '}');
 }
 
-static int c_if_statement(struct c_compiler *compiler) {
+static int c_if_statement(struct c_compiler *compiler, size_t depth) {
+    if (depth == MAX_C_BLOCK_DEPTH) return 0;
     uint32_t false_condition = 0;
     if (!c_condition(compiler, &false_condition)) return 0;
     size_t branch = compiler->output;
@@ -1332,7 +1345,7 @@ static int c_if_statement(struct c_compiler *compiler) {
         return c_patch_conditional(compiler, branch, compiler->output,
                                    false_condition);
     }
-    if (!c_assignment_block_body(compiler)) return 0;
+    if (!c_control_block_body(compiler, depth + 1)) return 0;
     if (!c_keyword(compiler, "else"))
         return c_patch_conditional(compiler, branch, compiler->output,
                                    false_condition);
@@ -1341,13 +1354,14 @@ static int c_if_statement(struct c_compiler *compiler) {
         !c_patch_conditional(compiler, branch, compiler->output,
                              false_condition) ||
         !c_punct(compiler, '{') ||
-        !c_assignment_block_body(compiler) ||
+        !c_control_block_body(compiler, depth + 1) ||
         !c_patch_branch(compiler, join, compiler->output))
         return 0;
     return 1;
 }
 
-static int c_while(struct c_compiler *compiler) {
+static int c_while(struct c_compiler *compiler, size_t depth) {
+    if (depth == MAX_C_BLOCK_DEPTH) return 0;
     size_t loop = compiler->output;
     uint32_t false_condition = 0;
     if (!c_condition(compiler, &false_condition)) return 0;
@@ -1355,15 +1369,7 @@ static int c_while(struct c_compiler *compiler) {
     if (!c_emit(compiler, UINT32_C(0x54000000) | false_condition) ||
         !c_punct(compiler, '{'))
         return 0;
-    size_t assignments = 0;
-    for (;;) {
-        c_space(compiler);
-        if (compiler->cursor == compiler->source_length) return 0;
-        if (compiler->source[compiler->cursor] == '}') break;
-        if (!c_assignment(compiler)) return 0;
-        ++assignments;
-    }
-    if (assignments == 0 || !c_punct(compiler, '}')) return 0;
+    if (!c_control_block_body(compiler, depth + 1)) return 0;
     size_t back_branch = compiler->output;
     if (!c_emit(compiler, UINT32_C(0x14000000)) ||
         !c_patch_branch(compiler, back_branch, loop) ||
@@ -1445,9 +1451,9 @@ static int c_compile_function(struct c_compiler *compiler,
         if (c_keyword(compiler, "int")) {
             if (!c_declaration(compiler)) return 0;
         } else if (c_keyword(compiler, "if")) {
-            if (!c_if_statement(compiler)) return 0;
+            if (!c_if_statement(compiler, 0)) return 0;
         } else if (c_keyword(compiler, "while")) {
-            if (!c_while(compiler)) return 0;
+            if (!c_while(compiler, 0)) return 0;
         } else if (c_keyword(compiler, "return")) {
             if (!c_return_statement(compiler)) return 0;
             terminal_return = 1;
@@ -3607,6 +3613,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "int adjust(int value) { int result = value; if (value > 0) { result = 42; } else { } return result; }\n";
     static const char malformed_branch_declaration_source[] =
         "int adjust(int value) { int result = value; if (value > 0) { int nested = 42; } return result; }\n";
+    static const char malformed_block_depth_source[] =
+        "int adjust(int value) { int result = value; if (value > 0) { if (value > 1) { if (value > 2) { if (value > 3) { if (value > 4) { result = 42; } } } } } return result; }\n";
     static const char malformed_assignment_source[] =
         "int adjust(int value) { missing = value; return value; }\n";
     static const char malformed_address_source[] =
@@ -3662,7 +3670,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "int stage6(int value) { return stage5(value) + 1; }\n";
     static const char branch_assignment_source[] =
         "int choose(int value) { int result = 0; if (value > 5) { result = value + 2; } else { result = value - 2; } return result; }\n"
-        "int bump(int value) { int result = value; if (value < 5) { result = result + 1; } return result; }\n";
+        "int bump(int value) { int result = value; if (value < 5) { result = result + 1; } return result; }\n"
+        "int nested(int value) { int result = 0; if (value > 0) { if (value > 5) { result = value + 2; } else { result = value - 2; } } else { result = 1; } return result; }\n"
+        "int accumulate(int value) { int result = 0; while (value > 0) { if (value > 2) { result = result + 2; } else { result = result + 1; } value = value - 1; } return result; }\n";
     static const char relational_greater_source[] =
         "int greater(int value) { if (value > 5) { return 42; } return 0; }\n";
     static const char relational_at_most_source[] =
@@ -3680,12 +3690,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "build_manifest=argv1 build_driver=makbuild-v1 build_inputs=4 cache=makstate-v2 cache_hits=0 cache_misses=4 state_committed=1 "
         "c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c translation_unit_functions=2,1,1 "
         "c_abi=aapcs64-int32-pointer64 "
-        "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,if-assignment,if-else,equality,inequality,relational,while,call,return "
+        "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,if-assignment,if-else,nested-control,equality,inequality,relational,while,call,return "
         "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 three_argument_result=42 three_argument_link=et-rel,same-object six_argument_result=42 six_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 linked_bytes=500 output_bytes=815 helper_result=42 "
-        "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=20 "
+        "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
         "code_rx=1 data_nx=1 wx_denied=1 jit_result=42\n";
@@ -4075,6 +4085,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     if (compile_c(malformed_branch_declaration_source,
                   sizeof(malformed_branch_declaration_source) - 1,
                   malformed_code, sizeof(malformed_code), malformed_function,
+                  &malformed_function_length, 0, 0) != 0)
+        fail(82);
+    malformed_function_length = 0;
+    if (compile_c(malformed_block_depth_source,
+                  sizeof(malformed_block_depth_source) - 1, malformed_code,
+                  sizeof(malformed_code), malformed_function,
                   &malformed_function_length, 0, 0) != 0)
         fail(82);
     malformed_function_length = 0;
@@ -4474,7 +4490,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "result=42 max_functions=6 overflow=7-denied\n";
     write_bytes(six_function_marker, sizeof(six_function_marker) - 1);
 
-    uint8_t branch_assignment_code[512] = {0};
+    uint8_t branch_assignment_code[1024] = {0};
     struct c_definition branch_assignment_definitions[MAX_C_FUNCTIONS] = {0};
     size_t branch_assignment_definition_count = 0;
     struct relocation branch_assignment_relocations[MAX_RELOCATIONS] = {0};
@@ -4486,17 +4502,29 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         branch_assignment_relocations, &branch_assignment_relocation_count);
     if (!branch_assignment_code_length ||
         branch_assignment_code_length > sizeof(branch_assignment_code) ||
-        branch_assignment_definition_count != 2 ||
+        branch_assignment_definition_count != 4 ||
         branch_assignment_relocation_count != 0 ||
         !same_name(branch_assignment_definitions[0].name,
                    branch_assignment_definitions[0].length, "choose", 6) ||
         !same_name(branch_assignment_definitions[1].name,
                    branch_assignment_definitions[1].length, "bump", 4) ||
+        !same_name(branch_assignment_definitions[2].name,
+                   branch_assignment_definitions[2].length, "nested", 6) ||
+        !same_name(branch_assignment_definitions[3].name,
+                   branch_assignment_definitions[3].length, "accumulate", 10) ||
         branch_assignment_definitions[0].offset != 0 ||
         branch_assignment_definitions[0].size == 0 ||
         branch_assignment_definitions[1].offset !=
             branch_assignment_definitions[0].size ||
-        branch_assignment_definitions[1].size == 0)
+        branch_assignment_definitions[1].size == 0 ||
+        branch_assignment_definitions[2].offset !=
+            branch_assignment_definitions[1].offset +
+                branch_assignment_definitions[1].size ||
+        branch_assignment_definitions[2].size == 0 ||
+        branch_assignment_definitions[3].offset !=
+            branch_assignment_definitions[2].offset +
+                branch_assignment_definitions[2].size ||
+        branch_assignment_definitions[3].size == 0)
         fail(82);
     uint8_t branch_assignment_object[OBJECT_CAPACITY] = {0};
     size_t branch_assignment_object_length = emit_object_definitions(
@@ -4512,7 +4540,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                       &branch_assignment_view) ||
         branch_assignment_view.text_length != branch_assignment_code_length ||
         branch_assignment_view.rela_count != 0 ||
-        branch_assignment_view.symbol_count != 3)
+        branch_assignment_view.symbol_count != 5)
         fail(85);
     const uint8_t *branch_assignment_objects[MAX_LINK_OBJECTS] = {
         branch_assignment_object,
@@ -4520,8 +4548,9 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     size_t branch_assignment_object_lengths[MAX_LINK_OBJECTS] = {
         branch_assignment_object_length,
     };
-    uint8_t branch_assignment_linked[512] = {0};
-    size_t choose_entry = 0, bump_entry = 0;
+    uint8_t branch_assignment_linked[1024] = {0};
+    size_t choose_entry = 0, bump_entry = 0, nested_entry = 0;
+    size_t accumulate_entry = 0;
     size_t branch_assignment_linked_length = link_objects(
         branch_assignment_objects, branch_assignment_object_lengths, 1,
         branch_assignment_linked, sizeof(branch_assignment_linked), "choose",
@@ -4530,10 +4559,22 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         branch_assignment_objects, branch_assignment_object_lengths, 1,
         branch_assignment_linked, sizeof(branch_assignment_linked), "bump",
         &bump_entry);
+    size_t branch_assignment_nested_length = link_objects(
+        branch_assignment_objects, branch_assignment_object_lengths, 1,
+        branch_assignment_linked, sizeof(branch_assignment_linked), "nested",
+        &nested_entry);
+    size_t branch_assignment_accumulate_length = link_objects(
+        branch_assignment_objects, branch_assignment_object_lengths, 1,
+        branch_assignment_linked, sizeof(branch_assignment_linked),
+        "accumulate", &accumulate_entry);
     if (branch_assignment_linked_length != branch_assignment_code_length ||
         branch_assignment_bump_length != branch_assignment_code_length ||
+        branch_assignment_nested_length != branch_assignment_code_length ||
+        branch_assignment_accumulate_length != branch_assignment_code_length ||
         choose_entry != branch_assignment_definitions[0].offset ||
-        bump_entry != branch_assignment_definitions[1].offset)
+        bump_entry != branch_assignment_definitions[1].offset ||
+        nested_entry != branch_assignment_definitions[2].offset ||
+        accumulate_entry != branch_assignment_definitions[3].offset)
         fail(88);
     uint8_t *branch_assignment_jit =
         (uint8_t *)(uintptr_t)syscall4(SYS_VM_MAP, 0, 0, 0, 0);
@@ -4551,14 +4592,24 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     uint64_t (*compiled_bump)(uint64_t) =
         (uint64_t (*)(uint64_t))(uintptr_t)
             (branch_assignment_jit + bump_entry);
+    uint64_t (*compiled_nested)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)
+            (branch_assignment_jit + nested_entry);
+    uint64_t (*compiled_accumulate)(uint64_t) =
+        (uint64_t (*)(uint64_t))(uintptr_t)
+            (branch_assignment_jit + accumulate_entry);
     if (compiled_choose(40) != 42 || compiled_choose(4) != 2 ||
-        compiled_bump(4) != 5 || compiled_bump(8) != 8)
+        compiled_bump(4) != 5 || compiled_bump(8) != 8 ||
+        compiled_nested(40) != 42 || compiled_nested(4) != 2 ||
+        compiled_nested(UINT64_C(0xffffffffffffffff)) != 1 ||
+        compiled_accumulate(4) != 6)
         fail(83);
     static const char branch_assignment_marker[] =
-        "MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else "
-        "body=bounded-assignment continuation=return "
-        "object=elf64-et-rel symbols=choose,bump linked=1 wx=denied "
-        "results=42,2,5,8 malformed=empty-else,branch-declaration-denied\n";
+        "MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else,nested-if,nested-loop "
+        "body=bounded-control-assignment continuation=return max_depth=4 "
+        "object=elf64-et-rel symbols=choose,bump,nested,accumulate linked=1 wx=denied "
+        "results=42,2,5,8,42,2,1,6 "
+        "malformed=empty-else,branch-declaration-denied,depth-5-denied\n";
     write_bytes(branch_assignment_marker,
                 sizeof(branch_assignment_marker) - 1);
 

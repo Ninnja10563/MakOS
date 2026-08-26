@@ -305,17 +305,19 @@ is bounded automatic placement and dynamic migration of single-threaded
 toolchain leaders, not general load-driven migration of arbitrary desktop
 processes.
 
-The gate also proves bounded assignment-only conditional bodies with
-continuation. It compiles `if` and `if`/`else` forms into a genuine ELF64
-`ET_REL`, links separate `choose` and `bump` entries, applies W^X, and requires
-results `42,2,5,8`; empty `else` and declaration-bearing branch bodies remain
-denied. This is not general block or nested-scope support.
+The gate also proves bounded nested assignment/control bodies with continuation.
+It compiles `if`, `if`/`else`, nested `if`, and a `while` containing
+`if`/`else` into a genuine ELF64 `ET_REL`, links separate `choose`, `bump`,
+`nested`, and `accumulate` entries, applies W^X, and requires results
+`42,2,5,8,42,2,1,6`. Control nesting is capped at four; empty `else`, a fifth
+level, and declaration-bearing nested bodies remain denied. This is not
+general block or nested lexical-scope support.
 
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
-structs, nested/general blocks beyond that bounded conditional form, more than
+structs, nested/general blocks beyond that bounded depth-four control form, more than
 six functions or parameters per translation unit, general object
 count/relocation repertoire, a general preprocessor or transitive dependency
 engine, or

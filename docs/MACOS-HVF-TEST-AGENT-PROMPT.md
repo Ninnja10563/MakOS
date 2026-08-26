@@ -34,11 +34,13 @@ acceptable if this baseline is its ancestor.
        make test-aarch64-cursor-runtime
 
    The self-hosting gate must report
-   `MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else body=bounded-assignment continuation=return object=elf64-et-rel symbols=choose,bump linked=1 wx=denied results=42,2,5,8 malformed=empty-else,branch-declaration-denied`.
-   Its final host marker must include `branch_blocks=if,if-else`,
-   `branch_block_body=bounded-assignment`, `branch_block_results=42,2,5,8`,
+   `MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else,nested-if,nested-loop body=bounded-control-assignment continuation=return max_depth=4 object=elf64-et-rel symbols=choose,bump,nested,accumulate linked=1 wx=denied results=42,2,5,8,42,2,1,6 malformed=empty-else,branch-declaration-denied,depth-5-denied`.
+   Its final host marker must include
+   `branch_blocks=if,if-else,nested-if,nested-loop`,
+   `branch_block_body=bounded-control-assignment`, `branch_block_max_depth=4`,
+   `branch_block_results=42,2,5,8,42,2,1,6`,
    `branch_block_object=elf64-et-rel`, and
-   `malformed_branch_blocks=empty-else,branch-declaration-denied`.
+   `malformed_branch_blocks=empty-else,branch-declaration-denied,depth-5-denied`.
    It must also report
    `MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5` with ELF64 ET_REL
    emission, five `R_AARCH64_CALL26` relocations, one-object guest linking,

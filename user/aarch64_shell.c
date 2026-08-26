@@ -502,7 +502,7 @@ static void run_selfhost_probe(void) {
             "elif=selected "
             "c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c "
             "translation_unit_functions=2,1,1 c_abi=aapcs64-int32-pointer64 "
-            "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,if-assignment,if-else,equality,inequality,relational,while,call,return "
+            "c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,if-assignment,if-else,nested-control,equality,inequality,relational,while,call,return "
             "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 "
             "three_argument_result=42 three_argument_link=et-rel,same-object "
             "six_argument_result=42 six_argument_link=et-rel,same-object "
@@ -523,7 +523,7 @@ static void run_selfhost_probe(void) {
             "intra_object_calls=1 cross_object_calls=2 linked_bytes=500 "
             "output_bytes=815 helper_result=42 persisted_reopened=1 "
             "manifest_input_bounds=2..6 malformed_build_denied=6 "
-            "malformed_c_denied=20 malformed_relocation_denied=1 "
+            "malformed_c_denied=21 malformed_relocation_denied=1 "
             "unresolved_symbol_denied=1 duplicate_definition_denied=1 "
             "output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 "
             "argv=3 env=1 malformed_startup_denied=3 executed=2 status=42\n");

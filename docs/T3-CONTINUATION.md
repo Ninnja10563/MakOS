@@ -27,13 +27,32 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The guest-native AArch64 C seed now supports nested assignment/control bodies
+  to an explicit maximum depth of four. Branches and loops may recursively
+  contain assignments, `if`/`else`, and `while`; a fifth level and branch-local
+  declarations fail closed. A four-function genuine ELF64 `ET_REL` fixture
+  validates five symbols/no relocations, links four independent entry points,
+  applies W^X, and executes `42,2,5,8,42,2,1,6`, including a real
+  `while`→`if`/`else` path. Its initial 512-byte local proof buffer rejected the
+  stronger fourth function; increasing that bounded fixture buffer to 1024
+  bytes restored the stronger case. Final Pi/QEMU 10.0.11 TCG self-host runtime
+  passes all 15 processes with placements `4,3,8`, dispatches `170,172,178`,
+  39 migrations, zero drops, and status 42. Full `make unit check`, release
+  image/artifacts, identical-rerun Firefox-role (`11044,13916,10809`, two
+  migrations, watcher AP1, exact Ctrl-A, status 42), Native
+  (`13536,16795,13361`, three migrations, status 42), Python-role
+  (`18326,13846,13692`, two migrations, status 42), and cursor (seven positions,
+  zero scanout changes) gates pass. The chained Firefox and Native attempts each first missed
+  an unchanged later marker window under Pi pressure; no threshold changed.
+  This is Pi functional evidence only; the fresh patch-0057 package and strict
+  idle-macOS/HVF Firefox qualification remain first priority.
 - The guest-native AArch64 C seed now supports bounded assignment-only
   conditional bodies with continuation: `if (...) { assignments; }` and
   `if (...) { assignments; } else { assignments; }`. A genuine ELF64
   `ET_REL` fixture links and executes `choose(40)=42`, `choose(4)=2`,
   `bump(4)=5`, and `bump(8)=8` after W^X enforcement; empty `else` and a
-  branch-local declaration fail closed. Nested/general blocks are still
-  absent. Structural, release/image, full `make unit check`, and unchanged
+  branch-local declaration fail closed. Broader general blocks remained absent
+  at that increment. Structural, release/image, full `make unit check`, and unchanged
   Pi/TCG Firefox-role, cursor, and Native SMP gates pass. The first focused
   self-host run passed the new marker but a later existing warm-cache child
   exited 81; an identical rerun passed all 15 toolchain processes with
