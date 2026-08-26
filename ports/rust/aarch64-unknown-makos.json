@@ -10,7 +10,7 @@
   "features": "+v8a,+outline-atomics",
   "frame-pointer": "non-leaf",
   "has-thread-local": true,
-  "linker": "/Users/marcushuang/Documents/Codex/2026-08-12/mak/ports/firefox/toolchain/makos-clang",
+  "linker": "makos-clang",
   "linker-flavor": "gnu-cc",
   "llvm-target": "aarch64-unknown-makos",
   "max-atomic-width": 128,

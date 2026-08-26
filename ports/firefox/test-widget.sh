@@ -7,6 +7,34 @@ port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)
 source_dir="$repo_dir/build/ports/firefox/source"
 out_dir="$repo_dir/build/ports/firefox/widget-probe"
+cxx=${CXX:-$port_dir/toolchain/makos-clang++}
+sysroot=${MAKOS_SYSROOT:-$repo_dir/build/ports/libcxx/sysroot}
+if test -z "${MAKOS_REAL_CLANGXX:-}"; then
+    for candidate in clang++ clang++-19 \
+        "$repo_dir/build/host-tools/llvm19/usr/bin/clang++-19"
+    do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            MAKOS_REAL_CLANGXX=$(command -v "$candidate")
+            export MAKOS_REAL_CLANGXX
+            break
+        fi
+    done
+fi
+if test -z "${MAKOS_REAL_CLANG:-}"; then
+    MAKOS_REAL_CLANG=${MAKOS_REAL_CLANGXX:-}
+    export MAKOS_REAL_CLANG
+fi
+if test -z "${MAKOS_LLD:-}"; then
+    for candidate in ld.lld ld.lld-19 \
+        "$repo_dir/build/host-tools/llvm19/usr/bin/ld.lld-19"
+    do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            MAKOS_LLD=$(command -v "$candidate")
+            export MAKOS_LLD
+            break
+        fi
+    done
+fi
 
 test -d "$source_dir/.git" || {
     echo "Firefox source missing; run ports/firefox/clone.sh" >&2
@@ -29,7 +57,12 @@ PYTHONPYCACHEPREFIX="$out_dir/pycache" python3 -m py_compile \
     "$source_dir/widget/moz.build" \
     "$source_dir/widget/makos/moz.build"
 
-clang++ --target=aarch64-unknown-makos -D__makos__ -DMOZ_WIDGET_MAKOS \
+test -f "$sysroot/usr/include/stdint.h" || {
+    echo "MakOS sysroot missing; run ports/libcxx/build-makos.sh" >&2
+    exit 1
+}
+"$cxx" --target=aarch64-unknown-makos --sysroot="$sysroot" \
+    -D__makos__ -DMOZ_WIDGET_MAKOS \
     -std=c++17 -ffreestanding -fno-exceptions -fno-rtti \
     -fno-stack-protector -I"$source_dir/widget/makos" \
     -c "$source_dir/widget/makos/MakOSSurface.cpp" \
@@ -45,7 +78,7 @@ grep -Fq 'const SYS_SURFACE_MAIN_HANDOFF_READY: u64 = 149;' \
     "$repo_dir/kernel/src/arch/aarch64.rs"
 grep -Fq 'SYS_SURFACE_WAIT_EVENT => {' \
     "$repo_dir/kernel/src/arch/aarch64.rs"
-grep -Fq 'block_current_for_input(frame)' \
+grep -Fq 'crate::aarch64_process::block_current_for_input(' \
     "$repo_dir/kernel/src/arch/aarch64.rs"
 grep -Fq 'wake_input_waiters();' "$repo_dir/kernel/src/graphics.rs"
 grep -Fq 'SurfaceWaitEvent = 140' \

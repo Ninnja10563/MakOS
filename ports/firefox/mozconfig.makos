@@ -3,7 +3,7 @@
 mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/../obj-aarch64-makos
 
 ac_add_options --target=aarch64-unknown-makos
-ac_add_options --host=aarch64-apple-darwin
+ac_add_options --host=${MAKOS_BUILD_HOST:-aarch64-apple-darwin}
 ac_add_options --enable-application=browser
 ac_add_options --enable-default-toolkit=cairo-makos
 ac_add_options --disable-tests

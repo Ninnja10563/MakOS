@@ -8,28 +8,78 @@ repo_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)
 source_dir="$repo_dir/build/ports/firefox/source"
 obj="$repo_dir/build/ports/firefox/obj-aarch64-makos"
 sysroot=${MAKOS_SYSROOT:-"$repo_dir/build/ports/firefox/sysroot-runtime"}
-build_python=${FIREFOX_BUILD_PYTHON:-/opt/homebrew/opt/python@3.12/bin/python3.12}
+build_python=${FIREFOX_BUILD_PYTHON:-}
 rust_toolchain="$repo_dir/build/ports/rust/toolchain-makos"
-bindgen_libdir=${MAKOS_BINDGEN_LIBDIR:-/opt/homebrew/opt/llvm@18/lib}
-profiler_bindgen_libdir=${MAKOS_PROFILER_BINDGEN_LIBDIR:-/opt/homebrew/opt/llvm/lib}
+bindgen_libdir=${MAKOS_BINDGEN_LIBDIR:-}
+profiler_bindgen_libdir=${MAKOS_PROFILER_BINDGEN_LIBDIR:-}
+
+if test -z "$build_python"; then
+    for candidate in python3.12 python3.11 python3; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            build_python=$(command -v "$candidate")
+            break
+        fi
+    done
+fi
+if test -z "$bindgen_libdir"; then
+    for candidate in \
+        "$repo_dir/build/host-tools/llvm19/usr/lib/llvm-19/lib" \
+        /opt/homebrew/opt/llvm@18/lib /usr/lib/llvm-19/lib
+    do
+        if find "$candidate" -maxdepth 1 \( -name 'libclang.dylib' -o \
+            -name 'libclang.so' -o -name 'libclang-*.so.*' \) \
+            -print -quit 2>/dev/null | grep -q .; then
+            bindgen_libdir=$candidate
+            break
+        fi
+    done
+fi
+if test -z "$profiler_bindgen_libdir"; then
+    profiler_bindgen_libdir=$bindgen_libdir
+fi
 
 test -x "$build_python" || {
     echo "Firefox MakOS build blocked: host Python 3.11/3.12 required by ESR mach." >&2
     exit 1
 }
-test -f "$bindgen_libdir/libclang.dylib" || {
+build_python_version=$(
+    "$build_python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+)
+case "$build_python_version" in
+    3.11|3.12) ;;
+    *)
+        echo "Firefox MakOS build blocked: Python 3.11/3.12 required (found $build_python_version)." >&2
+        exit 1
+        ;;
+esac
+find "$bindgen_libdir" -maxdepth 1 \( -name 'libclang.dylib' -o \
+    -name 'libclang.so' -o -name 'libclang-*.so.*' \) \
+    -print -quit 2>/dev/null | grep -q . || {
     echo "Firefox MakOS build blocked: bindgen 0.69 requires compatible libclang 18." >&2
     echo "Set MAKOS_BINDGEN_LIBDIR for another host." >&2
     exit 1
 }
 export MAKOS_BINDGEN_LIBDIR="$bindgen_libdir"
-test -f "$profiler_bindgen_libdir/libclang.dylib" || {
+find "$profiler_bindgen_libdir" -maxdepth 1 \( -name 'libclang.dylib' -o \
+    -name 'libclang.so' -o -name 'libclang-*.so.*' \) \
+    -print -quit 2>/dev/null | grep -q . || {
     echo "Firefox MakOS build blocked: profiler/libc++ 22 needs matching libclang." >&2
     echo "Set MAKOS_PROFILER_BINDGEN_LIBDIR for another host." >&2
     exit 1
 }
 export MAKOS_PROFILER_BINDGEN_LIBDIR="$profiler_bindgen_libdir"
 export MAKOS_MODERN_BINDGEN_LIBDIR=${MAKOS_MODERN_BINDGEN_LIBDIR:-"$profiler_bindgen_libdir"}
+if test -z "${MAKOS_BUILD_HOST:-}"; then
+    case "$(uname -s):$(uname -m)" in
+        Linux:aarch64) MAKOS_BUILD_HOST=aarch64-unknown-linux-gnu ;;
+        Darwin:arm64) MAKOS_BUILD_HOST=aarch64-apple-darwin ;;
+        *)
+            echo "Firefox MakOS build blocked: set MAKOS_BUILD_HOST for this host." >&2
+            exit 1
+            ;;
+    esac
+fi
+export MAKOS_BUILD_HOST
 
 if test -z "${MAKOS_CC-}" && test -x "$port_dir/toolchain/makos-clang"; then
     MAKOS_CC="$port_dir/toolchain/makos-clang"
@@ -38,6 +88,7 @@ if test -z "${MAKOS_CXX-}" && test -x "$port_dir/toolchain/makos-clang++"; then
     MAKOS_CXX="$port_dir/toolchain/makos-clang++"
 fi
 export MAKOS_CC MAKOS_CXX
+export PATH="$port_dir/toolchain:$PATH"
 if test -z "${MAKOS_SYSROOT-}"; then
     FIREFOX_RUNTIME_SYSROOT="$sysroot" "$port_dir/prepare-runtime-sysroot.sh"
 fi
@@ -108,6 +159,17 @@ export MOZCONFIG="$port_dir/mozconfig.makos"
 # required.
 export MOZ_BUILD_DATE=${MOZ_BUILD_DATE:-20260818193048}
 "$build_python" "$source_dir/mach" build "$@"
+full_build=true
+for argument in "$@"; do
+    case "$argument" in
+        -*) ;;
+        *) full_build=false ;;
+    esac
+done
+if test "$full_build" = false; then
+    echo "MAKOS_FIREFOX_PARTIAL_BUILD_OK targets=$* binary_audit=deferred"
+    exit 0
+fi
 FIREFOX_BIN_DIR="$obj/dist/bin" "$port_dir/audit-binary.sh"
 python3 "$repo_dir/scripts/firefox_provenance.py" create-build-stamp \
     --source-dir "$source_dir" \

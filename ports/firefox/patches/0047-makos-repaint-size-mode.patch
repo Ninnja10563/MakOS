@@ -9,8 +9,9 @@ paint without synthesizing any browser pixels.
 diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
 --- a/widget/makos/MakOSWindow.cpp
 +++ b/widget/makos/MakOSWindow.cpp
-@@ -224,6 +224,14 @@ class MakOSWindow final : public HeadlessWidget {
-     }
+@@ -250,6 +250,14 @@ class MakOSWindow final : public HeadlessWidget {
+     mDrawTarget->ReleaseBits(pixels);
+     (void)makos::PresentSurface(mSurface);
    }
  
 +  void SetSizeMode(nsSizeMode aMode) override {

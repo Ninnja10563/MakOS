@@ -1180,6 +1180,19 @@ Preserve existing files and changes.
 
 ## Important files
 
+- 2026-08-26 clean-source Firefox prerequisite increment: on the Debian
+  Raspberry Pi, a pristine pinned ESR checkout proved that the historical
+  series lacked the invalidation/paint implementation assumed by patch 0047.
+  Patch `0046a` now records that Gecko listener/paint path and 0047 is rebased
+  onto it; all later patches through 0057 apply. The real MakOS widget target
+  builds successfully with `mach build widget/makos -j1`. The clean-host Rust
+  bootstrap now fetches pinned libc independently, supports Linux/macOS LLVM
+  runtime layouts, builds target `std`, and verifies a nonzero AArch64 ELF entry
+  (`0x28e3a0`) without the former false-positive `readelf` pipeline. No new
+  Firefox binary/package was produced, so do not run or announce the macOS gate
+  from this evidence; complete the full build/package first, then run the
+  unchanged idle macOS/HVF strict target.
+
 - `docs/ORIGINAL-SPEC-AUDIT.md` — source of truth for spec coverage.
 - `docs/STATUS.md` — current project status.
 - `docs/BUILD.md` — build/boot instructions.

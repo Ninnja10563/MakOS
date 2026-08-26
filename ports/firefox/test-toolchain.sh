@@ -7,7 +7,34 @@ port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)
 out_dir="$repo_dir/build/ports/firefox/toolchain-test"
 driver="$port_dir/toolchain/makos-clang"
-nm=${MAKOS_NM:-/opt/homebrew/opt/llvm/bin/llvm-nm}
+nm=${MAKOS_NM:-}
+
+if test -z "$nm"; then
+    for candidate in llvm-nm llvm-nm-19 nm; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            nm=$(command -v "$candidate")
+            break
+        fi
+    done
+fi
+if test -z "${MAKOS_REAL_CLANG:-}"; then
+    for candidate in clang clang-19 "$repo_dir/build/host-tools/llvm19/usr/bin/clang-19"; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            MAKOS_REAL_CLANG=$(command -v "$candidate")
+            export MAKOS_REAL_CLANG
+            break
+        fi
+    done
+fi
+if test -z "${MAKOS_LLD:-}"; then
+    for candidate in ld.lld ld.lld-19 "$repo_dir/build/host-tools/llvm19/usr/bin/ld.lld-19"; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            MAKOS_LLD=$(command -v "$candidate")
+            export MAKOS_LLD
+            break
+        fi
+    done
+fi
 
 test -x "$driver"
 test -x "$port_dir/toolchain/makos-clang++"

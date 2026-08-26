@@ -1546,6 +1546,18 @@ Last updated: 2026-08-26.
 
 ## Known constraints
 
+- 2026-08-26 Raspberry Pi/Debian clean-host Firefox source qualification found
+  and repaired an initial-import patch-series gap: the invalidation/paint loop
+  assumed by patches 0047-0057 was absent from every earlier patch. New patch
+  `0046a` records the real Gecko listener paint path, and adjusted 0047 applies
+  after it. A pristine pinned ESR 140.13 checkout now applies the entire series;
+  `test-widget.sh` compiles the AArch64 MakOS surface ABI; the distinct Rust
+  target builds and links `std` with nonzero ELF entry `0x28e3a0`; and a genuine
+  Mozilla `mach build widget/makos -j1` compiles `MakOSWindow.cpp` and completes
+  successfully. This is Pi build evidence, not a new Firefox package or strict
+  macOS/HVF latency qualification. The full Firefox binary build and unchanged
+  idle-host runtime gate remain pending.
+
 - Kernel initially loads at 64 MiB, then installs owned identity page tables.
 - COM1 and 32-bit RGB/BGR GOP modes only.
 - x86_64 and AArch64 have single-disk GPT ESP+MakFS targets. x86_64 uses

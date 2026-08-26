@@ -20,13 +20,27 @@ if test ! -d "$stage_dir"; then
 fi
 
 # rust-objcopy looks for libLLVM one directory beside its host rustlib tools.
-# Keep lookup local: a global DYLD_LIBRARY_PATH poisons unrelated LLVM tools.
+# Keep lookup local: a global DYLD_LIBRARY_PATH/LD_LIBRARY_PATH poisons
+# unrelated LLVM tools. Official macOS nightlies use libLLVM.dylib; Linux
+# nightlies encode their versioned libLLVM.so basename in DT_NEEDED.
 host_triple=$("$stage_dir/bin/rustc" -vV | sed -n 's/^host: //p')
 host_rustlib="$stage_dir/lib/rustlib/$host_triple"
 test -n "$host_triple"
-test -f "$stage_dir/lib/libLLVM.dylib"
 mkdir -p "$host_rustlib/lib"
-ln -sfn ../../../libLLVM.dylib "$host_rustlib/lib/libLLVM.dylib"
+if test -f "$stage_dir/lib/libLLVM.dylib"; then
+    llvm_runtime=libLLVM.dylib
+else
+    llvm_runtime=$(
+        find "$stage_dir/lib" -maxdepth 1 -type f \
+            -name 'libLLVM.so.*-rust-*' -print | sed -n '1p'
+    )
+    test -n "$llvm_runtime" || {
+        echo "MakOS Rust toolchain stage lacks its host libLLVM runtime" >&2
+        exit 1
+    }
+    llvm_runtime=$(basename "$llvm_runtime")
+fi
+ln -sfn "../../../$llvm_runtime" "$host_rustlib/lib/$llvm_runtime"
 
 test -f "$std_dir/os/mod.rs" || {
     echo "MakOS Rust toolchain stage is incomplete: $stage_dir" >&2
@@ -45,4 +59,4 @@ if ! grep -q 'target_os == "makos"' "$std_build"; then
 fi
 
 test "$("$stage_dir/bin/rustc" --print sysroot)" = "$stage_dir"
-echo "MAKOS_RUST_TOOLCHAIN_OK target_os=makos unix_backend=linux-musl distinct_target=1"
+echo "MAKOS_RUST_TOOLCHAIN_OK target_os=makos unix_backend=linux-musl distinct_target=1 host=$host_triple llvm_runtime=$llvm_runtime"

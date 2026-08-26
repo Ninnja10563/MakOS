@@ -1,0 +1,161 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget/makos: add native invalidation and paint dispatch
+
+The later size-mode and input-wake changes build on a native invalidation
+queue, but the original port never recorded that implementation in its patch
+series.  Add the missing Gecko listener paint path explicitly so a pristine
+pinned Firefox checkout is reproducible.
+
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -7,8 +7,12 @@
+ #include "MakOSSurface.h"
+ #include "MakOSWindow.h"
+ #include "mozilla/TextEvents.h"
++#include "mozilla/TimeStamp.h"
++#include "mozilla/Printf.h"
+ #include "mozilla/WidgetUtils.h"
+ #include "mozilla/gfx/2D.h"
++#include "mozilla/layers/WebRenderLayerManager.h"
++#include "gfxContext.h"
+ #include "nsIWidget.h"
+ 
+ namespace mozilla::widget {
+@@ -247,4 +251,22 @@ class MakOSWindow final : public HeadlessWidget {
+     mDrawTarget->ReleaseBits(pixels);
+     (void)makos::PresentSurface(mSurface);
+   }
++
++  void Invalidate(const LayoutDeviceIntRect& aRect) override {
++    LayoutDeviceIntRect rect = aRect.Intersect(
++        LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
++    if (rect.IsEmpty()) {
++      return;
++    }
++    if (mPendingPaint) {
++      mPendingPaintRect = mPendingPaintRect.Union(rect);
++    } else {
++      mPendingPaintRect = rect;
++      mPendingPaint = true;
++    }
++    if (mInvalidateTraceCount++ < 32) {
++      printf_stderr("MAKOS_WIDGET_INVALIDATE width=%d height=%d\n",
++                    rect.Width(), rect.Height());
++    }
++  }
+ 
+@@ -253,6 +275,9 @@ class MakOSWindow final : public HeadlessWidget {
+     if (mSurface == makos::kInvalidSurface) {
+       return false;
+     }
++    if (ProcessPendingPaint()) {
++      return true;
++    }
+     makos::SurfaceEvent event{};
+     if (!makos::ReadSurfaceEvent(mSurface, event)) {
+       return false;
+@@ -285,6 +310,8 @@ class MakOSWindow final : public HeadlessWidget {
+       case makos::SurfaceEventKind::Resize:
+         HeadlessWidget::Resize(event.width, event.height, true);
+         mDrawTarget = nullptr;
++        Invalidate(
++            LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
+         break;
+       case makos::SurfaceEventKind::Close:
+         if (mWidgetListener) {
+@@ -301,6 +328,8 @@ class MakOSWindow final : public HeadlessWidget {
+       }
+       case makos::SurfaceEventKind::Key:
+         DispatchMakOSKey(this, event.key);
++        Invalidate(
++            LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
+         break;
+       case makos::SurfaceEventKind::None:
+         break;
+@@ -309,9 +338,85 @@ class MakOSWindow final : public HeadlessWidget {
+   }
+ 
+  private:
++  bool ProcessPendingPaint() {
++    nsIWidgetListener* listener =
++        mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
++    if (!mPendingPaint || !listener || !IsVisible()) {
++      return false;
++    }
++
++    LayoutDeviceIntRegion region(mPendingPaintRect);
++    mPendingPaint = false;
++    mPendingPaintRect = LayoutDeviceIntRect();
++    RefPtr<MakOSWindow> strongThis(this);
++    if (mPaintCycleTraceCount++ < 32) {
++      printf_stderr("MAKOS_WIDGET_PAINT_BEGIN width=%d height=%d\n",
++                    region.GetBounds().Width(), region.GetBounds().Height());
++    }
++
++    listener->WillPaintWindow(this);
++    if (mSurface == makos::kInvalidSurface) {
++      return true;
++    }
++    listener = mAttachedWidgetListener ? mAttachedWidgetListener
++                                       : mWidgetListener;
++    if (!listener) {
++      return true;
++    }
++
++    region.And(region,
++               LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize()));
++    if (region.IsEmpty()) {
++      return true;
++    }
++
++    WindowRenderer* renderer = GetWindowRenderer();
++    if (renderer && renderer->GetBackendType() ==
++                        layers::LayersBackend::LAYERS_WR) {
++      listener->PaintWindow(this, region);
++      if ((listener = mAttachedWidgetListener ? mAttachedWidgetListener
++                                               : mWidgetListener)) {
++        listener->DidPaintWindow();
++      }
++    } else {
++      RefPtr<gfx::DrawTarget> target = StartRemoteDrawing();
++      if (!target || !target->IsValid()) {
++        mPendingPaint = true;
++        mPendingPaintRect = region.GetBounds();
++        return false;
++      }
++      gfxContext context(target);
++      listener->PaintWindow(this, region);
++      EndRemoteDrawing();
++      if ((listener = mAttachedWidgetListener ? mAttachedWidgetListener
++                                               : mWidgetListener)) {
++        listener->DidPaintWindow();
++      }
++    }
++
++    if (renderer) {
++      if (layers::WebRenderLayerManager* layerManager =
++              renderer->AsWebRender()) {
++        if (layerManager->NeedsComposite()) {
++          layerManager->ScheduleComposite(wr::RenderReasons::WIDGET);
++          layerManager->SetNeedsComposite(false);
++        }
++      }
++    }
++    if (mPaintTraceCount++ < 32) {
++      printf_stderr("MAKOS_WIDGET_PAINT_END presented=1\n");
++    }
++    return true;
++  }
++
+   ~MakOSWindow() override { Destroy(); }
+   makos::SurfaceHandle mSurface = makos::kInvalidSurface;
+   RefPtr<gfx::DrawTarget> mDrawTarget;
++  bool mPendingPaint = false;
++  LayoutDeviceIntRect mPendingPaintRect;
++  uint32_t mInvalidateTraceCount = 0;
++  uint32_t mPaintTraceCount = 0;
++  uint32_t mPaintCycleTraceCount = 0;
+   uint32_t mPointerButtons = 0;
+ };
+ 

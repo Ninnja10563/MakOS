@@ -12,9 +12,9 @@ import tempfile
 import firefox_provenance as provenance
 
 
-EXPECTED_PATCH_COUNT = 56
+EXPECTED_PATCH_COUNT = 57
 EXPECTED_PATCH_SHA256 = (
-    "9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c"
+    "f1c0fb2bfcd40a554a9390abf85556f94d491728a6cfdee50e2f4c13c96a849c"
 )
 
 

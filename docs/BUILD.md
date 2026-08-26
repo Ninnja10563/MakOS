@@ -93,6 +93,14 @@ five exact stripped runtime artifacts. Package CRCs, AArch64 PIE/shared-object
 shape, and runtime hashes are checked before QEMU creation; a historical,
 unprovenanced, stale-patch, or mismatched-payload image is rejected. The
 successful preflight marker is `MAKOS_FIREFOX_RUNTIME_IMAGE_OK`.
+For a clean Firefox source build, run `ports/firefox/clone.sh`,
+`ports/rust/build-std.sh`, then `ports/firefox/build-makos.sh`. The scripts
+support Apple Silicon/macOS and AArch64 Debian build hosts: set
+`FIREFOX_BUILD_PYTHON` to Python 3.11/3.12 and point the documented `MAKOS_*`
+LLVM/libclang variables at locally staged tools when they are not installed
+system-wide. `ports/firefox/build-makos.sh widget/makos -j1` is a supported
+compile-only prerequisite gate and deliberately defers the final binary audit;
+it does not produce a package or qualify Firefox runtime behavior.
 The runtime then requires
 strict paint/input/TLS/exact-URI/page-pixel proof, then copies the selected URL
 through the MakOS system clipboard, clears the URL bar, pastes, and requires a
