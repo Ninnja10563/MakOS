@@ -40,21 +40,24 @@ Branch: main
    denied seventh parameter/argument. The final host marker must retain
    `max_parameters=6`, `max_call_arguments=6`, `nonleaf_frame=96,112`, and
    `six_argument_object=elf64-et-rel:808`. It must also report the exact
-   quoted-header guard and dependency markers:
-   `MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=transitive headers=2 max_depth=2 missing=denied relative=denied cycle=denied overdepth=denied depth_limit=4`
+   quoted-header/preprocessor guard and dependency markers:
+   `MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK headers=2 max_depth=2 macros=3 conditional_depth=2 include_guard=deduplicated missing=denied relative=denied cycle=denied overdepth=denied malformed=define,endif,unterminated,duplicate-else-denied depth_limit=4`
    and
-   `MAKOS_AARCH64_C_HEADER_DEP_OK source=/home/user/generated-header.c root=/home/user/generated-inline.h leaf=/home/user/generated-leaf.h headers=2 max_depth=2 resolver=quoted-absolute-recursive depth_limit=4 fingerprint=expanded-source`.
+   `MAKOS_AARCH64_C_HEADER_DEP_OK source=/home/user/generated-header.c root=/home/user/generated-inline.h leaf=/home/user/generated-leaf.h headers=2 max_depth=2 resolver=quoted-absolute-recursive depth_limit=4 preprocessor=object-macro-conditionals macros=3 conditional_depth=2 include_guard=deduplicated fingerprint=expanded-source`.
    Prove the separate two-input
    graph cold `0/2`, warm `2/0`, edited-header selective `1/1`, and rewarm
    `2/0`, and execute `/home/user/generated-header.elf` with status 42 through
    `MAKOS_AARCH64_RUN_OK`. The dependency marker must report root
    `/home/user/generated-inline.h`, leaf `/home/user/generated-leaf.h`, two
-   headers, depth two, recursive absolute-quoted resolution, and an
-   expanded-source fingerprint. Missing, relative, cyclic, and over-depth
+   headers, depth two, recursive absolute-quoted resolution, three macros,
+   conditional depth two, include-guard deduplication, and an expanded-source
+   fingerprint. Missing, relative, cyclic, and over-depth
    headers must remain denied at depth limit four; the final host marker must
    contain `runtime_graphs=4,3,2`,
    `invalidations=object,source,state,header`, and
-   `header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 fingerprint=expanded-source`.
+   `header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-conditionals macros=3 conditional_depth=2 include_guard=deduplicated fingerprint=expanded-source`
+   plus
+   `malformed_preprocessor=define,endif,unterminated,duplicate-else-denied`.
    The Native gate must
    report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero

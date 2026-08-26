@@ -65,15 +65,24 @@ for fragment in (
     "BUILD_HEADER_CAPACITY = 384",
     "MAX_BUILD_HEADER_DEPTH = 4",
     "MAX_BUILD_HEADER_DEPENDENCIES = 8",
+    "MAX_BUILD_MACROS = 8",
+    "MAX_BUILD_MACRO_VALUE_BYTES = 16",
+    "MAX_BUILD_CONDITIONAL_DEPTH = 4",
     "struct build_dependencies",
+    "struct build_macro",
+    "struct conditional_state",
     "static int expand_source_recursive(",
     "static int record_dependency(",
+    "static int define_macro(",
+    "static int append_macro_expanded(",
     "static size_t expand_build_source(",
     "MAKOS_AARCH64_C_HEADER_DEP_OK",
-    "MAKOS_AARCH64_C_HEADER_GUARD_OK",
+    "MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK",
     "fingerprint=expanded-source",
-    "accepted=transitive ",
-    "cycle=denied overdepth=denied depth_limit=4",
+    "preprocessor=object-macro-conditionals",
+    "include_guard=deduplicated",
+    "cycle=denied overdepth=denied ",
+    "malformed=define,endif,unterminated,duplicate-else-denied ",
     '"/home/user/generated-header.build"',
     '"/home/user/generated-inline.h"',
     '"/home/user/generated-leaf.h"',
@@ -429,8 +438,8 @@ require(FOCUSED_RUNTIME, "write generated-leaf.h")
 require(FOCUSED_RUNTIME, "run generated-header.elf")
 require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
-require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 fingerprint=expanded-source")
-require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied transitive_header_execution=42")
+require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-conditionals macros=3 conditional_depth=2 include_guard=deduplicated fingerprint=expanded-source")
+require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else-denied transitive_header_execution=42")
 require(FOCUSED_RUNTIME, "malformed_c_denied=18")
 require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")

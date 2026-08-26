@@ -182,6 +182,9 @@ enum {
     BUILD_HEADER_CAPACITY = 384,
     MAX_BUILD_HEADER_DEPTH = 4,
     MAX_BUILD_HEADER_DEPENDENCIES = 8,
+    MAX_BUILD_MACROS = 8,
+    MAX_BUILD_MACRO_VALUE_BYTES = 16,
+    MAX_BUILD_CONDITIONAL_DEPTH = 4,
     BUILD_STATE_BYTES = 120,
     BUILD_STATE_SUFFIX_BYTES = 6,
 };
@@ -208,6 +211,15 @@ struct build_dependencies {
     size_t path_lengths[MAX_BUILD_HEADER_DEPENDENCIES];
     size_t count;
     size_t max_depth;
+    size_t macro_count;
+    size_t max_conditional_depth;
+};
+
+struct build_macro {
+    char name[MAX_LABEL_BYTES];
+    size_t name_length;
+    char value[MAX_BUILD_MACRO_VALUE_BYTES];
+    size_t value_length;
 };
 
 static int build_path_byte(char byte) {
@@ -1485,6 +1497,14 @@ struct include_context {
     struct build_dependencies *dependencies;
     char active_paths[MAX_BUILD_HEADER_DEPTH][MAX_BUILD_PATH_BYTES];
     size_t active_path_lengths[MAX_BUILD_HEADER_DEPTH];
+    struct build_macro macros[MAX_BUILD_MACROS];
+    size_t macro_count;
+};
+
+struct conditional_state {
+    int parent_active;
+    int condition;
+    int seen_else;
 };
 
 static int append_expanded(struct include_context *context,
@@ -1524,10 +1544,161 @@ static int record_dependency(struct include_context *context,
     return 1;
 }
 
+static int macro_name_byte(char byte, int first) {
+    if ((byte >= 'a' && byte <= 'z') ||
+        (byte >= 'A' && byte <= 'Z') || byte == '_')
+        return 1;
+    return !first && byte >= '0' && byte <= '9';
+}
+
+static size_t macro_lookup(const struct include_context *context,
+                           const char *name, size_t name_length) {
+    for (size_t index = 0; index < context->macro_count; ++index)
+        if (same_name(context->macros[index].name,
+                      context->macros[index].name_length, name, name_length))
+            return index + 1;
+    return 0;
+}
+
+static int parse_macro_name(const uint8_t *source, size_t line_end,
+                            size_t *cursor, char name[MAX_LABEL_BYTES],
+                            size_t *name_length) {
+    while (*cursor < line_end &&
+           (source[*cursor] == ' ' || source[*cursor] == '\t'))
+        ++*cursor;
+    size_t count = 0;
+    if (*cursor == line_end ||
+        !macro_name_byte((char)source[*cursor], 1))
+        return 0;
+    while (*cursor < line_end &&
+           macro_name_byte((char)source[*cursor], count == 0)) {
+        if (count == MAX_LABEL_BYTES) return 0;
+        name[count++] = (char)source[(*cursor)++];
+    }
+    *name_length = count;
+    return 1;
+}
+
+static int parse_define(const uint8_t *source, size_t line_end,
+                        size_t *cursor, char name[MAX_LABEL_BYTES],
+                        size_t *name_length,
+                        char value[MAX_BUILD_MACRO_VALUE_BYTES],
+                        size_t *value_length) {
+    if (!parse_macro_name(source, line_end, cursor, name, name_length))
+        return 0;
+    while (*cursor < line_end &&
+           (source[*cursor] == ' ' || source[*cursor] == '\t'))
+        ++*cursor;
+    size_t end = line_end;
+    while (end > *cursor &&
+           (source[end - 1] == ' ' || source[end - 1] == '\t'))
+        --end;
+    if (*cursor == end) {
+        *value_length = 0;
+        return 1;
+    }
+    size_t start = *cursor;
+    if (source[*cursor] == '-') ++*cursor;
+    size_t digits = 0;
+    uint32_t magnitude = 0;
+    while (*cursor < end && source[*cursor] >= '0' &&
+           source[*cursor] <= '9') {
+        magnitude = magnitude * 10 + (uint32_t)(source[*cursor] - '0');
+        if (magnitude > 65535) return 0;
+        ++*cursor;
+        ++digits;
+    }
+    if (!digits || *cursor != end ||
+        end - start > MAX_BUILD_MACRO_VALUE_BYTES)
+        return 0;
+    *value_length = end - start;
+    for (size_t index = 0; index < *value_length; ++index)
+        value[index] = (char)source[start + index];
+    return 1;
+}
+
+static int define_macro(struct include_context *context, const char *name,
+                        size_t name_length, const char *value,
+                        size_t value_length) {
+    if (macro_lookup(context, name, name_length) ||
+        context->macro_count == MAX_BUILD_MACROS)
+        return 0;
+    size_t index = context->macro_count++;
+    for (size_t byte = 0; byte < name_length; ++byte)
+        context->macros[index].name[byte] = name[byte];
+    context->macros[index].name_length = name_length;
+    for (size_t byte = 0; byte < value_length; ++byte)
+        context->macros[index].value[byte] = value[byte];
+    context->macros[index].value_length = value_length;
+    context->dependencies->macro_count = context->macro_count;
+    return 1;
+}
+
+static int append_macro_expanded(struct include_context *context,
+                                 const uint8_t *source, size_t start,
+                                 size_t end) {
+    size_t cursor = start;
+    while (cursor < end) {
+        if (!macro_name_byte((char)source[cursor], 1)) {
+            if (!append_expanded(context, source + cursor, 1)) return 0;
+            ++cursor;
+            continue;
+        }
+        size_t identifier = cursor++;
+        while (cursor < end &&
+               macro_name_byte((char)source[cursor], 0))
+            ++cursor;
+        size_t found = macro_lookup(context,
+                                    (const char *)source + identifier,
+                                    cursor - identifier);
+        if (!found) {
+            if (!append_expanded(context, source + identifier,
+                                 cursor - identifier))
+                return 0;
+            continue;
+        }
+        const struct build_macro *macro = &context->macros[found - 1];
+        if (!append_expanded(context, (const uint8_t *)macro->value,
+                             macro->value_length))
+            return 0;
+    }
+    return 1;
+}
+
+static int directive_token(const uint8_t *source, size_t line_end,
+                           size_t directive, const char *token,
+                           size_t *cursor) {
+    size_t position = directive + 1;
+    while (position < line_end &&
+           (source[position] == ' ' || source[position] == '\t'))
+        ++position;
+    size_t token_length = length(token);
+    if (token_length > line_end - position) return 0;
+    for (size_t index = 0; index < token_length; ++index)
+        if (source[position + index] != (uint8_t)token[index])
+            return 0;
+    position += token_length;
+    if (position < line_end && source[position] != ' ' &&
+        source[position] != '\t')
+        return 0;
+    *cursor = position;
+    return 1;
+}
+
+static int directive_tail_empty(const uint8_t *source, size_t line_end,
+                                size_t cursor) {
+    while (cursor < line_end &&
+           (source[cursor] == ' ' || source[cursor] == '\t'))
+        ++cursor;
+    return cursor == line_end;
+}
+
 static int expand_source_recursive(struct include_context *context,
                                    const uint8_t *source,
                                    size_t source_length, size_t depth) {
-    static const char prefix[] = "#include \"";
+    struct conditional_state conditionals[MAX_BUILD_CONDITIONAL_DEPTH] = {0};
+    size_t conditional_depth = 0;
+    int active = 1;
     size_t cursor = 0;
     while (cursor < source_length) {
         size_t line_start = cursor;
@@ -1539,51 +1710,110 @@ static int expand_source_recursive(struct include_context *context,
                (source[directive] == ' ' || source[directive] == '\t'))
             ++directive;
         if (directive == line_end || source[directive] != '#') {
-            if (!append_expanded(context, source + line_start,
-                                 next - line_start))
+            if (active &&
+                !append_macro_expanded(context, source, line_start, next))
                 return 0;
             cursor = next;
             continue;
         }
-        if (line_end - directive <= sizeof(prefix) - 1) return 0;
-        for (size_t index = 0; index < sizeof(prefix) - 1; ++index)
-            if (source[directive + index] != (uint8_t)prefix[index]) return 0;
-        size_t include_depth = depth + 1;
-        if (include_depth > MAX_BUILD_HEADER_DEPTH) return 0;
-        size_t path_cursor = directive + sizeof(prefix) - 1;
-        char path[MAX_BUILD_PATH_BYTES] = {0};
-        size_t path_length = 0;
-        while (path_cursor < line_end && source[path_cursor] != '"') {
-            if (path_length == MAX_BUILD_PATH_BYTES ||
-                !build_path_byte((char)source[path_cursor]))
+        size_t argument = 0;
+        if (directive_token(source, line_end, directive, "ifdef", &argument) ||
+            directive_token(source, line_end, directive, "ifndef", &argument)) {
+            int negate = directive_token(source, line_end, directive,
+                                         "ifndef", &argument);
+            char name[MAX_LABEL_BYTES] = {0};
+            size_t name_length = 0;
+            if (conditional_depth == MAX_BUILD_CONDITIONAL_DEPTH ||
+                !parse_macro_name(source, line_end, &argument, name,
+                                  &name_length) ||
+                !directive_tail_empty(source, line_end, argument))
                 return 0;
-            path[path_length++] = (char)source[path_cursor++];
-        }
-        if (!path_length || path[0] != '/' || path_cursor == line_end ||
-            source[path_cursor++] != '"' || path_cursor != line_end ||
-            !build_state_path_safe(context->build, path, path_length) ||
-            !record_dependency(context, path, path_length, include_depth))
+            int condition = macro_lookup(context, name, name_length) != 0;
+            if (negate) condition = !condition;
+            conditionals[conditional_depth++] = (struct conditional_state) {
+                .parent_active = active,
+                .condition = condition,
+            };
+            active = active && condition;
+            if (conditional_depth >
+                context->dependencies->max_conditional_depth)
+                context->dependencies->max_conditional_depth =
+                    conditional_depth;
+        } else if (directive_token(source, line_end, directive, "else",
+                                   &argument)) {
+            if (!conditional_depth ||
+                !directive_tail_empty(source, line_end, argument) ||
+                conditionals[conditional_depth - 1].seen_else)
+                return 0;
+            conditionals[conditional_depth - 1].seen_else = 1;
+            active = conditionals[conditional_depth - 1].parent_active &&
+                     !conditionals[conditional_depth - 1].condition;
+        } else if (directive_token(source, line_end, directive, "endif",
+                                   &argument)) {
+            if (!conditional_depth ||
+                !directive_tail_empty(source, line_end, argument))
+                return 0;
+            active = conditionals[conditional_depth - 1].parent_active;
+            --conditional_depth;
+        } else if (directive_token(source, line_end, directive, "define",
+                                   &argument)) {
+            char name[MAX_LABEL_BYTES] = {0};
+            char value[MAX_BUILD_MACRO_VALUE_BYTES] = {0};
+            size_t name_length = 0, value_length = 0;
+            if (!parse_define(source, line_end, &argument, name,
+                              &name_length, value, &value_length) ||
+                (active && !define_macro(context, name, name_length,
+                                         value, value_length)))
+                return 0;
+        } else if (directive_token(source, line_end, directive, "include",
+                                   &argument)) {
+            while (argument < line_end &&
+                   (source[argument] == ' ' || source[argument] == '\t'))
+                ++argument;
+            if (argument == line_end || source[argument++] != '"') return 0;
+            char path[MAX_BUILD_PATH_BYTES] = {0};
+            size_t path_length = 0;
+            while (argument < line_end && source[argument] != '"') {
+                if (path_length == MAX_BUILD_PATH_BYTES ||
+                    !build_path_byte((char)source[argument]))
+                    return 0;
+                path[path_length++] = (char)source[argument++];
+            }
+            if (!path_length || path[0] != '/' || argument == line_end ||
+                source[argument++] != '"' ||
+                !directive_tail_empty(source, line_end, argument))
+                return 0;
+            if (active) {
+                size_t include_depth = depth + 1;
+                if (include_depth > MAX_BUILD_HEADER_DEPTH ||
+                    !build_state_path_safe(context->build, path, path_length) ||
+                    !record_dependency(context, path, path_length,
+                                       include_depth))
+                    return 0;
+                uint8_t header[BUILD_HEADER_CAPACITY] = {0};
+                size_t header_length = read_file(path, path_length, header,
+                                                 sizeof(header));
+                if (!header_length || header_length == sizeof(header)) return 0;
+                size_t active_path = include_depth - 1;
+                for (size_t index = 0; index < path_length; ++index)
+                    context->active_paths[active_path][index] = path[index];
+                context->active_path_lengths[active_path] = path_length;
+                if (!expand_source_recursive(context, header, header_length,
+                                             include_depth))
+                    return 0;
+                context->active_path_lengths[active_path] = 0;
+                if (next < source_length && context->output &&
+                    context->expanded[context->output - 1] != '\n') {
+                    static const uint8_t newline = '\n';
+                    if (!append_expanded(context, &newline, 1)) return 0;
+                }
+            }
+        } else {
             return 0;
-        uint8_t header[BUILD_HEADER_CAPACITY] = {0};
-        size_t header_length = read_file(path, path_length, header,
-                                         sizeof(header));
-        if (!header_length || header_length == sizeof(header)) return 0;
-        size_t active = include_depth - 1;
-        for (size_t index = 0; index < path_length; ++index)
-            context->active_paths[active][index] = path[index];
-        context->active_path_lengths[active] = path_length;
-        if (!expand_source_recursive(context, header, header_length,
-                                     include_depth))
-            return 0;
-        context->active_path_lengths[active] = 0;
-        if (next < source_length && context->output &&
-            context->expanded[context->output - 1] != '\n') {
-            static const uint8_t newline = '\n';
-            if (!append_expanded(context, &newline, 1)) return 0;
         }
         cursor = next;
     }
-    return 1;
+    return conditional_depth == 0;
 }
 
 static size_t expand_build_source(
@@ -2352,6 +2582,9 @@ static void write_header_marker(const struct build_manifest *build,
                                 const struct build_dependencies *dependencies) {
     char count = (char)('0' + dependencies->count);
     char depth = (char)('0' + dependencies->max_depth);
+    char macros = (char)('0' + dependencies->macro_count);
+    char conditional_depth =
+        (char)('0' + dependencies->max_conditional_depth);
     write_text("MAKOS_AARCH64_C_HEADER_DEP_OK source=");
     write_bytes(build->inputs[input].source_path,
                 build->inputs[input].source_path_length);
@@ -2365,7 +2598,11 @@ static void write_header_marker(const struct build_manifest *build,
     write_text(" max_depth=");
     write_bytes(&depth, 1);
     write_text(" resolver=quoted-absolute-recursive depth_limit=4 "
-               "fingerprint=expanded-source\n");
+               "preprocessor=object-macro-conditionals macros=");
+    write_bytes(&macros, 1);
+    write_text(" conditional_depth=");
+    write_bytes(&conditional_depth, 1);
+    write_text(" include_guard=deduplicated fingerprint=expanded-source\n");
 }
 
 static void fail(uint64_t status) {
@@ -2529,13 +2766,28 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "svc #0\n";
     static const char header_c_source[] =
         "int identity(int value) { return value; }\n"
+        "#include \"/home/user/generated-inline.h\"\n"
         "#include \"/home/user/generated-inline.h\"\n";
-    static const char header_prefix_source[] =
-        "int identity(int value) { return value; }\n";
-    static const char inline_header_source[] =
-        "#include \"/home/user/generated-leaf.h\"\n";
-    static const char leaf_header_source[] =
+    static const char header_expected_source[] =
+        "int identity(int value) { return value; }\n"
         "int included_answer(int value) { return value + 2; }\n";
+    static const char inline_header_source[] =
+        "#ifndef GEN_INLINE_H\n"
+        "#define GEN_INLINE_H\n"
+        "#include \"/home/user/generated-leaf.h\"\n"
+        "#else\n"
+        "#ifdef NEVER_DEFINED\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
+        "#endif\n";
+    static const char leaf_header_source[] =
+        "#ifndef GEN_LEAF_H\n"
+        "#define GEN_LEAF_H\n"
+        "#define INCLUDED_DELTA 2\n"
+        "int included_answer(int value) { return value + INCLUDED_DELTA; }\n"
+        "#else\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n";
     static const char cycle_a_header_source[] =
         "#include \"/home/user/generated-cycle-b.h\"\n";
     static const char cycle_b_header_source[] =
@@ -2556,6 +2808,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#include \"/home/user/generated-cycle-a.h\"\n";
     static const char overdepth_include_source[] =
         "#include \"/home/user/generated-deep1.h\"\n";
+    static const char malformed_define_source[] =
+        "#define BAD(value) 2\n"
+        "int answer(int value) { return value + BAD; }\n";
+    static const char unmatched_endif_source[] = "#endif\n";
+    static const char unterminated_ifndef_source[] =
+        "#ifndef NEVER_DEFINED\n"
+        "int answer(int value) { return value; }\n";
+    static const char duplicate_else_source[] =
+        "#ifdef NEVER_DEFINED\n"
+        "#else\n"
+        "#else\n"
+        "#endif\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value | 2; }\n";
     static const char malformed_divide_zero_source[] =
@@ -2793,16 +3057,24 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             &build, 1, (const uint8_t *)header_c_source,
             sizeof(header_c_source) - 1, include_output,
             sizeof(include_output), &include_dependencies);
-        if (included_length != sizeof(header_prefix_source) - 1 +
-                                   sizeof(leaf_header_source) - 1 ||
-            include_dependencies.count != 2 ||
-            include_dependencies.max_depth != 2 ||
-            !same_name(include_dependencies.paths[0],
+        if (included_length != sizeof(header_expected_source) - 1) fail(82);
+        if (include_dependencies.count != 2) fail(83);
+        if (include_dependencies.max_depth != 2) fail(84);
+        if (include_dependencies.macro_count != 3) fail(85);
+        if (include_dependencies.max_conditional_depth != 2) fail(86);
+        if (!same_name(include_dependencies.paths[0],
                        include_dependencies.path_lengths[0],
-                       inline_header_path, sizeof(inline_header_path) - 1) ||
-            !same_name(include_dependencies.paths[1],
+                       inline_header_path, sizeof(inline_header_path) - 1))
+            fail(87);
+        if (!same_name(include_dependencies.paths[1],
                        include_dependencies.path_lengths[1], leaf_header_path,
-                       sizeof(leaf_header_path) - 1) ||
+                       sizeof(leaf_header_path) - 1))
+            fail(88);
+        for (size_t index = 0; index < included_length; ++index)
+            if (include_output[index] !=
+                (uint8_t)header_expected_source[index])
+                fail(89);
+        if (
             expand_build_source(
                 &build, 1, (const uint8_t *)relative_include_source,
                 sizeof(relative_include_source) - 1, include_output,
@@ -2818,11 +3090,30 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             expand_build_source(
                 &build, 1, (const uint8_t *)overdepth_include_source,
                 sizeof(overdepth_include_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)malformed_define_source,
+                sizeof(malformed_define_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)unmatched_endif_source,
+                sizeof(unmatched_endif_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)unterminated_ifndef_source,
+                sizeof(unterminated_ifndef_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)duplicate_else_source,
+                sizeof(duplicate_else_source) - 1, include_output,
                 sizeof(include_output), &include_dependencies) != 0)
-            fail(81);
-        write_text("MAKOS_AARCH64_C_HEADER_GUARD_OK accepted=transitive "
-                   "headers=2 max_depth=2 missing=denied relative=denied "
-                   "cycle=denied overdepth=denied depth_limit=4\n");
+            fail(90);
+        write_text("MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK "
+                   "headers=2 max_depth=2 macros=3 conditional_depth=2 "
+                   "include_guard=deduplicated missing=denied "
+                   "relative=denied cycle=denied overdepth=denied "
+                   "malformed=define,endif,unterminated,duplicate-else-denied "
+                   "depth_limit=4\n");
     }
     if (build_mode) {
         size_t cache_hits = 0, cache_misses = 0;
