@@ -4,6 +4,35 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the AArch64 guest-native preprocessor now performs bounded
+  object-text and function-like macro expansion on active C lines. Definitions
+  allow four distinct parameters and 64 replacement bytes; invocation parses
+  nested parentheses, pre-expands 64-byte arguments, substitutes through a
+  256-byte scratch buffer, rescans to depth eight, and fails closed on direct
+  or indirect recursion. The real 1,215-byte leaf uses `RETURN_TYPE` and
+  two-parameter `APPLY_DELTA(value, delta)` with an object-macro argument;
+  the expanded unit compiles, links, runs, and reaps status 42. Duplicate and
+  five-parameter definitions, wrong arity, recursion, and `#` stringification
+  are denied. Variadics, `#`/`##`, multiline macros, function-like expansion
+  inside `#if`, system headers, and a substantial in-guest MakOS build remain
+  absent, so SDK/self-hosting remain Partial. Fresh Raspberry Pi/QEMU 10.0.11
+  TCG evidence passes the focused self-host gate with all 15 processes,
+  placements `5,3,7`, dispatches `179,184,181`, 40 migrations, zero evidence
+  drops, 231 CPU0 compositions for 247 AP deferrals, and status 42. Full
+  `make unit check`, Native SMP (`10789,13863,10412`, status 42), and cursor
+  (`positions=7`, zero changed scanout pixels) pass. The first unchanged
+  Firefox-role attempt reached direct IRQ/exact-watcher wake/CPU0 handoff but
+  missed its 30-second completion marker under Pi pressure; its unchanged
+  rerun passed (`10525,13675,10034`, exact Ctrl-A, three automatic migrations,
+  status 42). This is Pi/TCG functional evidence, not strict Firefox browser
+  performance evidence; idle macOS/HVF qualification remains pending. A fresh
+  visible login from the exact tested image is active as the sole QEMU, PID
+  869495, service `makos-visible-selfhost-macro-final.service`, private session
+  `build/makos-pi-visible-selfhost-macro-final-qgeLzRmM`. QMP reports running;
+  the boot clone SHA-256 is
+  `13ad44f51dc5f1b2287a19267e8a0a8b0423246b71ce091fa19d7163bd67c24a`
+  and the 800x600 login PPM SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
 - 2026-08-26 the bounded AArch64 guest preprocessor now implements the C
   conditional `?:` operator as its lowest-precedence, right-associative
   expression tier. Both arms remain syntax-checked, but only the selected arm

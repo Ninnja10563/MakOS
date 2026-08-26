@@ -155,7 +155,11 @@ linking, transitions the code from writable/NX to RX, and executes
 Build inputs pass through a bounded guest-native preprocessing stage before
 compilation and cache fingerprinting. It resolves absolute quoted includes
 through MakFS to four nested headers/eight unique dependencies, supports eight
-empty or signed-integer object macros, and permits four conditional levels.
+bounded object-text or function-like macros, and permits four conditional
+levels. Replacements and arguments are capped at 64 bytes, function-like
+definitions at four distinct parameters, substitution scratch at 256 bytes,
+and recursive identifier-token rescanning at depth eight. Invocation arguments
+may contain nested parentheses and are pre-expanded before substitution.
 Its condition subset covers `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and
 `#endif`; expressions have checked signed 32-bit semantics and support
 `defined`, signed numeric literals/object macros, unknown-name zero, unary
@@ -167,9 +171,12 @@ out-of-range shifts, invalid/overflowing left shifts, and signed overflow fail
 closed, while unevaluated logical operands are parsed without evaluating those
 errors. Literal/macro magnitude is capped at 65,535 and expanded headers at
 1,280 bytes. Malformed expressions/directives, unsafe include paths, cycles,
-limit overflow, and `#elif` after `#else` fail closed. This does not provide
-function-like/text macro replacement, token operations, or system include
-search.
+limit overflow, wrong arity, duplicate/excess macro parameters, recursive
+expansion, `#`/`##`, backslash continuations, and `#elif` after `#else` fail
+closed. Function-like macros expand on active C lines but not inside
+`#if`/`#elif`; those expressions continue to accept only signed-decimal object
+macros. This does not provide variadics, token pasting/stringification,
+multiline macros, or system include search.
 
 Build mode derives `<manifest>.state` and therefore accepts manifest paths up
 to 90 bytes. The exact 120-byte `MAKSTATE2` record contains its nine-byte

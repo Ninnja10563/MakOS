@@ -343,14 +343,20 @@ same bounded path alphabet, and not collide with a manifest
 source/object/output. Discovery is capped at four nested headers and eight
 unique dependencies, with an active-path stack for cycle detection. Empty,
 missing, oversized, relative, malformed, cyclic, or over-depth includes fail
-closed. The same pass accepts up to eight 16-byte object macro names with
-either an empty replacement (for guards) or a signed decimal replacement of
-magnitude at most 65,535. It substitutes identifier tokens on active C lines
-and processes `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and `#endif`,
+closed. The same pass accepts up to eight 16-byte macro names. Object and
+function-like replacements may contain up to 64 printable bytes; a
+function-like definition must place `(` immediately after its name and may
+declare up to four distinct parameters. Active C lines use bounded identifier
+token rescanning with nested-parenthesis argument parsing, pre-expanded
+arguments, a 64-byte bound per argument, a 256-byte substitution scratch
+buffer, and an eight-level expansion limit. Direct or indirect recursion,
+wrong arity, duplicate or excess parameters, `#`/`##`, backslash continuations,
+and limit overflow fail closed. Variadic macros are not accepted. The pass
+also processes `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and `#endif`,
 bounded to four conditional levels within each source/header. `#if`/`#elif`
 use a bounded recursive evaluator with checked signed 32-bit semantics. It
 supports `defined(NAME)` or `defined NAME`, numeric literals and numeric
-object macros, unknown identifiers as zero, unary `+`, `-`, `!`, and `~`,
+signed-decimal object macros, unknown identifiers as zero, unary `+`, `-`, `!`, and `~`,
 multiplicative and additive arithmetic, shifts, equality/relations, bitwise
 `&`, `^`, and `|`, short-circuit `&&` and `||`, and right-associative
 conditional `?:`. The precedence and associativity follow C for this subset.
@@ -360,11 +366,13 @@ invalid shift counts, negative or overflowing left shifts, and signed overflow
 fail closed; unevaluated logical operands are still parsed but do not trigger
 those semantic errors. Literal and macro magnitude remains capped at 65,535
 and every evaluated intermediate must fit `int32_t`. Exactly one branch may be
-selected. Redefinition, function-like defines, malformed/unbalanced
-expressions or conditionals, `#elif` after `#else`, and limit overflow fail
-closed. Each expanded header is capped at 1,280 bytes. This is not a general
-preprocessor: it has no general function-like/text replacement, token
-pasting/stringification, system include search, or unbounded include graphs.
+selected. Function-like invocations are expanded on active C lines, not inside
+`#if`/`#elif`; expression macros therefore remain signed-decimal object macros.
+Redefinition, malformed/unbalanced expressions or conditionals, and `#elif`
+after `#else` fail closed. Each expanded header is capped at 1,280 bytes. This
+is not a general preprocessor: it has no variadics, token
+pasting/stringification, multiline definitions, system include search, or
+unbounded include graphs.
 
 The fixture seeds `/home/user/generated-header.build`, a small assembly
 startup, `/home/user/generated-header.c`,
@@ -372,13 +380,18 @@ startup, `/home/user/generated-header.c`,
 defines a function before including the guarded root twice. The root's
 defined/undefined branches include a guarded leaf. That leaf sets
 `INCLUDED_DELTA=1`; a false `#if` is followed by a selected `#elif`, which
-defines `ACTIVE_DELTA=2` for the emitted function. The leaf also proves every
+defines `ACTIVE_DELTA=2` for the emitted function. `RETURN_TYPE` supplies a
+text replacement and two-parameter `APPLY_DELTA(value, delta)` expands nested
+object-macro arguments into the compiled function. The leaf is 1,215 bytes
+under the 1,280-byte cap. The leaf also proves every
 new arithmetic, shift, and bitwise tier, C precedence with `1 == 2 < 3`, and
 short-circuit suppression of a zero divisor and invalid shift. Conditional
 expressions prove both arm directions, logical-before-conditional precedence,
 right associativity, and selected-arm-only evaluation. Separate active
 zero-divisor, shift-range, overflow, malformed-conditional, and
-selected-conditional-trap fixtures fail closed. The repeated root is
+selected-conditional-trap fixtures fail closed. Separate definitions and
+invocations deny duplicate/five-parameter forms, wrong arity, recursive
+expansion, and `#` stringification. The repeated root is
 deduplicated and inactive missing-header branches are skipped. The focused gate
 builds this two-object graph cold (`0/2`) and warm
 (`2/0`), edits only the leaf header from the authenticated
@@ -392,9 +405,9 @@ hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`, plus
 header-graph cold `0/2`, warm `2/0`, edited-header `1/1`, and rewarm `2/0`
 results. All fourteen authenticated CLI builds link and reap with status
 42; the state-invalidated build re-establishes a valid cache. This is bounded
-incremental reuse with bounded recursive quoted-header discovery, integer
-object macros, include guards, and the documented expression subset—not a
-general preprocessor,
+incremental reuse with bounded recursive quoted-header discovery, object/text
+and four-parameter function-like macros, include guards, and the documented
+expression subset—not a general preprocessor,
 parallel builds, an
 arbitrary graph beyond six inputs, a general dependency engine, or a trust
 mechanism. The linker also retains its 512-byte aggregate code bound and fails

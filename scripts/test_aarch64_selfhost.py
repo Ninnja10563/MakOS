@@ -68,7 +68,11 @@ for fragment in (
     "MAX_BUILD_HEADER_DEPTH = 4",
     "MAX_BUILD_HEADER_DEPENDENCIES = 8",
     "MAX_BUILD_MACROS = 8",
-    "MAX_BUILD_MACRO_VALUE_BYTES = 16",
+    "MAX_BUILD_MACRO_VALUE_BYTES = 64",
+    "MAX_BUILD_MACRO_PARAMETERS = 4",
+    "MAX_BUILD_MACRO_ARGUMENT_BYTES = 64",
+    "MAX_BUILD_MACRO_SUBSTITUTION_BYTES = 256",
+    "MAX_BUILD_MACRO_EXPANSION_DEPTH = 8",
     "MAX_BUILD_CONDITIONAL_DEPTH = 4",
     "struct build_dependencies",
     "struct build_macro",
@@ -76,12 +80,22 @@ for fragment in (
     "static int expand_source_recursive(",
     "static int record_dependency(",
     "static int define_macro(",
+    "static size_t macro_parameter_lookup(",
+    "static int parse_macro_arguments(",
+    "static int expand_macro_bytes(",
     "static int append_macro_expanded(",
     "static size_t expand_build_source(",
     "MAKOS_AARCH64_C_HEADER_DEP_OK",
     "MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK",
     "fingerprint=expanded-source",
-    "preprocessor=object-macro-if-expressions",
+    "preprocessor=bounded-macro-if-expressions",
+    "macro_expansion=text,function-like parameters=4",
+    "expansion_depth=8",
+    '"#define APPLY_DELTA(value, delta) ((value) + (delta))\\n"',
+    '"#define FIVE(a, b, c, d, e) ((a) + (b))\\n"',
+    '"#define PAIR(first, second) ((first) + (second))\\n"',
+    '"#define LOOP(value) LOOP(value)\\n"',
+    '"#define TEXT(value) #value\\n"',
     "struct preprocessor_expression",
     "static int evaluate_preprocessor_expression(",
     "static int preprocessor_expression_equality(",
@@ -102,7 +116,8 @@ for fragment in (
     "malformed=define,endif,unterminated,",
     "duplicate-else,expression,elif-after-else,zero-divisor,",
     "shift-range,overflow,conditional-syntax,",
-    "conditional-selected-trap-denied ",
+    "conditional-selected-trap,macro-parameters,macro-arity,",
+    "macro-recursion,macro-token-op-denied ",
     '"/home/user/generated-header.build"',
     '"/home/user/generated-inline.h"',
     '"/home/user/generated-leaf.h"',
@@ -532,8 +547,8 @@ require(FOCUSED_RUNTIME, "ap_deferrals == 0")
 require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2")
 require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled guest_execution=42")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
-require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source")
-require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap-denied transitive_header_execution=42")
+require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=bounded-macro-if-expressions macros=6 conditional_depth=2 macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source")
+require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap,macro-parameters,macro-arity,macro-recursion,macro-token-op-denied transitive_header_execution=42")
 require(FOCUSED_RUNTIME, "malformed_c_denied=18")
 require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")

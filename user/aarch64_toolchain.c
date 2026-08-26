@@ -205,7 +205,11 @@ enum {
     MAX_BUILD_HEADER_DEPTH = 4,
     MAX_BUILD_HEADER_DEPENDENCIES = 8,
     MAX_BUILD_MACROS = 8,
-    MAX_BUILD_MACRO_VALUE_BYTES = 16,
+    MAX_BUILD_MACRO_VALUE_BYTES = 64,
+    MAX_BUILD_MACRO_PARAMETERS = 4,
+    MAX_BUILD_MACRO_ARGUMENT_BYTES = 64,
+    MAX_BUILD_MACRO_SUBSTITUTION_BYTES = 256,
+    MAX_BUILD_MACRO_EXPANSION_DEPTH = 8,
     MAX_BUILD_CONDITIONAL_DEPTH = 4,
     BUILD_STATE_BYTES = 120,
     BUILD_STATE_SUFFIX_BYTES = 6,
@@ -240,6 +244,10 @@ struct build_dependencies {
 struct build_macro {
     char name[MAX_LABEL_BYTES];
     size_t name_length;
+    char parameters[MAX_BUILD_MACRO_PARAMETERS][MAX_LABEL_BYTES];
+    size_t parameter_lengths[MAX_BUILD_MACRO_PARAMETERS];
+    size_t parameter_count;
+    int function_like;
     char value[MAX_BUILD_MACRO_VALUE_BYTES];
     size_t value_length;
 };
@@ -1602,12 +1610,49 @@ static int parse_macro_name(const uint8_t *source, size_t line_end,
 }
 
 static int parse_define(const uint8_t *source, size_t line_end,
-                        size_t *cursor, char name[MAX_LABEL_BYTES],
-                        size_t *name_length,
-                        char value[MAX_BUILD_MACRO_VALUE_BYTES],
-                        size_t *value_length) {
-    if (!parse_macro_name(source, line_end, cursor, name, name_length))
+                        size_t *cursor, struct build_macro *macro) {
+    if (!macro ||
+        !parse_macro_name(source, line_end, cursor, macro->name,
+                          &macro->name_length))
         return 0;
+    if (*cursor < line_end && source[*cursor] == '(') {
+        macro->function_like = 1;
+        ++*cursor;
+        while (*cursor < line_end &&
+               (source[*cursor] == ' ' || source[*cursor] == '\t'))
+            ++*cursor;
+        if (*cursor < line_end && source[*cursor] == ')') {
+            ++*cursor;
+        } else {
+            for (;;) {
+                if (macro->parameter_count == MAX_BUILD_MACRO_PARAMETERS)
+                    return 0;
+                size_t parameter = macro->parameter_count++;
+                if (!parse_macro_name(
+                        source, line_end, cursor,
+                        macro->parameters[parameter],
+                        &macro->parameter_lengths[parameter]))
+                    return 0;
+                for (size_t previous = 0; previous < parameter; ++previous)
+                    if (same_name(
+                            macro->parameters[previous],
+                            macro->parameter_lengths[previous],
+                            macro->parameters[parameter],
+                            macro->parameter_lengths[parameter]))
+                        return 0;
+                while (*cursor < line_end &&
+                       (source[*cursor] == ' ' || source[*cursor] == '\t'))
+                    ++*cursor;
+                if (*cursor == line_end) return 0;
+                if (source[*cursor] == ')') {
+                    ++*cursor;
+                    break;
+                }
+                if (source[*cursor] != ',') return 0;
+                ++*cursor;
+            }
+        }
+    }
     while (*cursor < line_end &&
            (source[*cursor] == ' ' || source[*cursor] == '\t'))
         ++*cursor;
@@ -1616,53 +1661,132 @@ static int parse_define(const uint8_t *source, size_t line_end,
            (source[end - 1] == ' ' || source[end - 1] == '\t'))
         --end;
     if (*cursor == end) {
-        *value_length = 0;
+        macro->value_length = 0;
         return 1;
     }
     size_t start = *cursor;
-    if (source[*cursor] == '-') ++*cursor;
-    size_t digits = 0;
-    uint32_t magnitude = 0;
-    while (*cursor < end && source[*cursor] >= '0' &&
-           source[*cursor] <= '9') {
-        magnitude = magnitude * 10 + (uint32_t)(source[*cursor] - '0');
-        if (magnitude > 65535) return 0;
-        ++*cursor;
-        ++digits;
-    }
-    if (!digits || *cursor != end ||
-        end - start > MAX_BUILD_MACRO_VALUE_BYTES)
+    if (end - start > MAX_BUILD_MACRO_VALUE_BYTES)
         return 0;
-    *value_length = end - start;
-    for (size_t index = 0; index < *value_length; ++index)
-        value[index] = (char)source[start + index];
+    macro->value_length = end - start;
+    for (size_t index = 0; index < macro->value_length; ++index) {
+        uint8_t byte = source[start + index];
+        if (byte < 32 || byte > 126 || byte == '#' || byte == '\\')
+            return 0;
+        macro->value[index] = (char)byte;
+    }
     return 1;
 }
 
-static int define_macro(struct include_context *context, const char *name,
-                        size_t name_length, const char *value,
-                        size_t value_length) {
-    if (macro_lookup(context, name, name_length) ||
+static int define_macro(struct include_context *context,
+                        const struct build_macro *macro) {
+    if (!macro || macro_lookup(context, macro->name, macro->name_length) ||
         context->macro_count == MAX_BUILD_MACROS)
         return 0;
     size_t index = context->macro_count++;
-    for (size_t byte = 0; byte < name_length; ++byte)
-        context->macros[index].name[byte] = name[byte];
-    context->macros[index].name_length = name_length;
-    for (size_t byte = 0; byte < value_length; ++byte)
-        context->macros[index].value[byte] = value[byte];
-    context->macros[index].value_length = value_length;
+    struct build_macro *defined = &context->macros[index];
+    defined->name_length = macro->name_length;
+    for (size_t byte = 0; byte < macro->name_length; ++byte)
+        defined->name[byte] = macro->name[byte];
+    defined->parameter_count = macro->parameter_count;
+    defined->function_like = macro->function_like;
+    for (size_t parameter = 0; parameter < macro->parameter_count;
+         ++parameter) {
+        defined->parameter_lengths[parameter] =
+            macro->parameter_lengths[parameter];
+        for (size_t byte = 0;
+             byte < macro->parameter_lengths[parameter]; ++byte)
+            defined->parameters[parameter][byte] =
+                macro->parameters[parameter][byte];
+    }
+    defined->value_length = macro->value_length;
+    for (size_t byte = 0; byte < macro->value_length; ++byte)
+        defined->value[byte] = macro->value[byte];
     context->dependencies->macro_count = context->macro_count;
     return 1;
 }
 
-static int append_macro_expanded(struct include_context *context,
-                                 const uint8_t *source, size_t start,
-                                 size_t end) {
+static int append_macro_bytes(uint8_t *output, size_t capacity,
+                              size_t *output_length, const uint8_t *bytes,
+                              size_t count) {
+    if (*output_length > capacity || count > capacity - *output_length)
+        return 0;
+    copy_bytes(output + *output_length, bytes, count);
+    *output_length += count;
+    return 1;
+}
+
+static size_t macro_parameter_lookup(const struct build_macro *macro,
+                                     const char *name, size_t name_length) {
+    for (size_t index = 0; index < macro->parameter_count; ++index)
+        if (same_name(macro->parameters[index],
+                      macro->parameter_lengths[index], name, name_length))
+            return index + 1;
+    return 0;
+}
+
+static int parse_macro_arguments(
+    const uint8_t *source, size_t end, size_t *cursor,
+    size_t starts[MAX_BUILD_MACRO_PARAMETERS],
+    size_t lengths[MAX_BUILD_MACRO_PARAMETERS], size_t *argument_count) {
+    while (*cursor < end &&
+           (source[*cursor] == ' ' || source[*cursor] == '\t'))
+        ++*cursor;
+    if (*cursor == end || source[*cursor] != '(') return 0;
+    ++*cursor;
+    while (*cursor < end &&
+           (source[*cursor] == ' ' || source[*cursor] == '\t'))
+        ++*cursor;
+    *argument_count = 0;
+    if (*cursor < end && source[*cursor] == ')') {
+        ++*cursor;
+        return 1;
+    }
+    size_t start = *cursor;
+    size_t nesting = 0;
+    while (*cursor < end) {
+        uint8_t byte = source[*cursor];
+        if (byte == '(') {
+            ++nesting;
+        } else if (byte == ')' && nesting) {
+            --nesting;
+        } else if ((byte == ',' || byte == ')') && !nesting) {
+            if (*argument_count == MAX_BUILD_MACRO_PARAMETERS) return 0;
+            size_t argument_end = *cursor;
+            while (start < argument_end &&
+                   (source[start] == ' ' || source[start] == '\t'))
+                ++start;
+            while (argument_end > start &&
+                   (source[argument_end - 1] == ' ' ||
+                    source[argument_end - 1] == '\t'))
+                --argument_end;
+            if (argument_end == start ||
+                argument_end - start > MAX_BUILD_MACRO_ARGUMENT_BYTES)
+                return 0;
+            starts[*argument_count] = start;
+            lengths[*argument_count] = argument_end - start;
+            ++*argument_count;
+            ++*cursor;
+            if (byte == ')') return 1;
+            start = *cursor;
+            continue;
+        }
+        ++*cursor;
+    }
+    return 0;
+}
+
+static int expand_macro_bytes(struct include_context *context,
+                              const uint8_t *source, size_t start,
+                              size_t end, uint8_t *output, size_t capacity,
+                              size_t *output_length, size_t depth,
+                              uint32_t active_macros) {
+    if (depth > MAX_BUILD_MACRO_EXPANSION_DEPTH) return 0;
     size_t cursor = start;
     while (cursor < end) {
         if (!macro_name_byte((char)source[cursor], 1)) {
-            if (!append_expanded(context, source + cursor, 1)) return 0;
+            if (!append_macro_bytes(output, capacity, output_length,
+                                    source + cursor, 1))
+                return 0;
             ++cursor;
             continue;
         }
@@ -1674,16 +1798,109 @@ static int append_macro_expanded(struct include_context *context,
                                     (const char *)source + identifier,
                                     cursor - identifier);
         if (!found) {
-            if (!append_expanded(context, source + identifier,
-                                 cursor - identifier))
+            if (!append_macro_bytes(output, capacity, output_length,
+                                    source + identifier,
+                                    cursor - identifier))
                 return 0;
             continue;
         }
-        const struct build_macro *macro = &context->macros[found - 1];
-        if (!append_expanded(context, (const uint8_t *)macro->value,
-                             macro->value_length))
+        size_t macro_index = found - 1;
+        const struct build_macro *macro = &context->macros[macro_index];
+        if (!macro->function_like) {
+            if (active_macros & ((uint32_t)1 << macro_index)) return 0;
+            uint32_t next_active =
+                active_macros | ((uint32_t)1 << macro_index);
+            if (!expand_macro_bytes(
+                    context, (const uint8_t *)macro->value, 0,
+                    macro->value_length, output, capacity, output_length,
+                    depth + 1, next_active))
+                return 0;
+            continue;
+        }
+        size_t invocation = cursor;
+        while (invocation < end &&
+               (source[invocation] == ' ' || source[invocation] == '\t'))
+            ++invocation;
+        if (invocation == end || source[invocation] != '(') {
+            if (!append_macro_bytes(output, capacity, output_length,
+                                    source + identifier,
+                                    cursor - identifier))
+                return 0;
+            continue;
+        }
+        if (active_macros & ((uint32_t)1 << macro_index)) return 0;
+        uint32_t next_active =
+            active_macros | ((uint32_t)1 << macro_index);
+        size_t argument_starts[MAX_BUILD_MACRO_PARAMETERS] = {0};
+        size_t argument_lengths[MAX_BUILD_MACRO_PARAMETERS] = {0};
+        size_t argument_count = 0;
+        if (!parse_macro_arguments(source, end, &invocation,
+                                   argument_starts, argument_lengths,
+                                   &argument_count) ||
+            argument_count != macro->parameter_count)
             return 0;
+        uint8_t arguments[MAX_BUILD_MACRO_PARAMETERS]
+                         [MAX_BUILD_MACRO_ARGUMENT_BYTES] = {{0}};
+        size_t expanded_argument_lengths[MAX_BUILD_MACRO_PARAMETERS] = {0};
+        for (size_t argument = 0; argument < argument_count; ++argument)
+            if (!expand_macro_bytes(
+                    context, source, argument_starts[argument],
+                    argument_starts[argument] + argument_lengths[argument],
+                    arguments[argument], sizeof(arguments[argument]),
+                    &expanded_argument_lengths[argument], depth + 1,
+                    active_macros))
+                return 0;
+        uint8_t substituted[MAX_BUILD_MACRO_SUBSTITUTION_BYTES] = {0};
+        size_t substituted_length = 0;
+        size_t replacement = 0;
+        while (replacement < macro->value_length) {
+            if (!macro_name_byte(macro->value[replacement], 1)) {
+                if (!append_macro_bytes(
+                        substituted, sizeof(substituted),
+                        &substituted_length,
+                        (const uint8_t *)macro->value + replacement, 1))
+                    return 0;
+                ++replacement;
+                continue;
+            }
+            size_t token = replacement++;
+            while (replacement < macro->value_length &&
+                   macro_name_byte(macro->value[replacement], 0))
+                ++replacement;
+            size_t parameter = macro_parameter_lookup(
+                macro, macro->value + token, replacement - token);
+            if (parameter) {
+                --parameter;
+                if (!append_macro_bytes(
+                        substituted, sizeof(substituted),
+                        &substituted_length, arguments[parameter],
+                        expanded_argument_lengths[parameter]))
+                    return 0;
+            } else if (!append_macro_bytes(
+                           substituted, sizeof(substituted),
+                           &substituted_length,
+                           (const uint8_t *)macro->value + token,
+                           replacement - token)) {
+                return 0;
+            }
+        }
+        if (!expand_macro_bytes(context, substituted, 0,
+                                substituted_length, output, capacity,
+                                output_length, depth + 1, next_active))
+            return 0;
+        cursor = invocation;
     }
+    return 1;
+}
+
+static int append_macro_expanded(struct include_context *context,
+                                 const uint8_t *source, size_t start,
+                                 size_t end) {
+    size_t output = context->output;
+    if (!expand_macro_bytes(context, source, start, end, context->expanded,
+                            context->expanded_capacity, &output, 0, 0))
+        return 0;
+    context->output = output;
     return 1;
 }
 
@@ -2193,13 +2410,9 @@ static int expand_source_recursive(struct include_context *context,
             --conditional_depth;
         } else if (directive_token(source, line_end, directive, "define",
                                    &argument)) {
-            char name[MAX_LABEL_BYTES] = {0};
-            char value[MAX_BUILD_MACRO_VALUE_BYTES] = {0};
-            size_t name_length = 0, value_length = 0;
-            if (!parse_define(source, line_end, &argument, name,
-                              &name_length, value, &value_length) ||
-                (active && !define_macro(context, name, name_length,
-                                         value, value_length)))
+            struct build_macro macro = {0};
+            if (!parse_define(source, line_end, &argument, &macro) ||
+                (active && !define_macro(context, &macro)))
                 return 0;
         } else if (directive_token(source, line_end, directive, "include",
                                    &argument)) {
@@ -3034,11 +3247,13 @@ static void write_header_marker(const struct build_manifest *build,
     write_text(" max_depth=");
     write_bytes(&depth, 1);
     write_text(" resolver=quoted-absolute-recursive depth_limit=4 "
-               "preprocessor=object-macro-if-expressions macros=");
+               "preprocessor=bounded-macro-if-expressions macros=");
     write_bytes(&macros, 1);
     write_text(" conditional_depth=");
     write_bytes(&conditional_depth, 1);
-    write_text(" if_expression=defined,numeric,arithmetic,shift,comparison,"
+    write_text(" macro_expansion=text,function-like parameters=4 "
+               "expansion_depth=8 "
+               "if_expression=defined,numeric,arithmetic,shift,comparison,"
                "bitwise,not,and,or,short-circuit,conditional "
                "elif=selected include_guard=deduplicated "
                "fingerprint=expanded-source\n");
@@ -3234,7 +3449,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#include \"/home/user/generated-inline.h\"\n";
     static const char header_expected_source[] =
         "int identity(int value) { return value; }\n"
-        "int included_answer(int value) { return value + 2; }\n";
+        "int included_answer(int value) { return ((value) + (2)); }\n";
     static const char inline_header_source[] =
         "#ifndef GEN_INLINE_H\n"
         "#define GEN_INLINE_H\n"
@@ -3248,11 +3463,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#ifndef GEN_LEAF_H\n"
         "#define GEN_LEAF_H\n"
         "#define INCLUDED_DELTA 1\n"
+        "#define RETURN_TYPE int\n"
+        "#define APPLY_DELTA(value, delta) ((value) + (delta))\n"
         "#if defined(GEN_LEAF_H) && INCLUDED_DELTA == 2\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#elif defined(GEN_INLINE_H) && INCLUDED_DELTA == 1\n"
         "#define ACTIVE_DELTA 2\n"
-        "int included_answer(int value) { return value + ACTIVE_DELTA; }\n"
+        "RETURN_TYPE included_answer(int value) { return APPLY_DELTA(value, ACTIVE_DELTA); }\n"
         "#else\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#endif\n"
@@ -3301,8 +3518,20 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char overdepth_include_source[] =
         "#include \"/home/user/generated-deep1.h\"\n";
     static const char malformed_define_source[] =
-        "#define BAD(value) 2\n"
+        "#define BAD(value, value) 2\n"
         "int answer(int value) { return value + BAD; }\n";
+    static const char malformed_macro_parameters_source[] =
+        "#define FIVE(a, b, c, d, e) ((a) + (b))\n"
+        "int answer(int value) { return FIVE(value, 1, 2, 3, 4); }\n";
+    static const char malformed_macro_arity_source[] =
+        "#define PAIR(first, second) ((first) + (second))\n"
+        "int answer(int value) { return PAIR(value); }\n";
+    static const char malformed_macro_recursion_source[] =
+        "#define LOOP(value) LOOP(value)\n"
+        "int answer(int value) { return LOOP(value); }\n";
+    static const char malformed_macro_token_operation_source[] =
+        "#define TEXT(value) #value\n"
+        "int answer(int value) { return value; }\n";
     static const char unmatched_endif_source[] = "#endif\n";
     static const char unterminated_ifndef_source[] =
         "#ifndef NEVER_DEFINED\n"
@@ -3609,7 +3838,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         }
         if (include_dependencies.count != 2) fail(83);
         if (include_dependencies.max_depth != 2) fail(84);
-        if (include_dependencies.macro_count != 4) fail(85);
+        if (include_dependencies.macro_count != 6) fail(85);
         if (include_dependencies.max_conditional_depth != 2) fail(86);
         if (!same_name(include_dependencies.paths[0],
                        include_dependencies.path_lengths[0],
@@ -3643,6 +3872,26 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             expand_build_source(
                 &build, 1, (const uint8_t *)malformed_define_source,
                 sizeof(malformed_define_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1,
+                (const uint8_t *)malformed_macro_parameters_source,
+                sizeof(malformed_macro_parameters_source) - 1,
+                include_output, sizeof(include_output),
+                &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)malformed_macro_arity_source,
+                sizeof(malformed_macro_arity_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)malformed_macro_recursion_source,
+                sizeof(malformed_macro_recursion_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1,
+                (const uint8_t *)malformed_macro_token_operation_source,
+                sizeof(malformed_macro_token_operation_source) - 1,
+                include_output,
                 sizeof(include_output), &include_dependencies) != 0 ||
             expand_build_source(
                 &build, 1, (const uint8_t *)unmatched_endif_source,
@@ -3694,15 +3943,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                 sizeof(include_output), &include_dependencies) != 0)
             fail(90);
         write_text("MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK "
-                   "headers=2 max_depth=2 macros=4 conditional_depth=2 "
+                   "headers=2 max_depth=2 macros=6 conditional_depth=2 "
                    "include_guard=deduplicated missing=denied "
                    "relative=denied cycle=denied overdepth=denied "
+                   "macro_expansion=text,function-like parameters=4 "
+                   "expansion_depth=8 "
                    "if_expression=defined,numeric,arithmetic,shift,"
                    "comparison,bitwise,not,and,or,short-circuit,conditional "
                    "elif=selected malformed=define,endif,unterminated,"
                    "duplicate-else,expression,elif-after-else,zero-divisor,"
                    "shift-range,overflow,conditional-syntax,"
-                   "conditional-selected-trap-denied "
+                   "conditional-selected-trap,macro-parameters,macro-arity,"
+                   "macro-recursion,macro-token-op-denied "
                    "depth_limit=4\n");
     }
     if (build_mode) {
