@@ -27,6 +27,19 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The first exact tracked repository-native component now passes the bounded
+  guest self-host path. `kernel/build.rs` reads the 440-byte
+  `user/aarch64_selfhost_probe.c` and 53-byte
+  `user/aarch64_selfhost_probe.S`, compiles the C source to a host AArch64
+  reference object, and generates exact source byte arrays plus FNV-1a
+  identities for the sandboxed EL0 toolchain. MakOS persists those bytes and a
+  two-input manifest to MakFS; authenticated `makbuild` passes cold `0/2` and
+  warm `2/0`, then authenticated `run` loads the guest-linked ELF and reaps
+  status 42. Focused Pi/QEMU 10.0.11 TCG runtime, structural guard, artifact
+  validation, full `make unit`/`make check`, Firefox-role production SMP,
+  Native SMP, and cursor runtime pass. This is genuine repository source
+  identity and guest compilation, not yet a substantial in-guest MakOS build;
+  SDK/self-hosting remain Partial.
 - The guest-native AArch64 build driver now resolves exact absolute quoted
   include directives recursively through guest MakFS, including directives
   after ordinary C definitions. Resolution is bounded to four nested headers
@@ -79,13 +92,13 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG preprocessing milestone: PID 766987,
-  user service `makos-visible-selfhost-preprocessor-final.service`, session
-  `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr`, private
+- Active visible Pi/QEMU 10.0.11 TCG repository-source milestone: PID 775104,
+  user service `makos-visible-selfhost-repository-final.service`, session
+  `build/makos-pi-visible-selfhost-repository-final-JJyWajUO`, private
   read-only `boot.img`, sparse `data.img`, private `vars.fd`, `qmp.sock`,
-  `serial.log`, `qemu.pid`, and `login.ppm`. The boot clone and current
+  `serial.log`, and `login.ppm`. The boot clone and current
   release image both have SHA-256
-  `a79936417914babaa50e31dcd300bac175f8c78ee1779312e932216ca45adf37`;
+  `3b03a276d5c6f6ab1c0654860088f1054087c82b9b5698a3b7fb9d2aa9d9e4b6`;
   the 800x600 QMP login capture has SHA-256
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   It reports `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, four online PEs,
@@ -93,6 +106,10 @@ Preserve existing files and changes.
   build lacks the optional VNC module, so live display is disabled while the
   guest remains fully inspectable and controllable through QMP captures/input.
   It is the sole QEMU process. Stop it with QMP `quit` before any runtime gate.
+- Prior visible preprocessing milestone PID 766987, service
+  `makos-visible-selfhost-preprocessor-final.service`, session
+  `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr`, was stopped
+  cleanly through QMP before this increment; its private files remain.
 - Prior visible Pi/QEMU 10.0.11 TCG transitive-header milestone: PID 749533,
   user service `makos-visible-selfhost-transitive-header-final.service`,
   session
@@ -584,11 +601,13 @@ Preserve existing files and changes.
   nested headers/eight dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 766987 in
-  `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr` is the sole
+- At this handoff PID 775104 in
+  `build/makos-pi-visible-selfhost-repository-final-JJyWajUO` is the sole
   QEMU and no runtime-test harness is active. Check process state before every
   runtime gate and stop this guest through its recorded QMP socket; never start
-  concurrent QEMU. PID 749533 in
+  concurrent QEMU. PID 766987 in
+  `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr` was stopped
+  cleanly through QMP before this increment. PID 749533 in
   `build/makos-pi-visible-selfhost-transitive-header-final-eFN3BPGd` was
   stopped cleanly through its recorded QMP socket before this increment.
   During final regression, two unchanged current-image Native SMP runs timed

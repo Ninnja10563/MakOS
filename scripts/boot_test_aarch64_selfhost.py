@@ -20,6 +20,26 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 IMAGE = pathlib.Path(
     os.environ.get("MAKOS_AARCH64_IMAGE", ROOT / "build/makos-aarch64.img")
 )
+
+
+def fnv1a(data: bytes) -> int:
+    value = 14695981039346656037
+    for byte in data:
+        value = ((value ^ byte) * 1099511628211) & ((1 << 64) - 1)
+    return value
+
+
+REPOSITORY_C_SOURCE = (ROOT / "user/aarch64_selfhost_probe.c").read_bytes()
+REPOSITORY_ASM_SOURCE = (ROOT / "user/aarch64_selfhost_probe.S").read_bytes()
+REPOSITORY_SOURCE_MARKER = (
+    "MAKOS_AARCH64_REPOSITORY_SOURCE_OK "
+    "c=user/aarch64_selfhost_probe.c asm=user/aarch64_selfhost_probe.S "
+    f"c_bytes={len(REPOSITORY_C_SOURCE)} "
+    f"asm_bytes={len(REPOSITORY_ASM_SOURCE)} "
+    f"c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} "
+    f"asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} "
+    "identity=build-generated-exact host_reference=compiled"
+).encode()
 LINKER_MARKER = (
     b"MAKOS_AARCH64_LINKER_OK sources=4 languages=aarch64-asm,c-subset-v1 "
     b"compiler=guest-native assembler=guest-native objects=4 "
@@ -119,6 +139,27 @@ HEADER_CLI_REAP_MARKER = (
 )
 HEADER_RUN_MARKER = (
     b"MAKOS_AARCH64_RUN_OK path=/home/user/generated-header.elf status=42 "
+    b"lifecycle=spawn,run,exit,wait,reap"
+)
+REPOSITORY_COLD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/makos-repo-probe.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=0 cache_misses=2 "
+    b"state_committed=1 status=42"
+)
+REPOSITORY_WARM_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/makos-repo-probe.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=2 cache_misses=0 "
+    b"state_committed=1 status=42"
+)
+REPOSITORY_CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK "
+    b"manifest=/home/user/makos-repo-probe.build source=existing-makfs "
+    b"seeded=0 startup=sysv status=42"
+)
+REPOSITORY_RUN_MARKER = (
+    b"MAKOS_AARCH64_RUN_OK path=/home/user/makos-repo-probe.elf status=42 "
     b"lifecycle=spawn,run,exit,wait,reap"
 )
 SIX_FUNCTION_MARKER = (
@@ -273,6 +314,9 @@ def main() -> int:
                 common.send_command(stream, "selfhost-aarch64")
                 common.wait_for_output(
                     selector, process, output, FIXTURE_BUILD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, REPOSITORY_SOURCE_MARKER, 60
                 )
                 common.wait_for_output(
                     selector, process, output, HEADER_GUARD_MARKER, 60
@@ -448,6 +492,28 @@ def main() -> int:
                 common.wait_for_output_count(
                     selector, process, output, HEADER_CLI_REAP_MARKER, 4, 60
                 )
+                common.send_command(
+                    stream, "makbuild /home/user/makos-repo-probe.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, REPOSITORY_COLD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, REPOSITORY_CLI_REAP_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/makos-repo-probe.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, REPOSITORY_WARM_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, REPOSITORY_CLI_REAP_MARKER, 2, 60
+                )
+                common.send_command(stream, "run makos-repo-probe.elf")
+                common.wait_for_output(
+                    selector, process, output, REPOSITORY_RUN_MARKER, 60
+                )
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
         finally:
@@ -463,9 +529,10 @@ def main() -> int:
         "compiler=guest-native assembler=guest-native objects=4 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
-        "toolchain_startup=sysv manifest_arg=1 cli_builds=12 seeded_modes=fixture,existing "
-        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2 invalidations=object,source,state,header "
-        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0 "
+        "toolchain_startup=sysv manifest_arg=1 cli_builds=14 seeded_modes=fixture,existing "
+        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2 invalidations=object,source,state,header "
+        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0 "
+        f"repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes={len(REPOSITORY_C_SOURCE)} asm_bytes={len(REPOSITORY_ASM_SOURCE)} c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} identity=build-generated-exact host_reference=compiled guest_execution=42 "
         "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-conditionals macros=3 conditional_depth=2 include_guard=deduplicated fingerprint=expanded-source malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else-denied transitive_header_execution=42 "
         "translation_unit_functions=2,1,1 "
         "max_functions_per_unit=6 six_function_calls=5 six_function_result=42 "

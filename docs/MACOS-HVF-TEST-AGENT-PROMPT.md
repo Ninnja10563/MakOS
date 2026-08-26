@@ -53,11 +53,19 @@ Branch: main
    conditional depth two, include-guard deduplication, and an expanded-source
    fingerprint. Missing, relative, cyclic, and over-depth
    headers must remain denied at depth limit four; the final host marker must
-   contain `runtime_graphs=4,3,2`,
+   contain `runtime_graphs=4,3,2,2`,
    `invalidations=object,source,state,header`, and
    `header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-conditionals macros=3 conditional_depth=2 include_guard=deduplicated fingerprint=expanded-source`
    plus
    `malformed_preprocessor=define,endif,unterminated,duplicate-else-denied`.
+   It must additionally prove the exact repository-source marker
+   `MAKOS_AARCH64_REPOSITORY_SOURCE_OK c=user/aarch64_selfhost_probe.c asm=user/aarch64_selfhost_probe.S c_bytes=440 asm_bytes=53 c_fnv1a=5d0b854c29106f84 asm_fnv1a=7ad8871bd0e68af4 identity=build-generated-exact host_reference=compiled`.
+   Require the separate `/home/user/makos-repo-probe.build` graph to report
+   cold `0/2`, warm `2/0`, and
+   `MAKOS_AARCH64_RUN_OK path=/home/user/makos-repo-probe.elf status=42`.
+   The final host marker must contain `cli_builds=14`,
+   `runtime_graphs=4,3,2,2`, and
+   `repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes=440 asm_bytes=53 c_fnv1a=5d0b854c29106f84 asm_fnv1a=7ad8871bd0e68af4 identity=build-generated-exact host_reference=compiled guest_execution=42`.
    The Native gate must
    report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero

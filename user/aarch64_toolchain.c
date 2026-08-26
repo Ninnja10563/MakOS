@@ -1,6 +1,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aarch64-selfhost-sources.inc"
+
 enum {
     SYS_WRITE = 0,
     SYS_EXIT = 5,
@@ -59,6 +61,26 @@ static void write_bytes(const void *bytes, size_t count) {
 }
 
 static void write_text(const char *text) { write_bytes(text, length(text)); }
+
+static void write_size_decimal(size_t value) {
+    char digits[20];
+    size_t count = 0;
+    do {
+        digits[count++] = (char)('0' + value % 10);
+        value /= 10;
+    } while (value && count < sizeof(digits));
+    while (count) write_bytes(&digits[--count], 1);
+}
+
+static void write_hex64(uint64_t value) {
+    static const char digits[] = "0123456789abcdef";
+    char output[16];
+    for (size_t index = 0; index < sizeof(output); ++index) {
+        size_t shift = (sizeof(output) - index - 1) * 4;
+        output[index] = digits[(value >> shift) & 15];
+    }
+    write_bytes(output, sizeof(output));
+}
 
 static size_t align_up(size_t value, size_t alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
@@ -2605,6 +2627,20 @@ static void write_header_marker(const struct build_manifest *build,
     write_text(" include_guard=deduplicated fingerprint=expanded-source\n");
 }
 
+static void write_repository_source_marker(void) {
+    write_text("MAKOS_AARCH64_REPOSITORY_SOURCE_OK "
+               "c=user/aarch64_selfhost_probe.c "
+               "asm=user/aarch64_selfhost_probe.S c_bytes=");
+    write_size_decimal(REPOSITORY_SELFHOST_C_SOURCE_LENGTH);
+    write_text(" asm_bytes=");
+    write_size_decimal(REPOSITORY_SELFHOST_ASM_SOURCE_LENGTH);
+    write_text(" c_fnv1a=");
+    write_hex64(REPOSITORY_SELFHOST_C_SOURCE_FNV1A);
+    write_text(" asm_fnv1a=");
+    write_hex64(REPOSITORY_SELFHOST_ASM_SOURCE_FNV1A);
+    write_text(" identity=build-generated-exact host_reference=compiled\n");
+}
+
 static void fail(uint64_t status) {
     syscall4(SYS_EXIT, status, 0, 0, 0);
     for (;;) __asm__ volatile("wfe");
@@ -2617,6 +2653,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "/home/user/generated-three.build";
     static const char header_manifest_path[] =
         "/home/user/generated-header.build";
+    static const char repository_manifest_path[] =
+        "/home/user/makos-repo-probe.build";
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
     static const char library_source_path[] = "/home/user/generated-library.c";
@@ -2634,6 +2672,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char deep2_header_path[] = "/home/user/generated-deep2.h";
     static const char deep3_header_path[] = "/home/user/generated-deep3.h";
     static const char deep4_header_path[] = "/home/user/generated-deep4.h";
+    static const char repository_asm_path[] =
+        "/home/user/makos-repo-probe.s";
+    static const char repository_c_path[] =
+        "/home/user/makos-repo-probe.c";
     static const char build_manifest_source[] =
         "MAKBUILD1\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -2652,6 +2694,11 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "asm /home/user/generated-header.s /home/user/generated-header-main.o\n"
         "c /home/user/generated-header.c /home/user/generated-header-c.o\n"
         "link /home/user/generated-header.elf _start\n";
+    static const char repository_manifest_source[] =
+        "MAKBUILD1\n"
+        "asm /home/user/makos-repo-probe.s /home/user/makos-repo-probe-main.o\n"
+        "c /home/user/makos-repo-probe.c /home/user/makos-repo-probe-c.o\n"
+        "link /home/user/makos-repo-probe.elf _start\n";
     static const char malformed_build_header[] =
         "MAKBUILD0\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -2941,6 +2988,17 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                      sizeof(header_manifest_path) - 1,
                      (const uint8_t *)header_manifest_source,
                      sizeof(header_manifest_source) - 1) ||
+         !write_file(repository_manifest_path,
+                     sizeof(repository_manifest_path) - 1,
+                     (const uint8_t *)repository_manifest_source,
+                     sizeof(repository_manifest_source) - 1) ||
+         !write_file(repository_asm_path,
+                     sizeof(repository_asm_path) - 1,
+                     REPOSITORY_SELFHOST_ASM_SOURCE,
+                     REPOSITORY_SELFHOST_ASM_SOURCE_LENGTH) ||
+         !write_file(repository_c_path, sizeof(repository_c_path) - 1,
+                     REPOSITORY_SELFHOST_C_SOURCE,
+                     REPOSITORY_SELFHOST_C_SOURCE_LENGTH) ||
          !write_file(main_source_path, sizeof(main_source_path) - 1,
                      (const uint8_t *)main_source, sizeof(main_source) - 1) ||
          !write_file(program_source_path, sizeof(program_source_path) - 1,
@@ -2985,6 +3043,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                      (const uint8_t *)deep4_header_source,
                      sizeof(deep4_header_source) - 1)))
         fail(80);
+    if (fixture_mode) {
+        if (build_hash(REPOSITORY_SELFHOST_C_SOURCE,
+                       REPOSITORY_SELFHOST_C_SOURCE_LENGTH) !=
+                REPOSITORY_SELFHOST_C_SOURCE_FNV1A ||
+            build_hash(REPOSITORY_SELFHOST_ASM_SOURCE,
+                       REPOSITORY_SELFHOST_ASM_SOURCE_LENGTH) !=
+                REPOSITORY_SELFHOST_ASM_SOURCE_FNV1A)
+            fail(80);
+        write_repository_source_marker();
+    }
     uint8_t manifest_input[512] = {0};
     size_t manifest_length = read_file(
         build_manifest_path, build_manifest_path_length,

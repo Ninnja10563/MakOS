@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -22,6 +24,8 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_scheduler.S");
     println!("cargo:rerun-if-changed=../user/aarch64_shell.c");
     println!("cargo:rerun-if-changed=../user/aarch64_toolchain.c");
+    println!("cargo:rerun-if-changed=../user/aarch64_selfhost_probe.c");
+    println!("cargo:rerun-if-changed=../user/aarch64_selfhost_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_ipc_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_exit_group_probe.S");
@@ -69,6 +73,7 @@ fn build_aarch64_init() {
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     build_aarch64_micropython(&manifest, &output_dir);
     build_aarch64_musl_probe(&manifest, &output_dir);
+    generate_aarch64_selfhost_sources(&manifest, &output_dir);
     let object = output_dir.join("aarch64-init.o");
     let scheduler_object = output_dir.join("aarch64-scheduler.o");
     let output = output_dir.join("aarch64-init.elf");
@@ -206,8 +211,10 @@ fn build_aarch64_init() {
             "-fno-asynchronous-unwind-tables",
             "-mgeneral-regs-only",
             "-Os",
-            "-c",
+            "-I",
         ])
+        .arg(&output_dir)
+        .arg("-c")
         .arg(manifest.join("../user/aarch64_toolchain.c"))
         .arg("-o")
         .arg(&toolchain_object)
@@ -820,6 +827,96 @@ fn build_aarch64_init() {
         .status()
         .expect("failed to link AArch64 SysV startup probe");
     assert!(status.success(), "AArch64 SysV startup probe link failed");
+}
+
+fn generate_aarch64_selfhost_sources(manifest: &Path, output_dir: &Path) {
+    let c_path = manifest.join("../user/aarch64_selfhost_probe.c");
+    let assembly_path = manifest.join("../user/aarch64_selfhost_probe.S");
+    let c_source = fs::read(&c_path).expect("failed to read canonical self-host C source");
+    let assembly_source =
+        fs::read(&assembly_path).expect("failed to read canonical self-host assembly source");
+    assert!(
+        !c_source.is_empty() && !assembly_source.is_empty(),
+        "canonical self-host sources must not be empty"
+    );
+
+    let mut generated = String::from(
+        "/* Generated from exact repository source bytes by kernel/build.rs. */\n",
+    );
+    append_c_byte_array(
+        &mut generated,
+        "REPOSITORY_SELFHOST_C_SOURCE",
+        &c_source,
+    );
+    append_c_byte_array(
+        &mut generated,
+        "REPOSITORY_SELFHOST_ASM_SOURCE",
+        &assembly_source,
+    );
+    fs::write(
+        output_dir.join("aarch64-selfhost-sources.inc"),
+        generated,
+    )
+    .expect("failed to write canonical self-host source include");
+
+    let reference_object = output_dir.join("aarch64-selfhost-reference.o");
+    let status = Command::new("clang")
+        .args([
+            "-target",
+            "aarch64-unknown-none-elf",
+            "-std=c17",
+            "-ffreestanding",
+            "-fno-builtin",
+            "-fno-stack-protector",
+            "-fno-pic",
+            "-fno-unwind-tables",
+            "-fno-asynchronous-unwind-tables",
+            "-mgeneral-regs-only",
+            "-Os",
+            "-c",
+        ])
+        .arg(&c_path)
+        .arg("-o")
+        .arg(&reference_object)
+        .status()
+        .expect("failed to compile canonical self-host reference object");
+    assert!(
+        status.success(),
+        "canonical self-host reference object compile failed"
+    );
+}
+
+fn append_c_byte_array(output: &mut String, name: &str, bytes: &[u8]) {
+    writeln!(output, "static const uint8_t {name}[] = {{").unwrap();
+    for chunk in bytes.chunks(16) {
+        output.push_str("    ");
+        for byte in chunk {
+            write!(output, "0x{byte:02x}, ").unwrap();
+        }
+        output.push('\n');
+    }
+    writeln!(output, "}};").unwrap();
+    writeln!(
+        output,
+        "static const size_t {name}_LENGTH = {};",
+        bytes.len()
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "static const uint64_t {name}_FNV1A = UINT64_C(0x{:016x});",
+        fnv1a(bytes)
+    )
+    .unwrap();
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 14_695_981_039_346_656_037u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    hash
 }
 
 fn build_aarch64_musl_probe(manifest: &std::path::Path, output_dir: &std::path::Path) {

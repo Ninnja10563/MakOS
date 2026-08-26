@@ -13,6 +13,8 @@ SECURITY = (ROOT / "kernel/src/security.rs").read_text()
 BUILD = (ROOT / "kernel/build.rs").read_text()
 RUNTIME = (ROOT / "scripts/boot_test_aarch64.py").read_text()
 FOCUSED_RUNTIME = (ROOT / "scripts/boot_test_aarch64_selfhost.py").read_text()
+REPOSITORY_C = (ROOT / "user/aarch64_selfhost_probe.c").read_text()
+REPOSITORY_ASM = (ROOT / "user/aarch64_selfhost_probe.S").read_text()
 
 
 def require(source: str, fragment: str) -> None:
@@ -340,6 +342,40 @@ for fragment in (
     require(ARCH, fragment)
 
 require(BUILD, "../user/aarch64_toolchain.c")
+for fragment in (
+    "../user/aarch64_selfhost_probe.c",
+    "../user/aarch64_selfhost_probe.S",
+    "generate_aarch64_selfhost_sources(&manifest, &output_dir)",
+    "fn generate_aarch64_selfhost_sources(",
+    'output_dir.join("aarch64-selfhost-sources.inc")',
+    'output_dir.join("aarch64-selfhost-reference.o")',
+    "append_c_byte_array(",
+    "fn fnv1a(",
+):
+    require(BUILD, fragment)
+for fragment in (
+    '#include "aarch64-selfhost-sources.inc"',
+    "REPOSITORY_SELFHOST_C_SOURCE",
+    "REPOSITORY_SELFHOST_ASM_SOURCE",
+    "REPOSITORY_SELFHOST_C_SOURCE_FNV1A",
+    "REPOSITORY_SELFHOST_ASM_SOURCE_FNV1A",
+    "MAKOS_AARCH64_REPOSITORY_SOURCE_OK",
+    '"/home/user/makos-repo-probe.build"',
+    '"/home/user/makos-repo-probe.c"',
+    '"/home/user/makos-repo-probe.s"',
+    '"link /home/user/makos-repo-probe.elf _start\\n"',
+    "identity=build-generated-exact host_reference=compiled",
+):
+    require(TOOLCHAIN, fragment)
+for fragment in (
+    "int makos_sum3(",
+    "int makos_adjust(",
+    "int makos_probe(",
+    "return makos_adjust(values, 1);",
+):
+    require(REPOSITORY_C, fragment)
+for fragment in ("_start:", "bl makos_probe", "mov x8, #5", "svc #0"):
+    require(REPOSITORY_ASM, fragment)
 require(TOOLCHAIN, "parameter_pointers")
 require(TOOLCHAIN, "compiler->parameter_pointers[parameter]")
 require(TOOLCHAIN, "static int c_pointer_expression(")
@@ -424,6 +460,11 @@ require(FOCUSED_RUNTIME, "HEADER_SELECTIVE_MARKER")
 require(FOCUSED_RUNTIME, "HEADER_DEP_MARKER")
 require(FOCUSED_RUNTIME, "HEADER_GUARD_MARKER")
 require(FOCUSED_RUNTIME, "HEADER_RUN_MARKER")
+require(FOCUSED_RUNTIME, "REPOSITORY_SOURCE_MARKER")
+require(FOCUSED_RUNTIME, "REPOSITORY_COLD_MARKER")
+require(FOCUSED_RUNTIME, "REPOSITORY_WARM_MARKER")
+require(FOCUSED_RUNTIME, "REPOSITORY_CLI_REAP_MARKER")
+require(FOCUSED_RUNTIME, "REPOSITORY_RUN_MARKER")
 require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "THREE_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "cache_hits=4 cache_misses=0")
@@ -436,7 +477,11 @@ require(FOCUSED_RUNTIME, "makbuild /home/user/generated-three.build")
 require(FOCUSED_RUNTIME, "makbuild /home/user/generated-header.build")
 require(FOCUSED_RUNTIME, "write generated-leaf.h")
 require(FOCUSED_RUNTIME, "run generated-header.elf")
-require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2")
+require(FOCUSED_RUNTIME, "makbuild /home/user/makos-repo-probe.build")
+require(FOCUSED_RUNTIME, "run makos-repo-probe.elf")
+require(FOCUSED_RUNTIME, "cli_builds=14")
+require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2")
+require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled guest_execution=42")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
 require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-conditionals macros=3 conditional_depth=2 include_guard=deduplicated fingerprint=expanded-source")
 require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else-denied transitive_header_execution=42")

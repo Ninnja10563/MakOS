@@ -254,6 +254,28 @@ Run the focused gate with:
 make test-aarch64-selfhost-runtime
 ```
 
+The focused gate also proves a repository-source path that is distinct from
+the synthetic language fixtures. `kernel/build.rs` reads the exact bytes of
+`user/aarch64_selfhost_probe.c` and `user/aarch64_selfhost_probe.S`, compiles
+the C file once with the configured host AArch64 clang as
+`aarch64-selfhost-reference.o`, and generates the byte include consumed by the
+guest toolchain. Fixture mode validates FNV-1a identities before writing those
+same bytes to `/home/user/makos-repo-probe.c` and
+`/home/user/makos-repo-probe.s`, alongside this manifest:
+
+```text
+MAKBUILD1
+asm /home/user/makos-repo-probe.s /home/user/makos-repo-probe-main.o
+c /home/user/makos-repo-probe.c /home/user/makos-repo-probe-c.o
+link /home/user/makos-repo-probe.elf _start
+```
+
+The runtime requires the exact source marker (440 C bytes, 53 assembly bytes,
+FNV-1a `5d0b854c29106f84` and `7ad8871bd0e68af4`), a cold guest build with two
+misses, a warm build with two hits, and `run makos-repo-probe.elf` exiting 42.
+Changing either tracked source changes the generated identity and the runtime
+expectation together; a hard-coded substitute cannot satisfy the gate.
+
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
@@ -273,7 +295,8 @@ separate three-input manifest plus a two-input quoted-header graph, and focused
 runtime builds all three. The current CLI remains bounded to one leading assembly
 input plus one through five C inputs. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
-in-guest OS build.
+in-guest OS build. The repository probe is the first exact tracked component,
+not a claim that MakOS can yet build substantial parts of itself.
 
 `makbuild` now persists a bounded incremental cache beside the manifest as
 `<manifest>.state`; consequently the manifest path itself is limited to 90
