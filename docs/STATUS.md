@@ -4,6 +4,31 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 implementation baseline
+  `7c01848e9098d8c5f44bd51f542ca06da592e7fe` adds a fifth persistent,
+  authenticated guest build graph. `makbuild /home/user/generated-nested.build`
+  reads one assembly and two C inputs from MakFS, cold-builds `0/3`, warm-builds
+  `3/0`, links 564 code bytes under a 1,024-byte aggregate bound, and writes a
+  1,583-byte two-`PT_LOAD` ELF with its non-executable provenance segment at
+  offset 1,536. The ordinary authenticated `run` loader executes and reaps it
+  with status 42, proving the persisted `while`→`if`/`else` result rather than
+  only the toolchain's direct W^X fixture. The focused Pi/QEMU 10.0.11 TCG gate
+  passes 16 CLI builds and all 17 toolchain processes, placements `2,5,10`,
+  dispatches `205,210,206`, 47 natural migrations, zero evidence drops, and
+  status 42. Two earlier focused attempts exposed repeatable virtio-GPU
+  completion starvation during long AP-terminal workloads; control and cursor
+  queues now retain the 10,000,000-spin fast path, add a bounded
+  200,000,000-spin recovery path, and emit paired delayed/recovered or explicit
+  timeout/error evidence. Final self-host and cursor runs report zero delayed
+  recoveries, timeouts, or errors. Release image/artifacts, structural tests,
+  and full `make unit check` pass. Native/Python SMP also passes with dispatches
+  `11768,15036,11841`, two Native migrations, one Python-role migration, and
+  both statuses 42. One unchanged production Firefox-role attempt hit a QEMU
+  user-network DNS transport failure; its unchanged retry completed DNS/HTTP
+  but missed the 60-second final marker under Pi pressure (583 MiB available,
+  1.2 GiB swap used). No threshold changed. This remains Pi functional
+  evidence only; a fresh patch-0057 Firefox package and unchanged strict
+  idle-macOS/HVF qualification remain the Firefox priority.
 - 2026-08-26 the guest-native AArch64 C seed now generates bounded nested
   control flow to depth four. Branch and loop bodies may contain assignments,
   nested `if`/`else`, and nested `while`; declarations inside those bodies

@@ -27,6 +27,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- Implementation baseline `7c01848e9098d8c5f44bd51f542ca06da592e7fe`
+  adds a fifth persistent authenticated `MAKBUILD1` graph: one assembly plus
+  two C objects are cold-built `0/3`, warm-reused `3/0`, linked to 564 code
+  bytes under a 1,024-byte aggregate bound, written as a 1,583-byte
+  two-`PT_LOAD` ELF with data offset 1,536, and executed/reaped by the ordinary
+  guest loader with status 42. Focused Pi/QEMU 10.0.11 TCG passes 16 CLI builds
+  and all 17 toolchain processes with placements `2,5,10`, dispatches
+  `205,210,206`, 47 migrations, zero drops, and status 42. A repeatable
+  virtio-GPU completion failure found during two earlier long terminal runs is
+  now bounded and observable: the unchanged 10,000,000-spin fast path extends
+  to a 200,000,000-spin recovery ceiling with paired delayed/recovered markers
+  and explicit timeout/error markers for control and cursor queues. Final
+  self-host and seven-position/zero-scanout cursor gates pass with zero delayed
+  recoveries, timeouts, or errors. Full `make unit check`, image/artifacts, and
+  Native/Python SMP pass. Production Firefox-role attempt one hit transient
+  QEMU user-network DNS failure; the unchanged retry passed DNS/HTTP but missed
+  its 60-second final marker under Pi pressure. No threshold changed. This is
+  Pi functional evidence only. The fresh patch-0057 package and unchanged
+  strict idle-macOS/HVF Firefox gate remain first priority.
 - The guest-native AArch64 C seed now supports nested assignment/control bodies
   to an explicit maximum depth of four. Branches and loops may recursively
   contain assignments, `if`/`else`, and `while`; a fifth level and branch-local
@@ -1158,8 +1177,10 @@ Preserve existing files and changes.
 
 ## Next actions
 
-1. On the intended macOS/HVF host, when no visible QEMU runs and host
-   load/memory pressure is low, rerun unchanged
+1. On the intended macOS/HVF host, first build/package Firefox with patch 0057
+   and create a new provenance-validated integrated image; the historical
+   `a9c604254f094de2` image is not valid for this increment. When no visible
+   QEMU runs and host load/memory pressure is low, run unchanged
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
@@ -1172,10 +1193,11 @@ Preserve existing files and changes.
    while retaining CPU0-exclusive device ownership. Stop any visible QEMU
    through QMP before a focused runtime.
 3. Expand the bounded guest C compiler beyond its current six-function and
-   six-parameter per-translation-unit limits. The primary runtime graph now
-   spans four objects (with one same-object call, two cross-object calls, and
-   one independent helper) and the build driver accepts two through six
-   inputs. Continue beyond signed typed-pointer arithmetic into
+   six-parameter per-translation-unit limits. Five persistent runtime graphs
+   now include the primary four-object graph and a three-object nested-control
+   graph whose 564 linked bytes pass the expanded 1,024-byte aggregate bound;
+   the build driver accepts two through six inputs. Continue beyond signed
+   typed-pointer arithmetic into
    provenance-aware/broader pointer and lvalue expressions,
    variable-length/global/multidimensional arrays, structs and nested/general
    blocks, then lift the function/parameter bounds further, add broader relocation/

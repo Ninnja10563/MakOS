@@ -81,6 +81,10 @@ while boot 2 injects primary-superblock and bitmap corruption before recovery.
 Focused `test-aarch64-cursor-runtime` uses a fresh private sparse data disk,
 moves the guest cursor through seven positions, and requires zero changed
 virtio-GPU scanout pixels. QEMU still renders the separate guest cursor plane.
+Both virtio-GPU queues retain a 10,000,000-spin fast completion path and use a
+bounded 200,000,000-spin recovery ceiling. Runtime gates reject timeout/error
+markers and require every delayed record to have a matching recovered record
+for the same queue and command.
 Focused `test-aarch64-firefox-runtime` requires the integrated Firefox package,
 and first runs a no-QEMU fail-closed preflight. The package must carry a
 canonical record for the pinned Firefox source commit and current ordered
@@ -215,7 +219,7 @@ discovers definitions and undefined symbols across all four, applies external
 `_start`→`answer`, same-object `answer`→`adjust`, and external
 `adjust`→`combine` `R_AARCH64_CALL26` relocations, includes the independent
 `helper` definition, and emits 500 code bytes in the
-815-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
+1,583-byte `/home/user/generated-aarch64.elf`. Fully linked RX calls require
 `answer(20)=42`, `answer(0)=86`, `adjust(forty,1)=42`,
 `adjust(scaled,2)=44`, and `adjust(zero,1)=2`, with the three-element direct-call arrays also
 required to become `41:42:0`, `42:0:44`, and `1:2:0`. Separate RX probes cover
@@ -328,8 +332,9 @@ that path into the sandboxed toolchain's child-owned SysV `argv[1]`; build mode
 reads the existing MakFS manifest and sources without seeding or overwriting
 them. The deterministic self-host fixture uses a separate `MODE=fixture` startup
 and is the only path that seeds the documented files. The fixture also seeds a
-separate three-input manifest plus a two-input quoted-header graph, and focused
-runtime builds all three. The current CLI remains bounded to one leading assembly
+separate three-input manifest, a two-input quoted-header graph, the exact
+two-input repository-source graph, and a three-input nested-control graph;
+focused runtime builds all five. The current CLI remains bounded to one leading assembly
 input plus one through five C inputs. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build. The repository probe is the first exact tracked component,
@@ -419,15 +424,20 @@ The focused runtime proves four-input cold `0/4`, warm `4/0`, corrupt-object
 `3/1`, warm `4/0`, changed-source `3/1`, warm `4/0`, and corrupt-state `0/4`
 hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`, plus
 header-graph cold `0/2`, warm `2/0`, edited-header `1/1`, and rewarm `2/0`
-results. All fourteen authenticated CLI builds link and reap with status
-42; the state-invalidated build re-establishes a valid cache. This is bounded
+results. The nested-control graph then proves cold `0/3` and warm `3/0`, emits
+564 linked code bytes under the 1,024-byte aggregate bound, writes a 1,583-byte
+two-segment ELF whose read-only/NX segment starts at offset 1,536, and executes
+that persisted output through the ordinary loader with status 42. All sixteen
+authenticated CLI builds link and reap with status 42; the state-invalidated
+build re-establishes a valid cache. This is bounded
 incremental reuse with bounded recursive quoted-header discovery, object/text
 and four-parameter function-like macros, include guards, and the documented
 expression subset—not a general preprocessor,
 parallel builds, an
 arbitrary graph beyond six inputs, a general dependency engine, or a trust
-mechanism. The linker also retains its 512-byte aggregate code bound and fails
-closed when a user-supplied accepted graph exceeds it.
+mechanism. The linker has a 1,024-byte aggregate code bound and fails closed
+when a user-supplied accepted graph exceeds it; individual build translation
+units retain their separate 512-byte code workspace.
 
 Linux uses equivalent Rust targets plus distro QEMU/OVMF packages. Image
 creation requires only Python 3 and does not mount filesystems.

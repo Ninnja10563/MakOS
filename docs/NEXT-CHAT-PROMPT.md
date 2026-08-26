@@ -1,5 +1,19 @@
 # MakOS next-chat prompt
 
+Current override (2026-08-26): implementation baseline
+`7c01848e9098d8c5f44bd51f542ca06da592e7fe` supersedes older self-host counts
+below. The focused Pi/TCG gate now covers five runtime graphs with input counts
+`4,3,2,2,3`, 16 authenticated CLI builds, and 17 Toolchain processes. The new
+nested-control graph cold-builds `0/3`, warm-reuses `3/0`, links 564 bytes under
+a 1,024-byte aggregate bound, emits a 1,583-byte ELF with data offset 1,536,
+and executes/reaps status 42 through the ordinary loader. Virtio-GPU control
+and cursor queues now have a 10,000,000-spin fast path plus bounded
+200,000,000-spin recovery with explicit delayed/recovered/timeout/error
+evidence. Final self-host, Native/Python SMP, cursor, full unit/check, and image
+gates pass on Pi; production Firefox-role was inconclusive under Pi pressure.
+No QEMU was running after those gates. A fresh patch-0057 Firefox package and
+the unchanged strict idle-macOS/HVF gate remain first priority.
+
 Continue MakOS from `/Users/marcushuang/Documents/Codex/2026-08-12/mak` and
 `docs/T3-CONTINUATION.md`. First read `docs/ORIGINAL-SPEC-AUDIT.md`,
 `docs/STATUS.md`, `docs/BUILD.md`, and original specification at
@@ -47,7 +61,7 @@ applies three `R_AARCH64_CALL26` relocations, rejects malformed C, relocation,
 unresolved-symbol, missing-library, and duplicate-definition inputs, rejects duplicate/over-limit
 parameters and over-limit calls, accepts up to six translation-unit functions
 with eight bounded relocations, rejects a seventh function,
-emits 500 linked bytes in an 815-byte `ET_EXEC`, directly executes
+emits 500 linked bytes in a 1,583-byte `ET_EXEC`, directly executes
 `helper(40)=42`, and separately compiles `sum3(int,int,int)` plus
 `invoke3(int)` into 140 bytes and a parsed 752-byte `ET_REL`, resolves its
 same-object `CALL26` with entry offset 80, and executes both as 42,
@@ -121,7 +135,8 @@ built-in/service roles remain Partial. Use
 `docs/MACOS-HVF-TEST-AGENT-PROMPT.md` to hand this large milestone to the
 macOS testing agent; it preserves every strict Firefox threshold.
 
-One visible Pi/QEMU TCG login milestone is running at handoff: PID 721926, user
+Historical visible Pi/QEMU TCG login milestone (stopped; do not treat its PID
+as live): PID 721926, user
 service `makos-visible-selfhost-six-argument-final.service`, VNC
 `127.0.0.1:5901`, session `build/makos-pi-visible-selfhost-six-argument-final-Rw5j5ib2`, private
 boot/data/vars in that session, and QMP

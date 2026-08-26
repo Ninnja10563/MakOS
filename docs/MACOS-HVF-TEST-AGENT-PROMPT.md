@@ -12,7 +12,7 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required implementation baseline: 07d8340596fa341e05219faef5d6a66d6192671e
+Required implementation baseline: 7c01848e9098d8c5f44bd51f542ca06da592e7fe
 
 Verify that the checked-out `main` contains this exact implementation commit.
 Do not test an older commit. A later documentation-only handoff commit is
@@ -68,7 +68,7 @@ acceptable if this baseline is its ancestor.
    feature set, include-guard deduplication, and an expanded-source
    fingerprint. Missing, relative, cyclic, and over-depth
    headers must remain denied at depth limit four; the final host marker must
-   contain `runtime_graphs=4,3,2,2`,
+   contain `runtime_graphs=4,3,2,2,3`,
    `invalidations=object,source,state,header`, and
    `header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=bounded-macro-if-expressions macros=6 conditional_depth=2 macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source`
    plus
@@ -78,11 +78,16 @@ acceptable if this baseline is its ancestor.
    Require the separate `/home/user/makos-repo-probe.build` graph to report
    cold `0/2`, warm `2/0`, and
    `MAKOS_AARCH64_RUN_OK path=/home/user/makos-repo-probe.elf status=42`.
-   The final host marker must contain `cli_builds=14`,
-   `runtime_graphs=4,3,2,2`, and
+   The final host marker must contain `cli_builds=16`,
+   `runtime_graphs=4,3,2,2,3`, and
    `repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes=440 asm_bytes=53 c_fnv1a=5d0b854c29106f84 asm_fnv1a=7ad8871bd0e68af4 identity=build-generated-exact host_reference=compiled guest_execution=42`.
-   It must also prove kernel-owned SMP placement for all 15 real Toolchain
-   processes. Require exactly 15
+   It must also prove the nested graph's cold `0/3`, warm `3/0`, two identical
+   `MAKOS_AARCH64_MAKBUILD_OUTPUT_OK` records with `linked_bytes=564`,
+   `output_bytes=1583`, `linked_capacity=1024`, `image_capacity=2048`, and
+   `data_offset=1536`, followed by
+   `MAKOS_AARCH64_RUN_OK path=/home/user/generated-nested.elf status=42`.
+   It must prove kernel-owned SMP placement for all 17 real Toolchain
+   processes. Require exactly 17
    `MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK` decisions, each with singleton AP
    affinity, the selected AP at the minimum recorded load, an idle AP selected
    whenever `idle_mask` is nonzero,
@@ -94,7 +99,7 @@ acceptable if this baseline is its ancestor.
    dispatches above target load, retain GPR/SP/TLS/SIMD context and
    Ready/unowned source publication, use SGI wake, preserve exclusive
    ownership, and report no caller-selected affinity. The final
-   `MAKOS_AARCH64_TOOLCHAIN_SMP_OK` must report `cpu_mask=0xe`, 15 total
+   `MAKOS_AARCH64_TOOLCHAIN_SMP_OK` must report `cpu_mask=0xe`, 17 total
    placements with every AP nonzero, every AP dispatch count nonzero,
    nonzero migrations, nonzero source/target masks contained in `0xe`,
    `migration_policy=timer-safe-dispatch-imbalance migration_delta=8`, and
@@ -104,7 +109,7 @@ acceptable if this baseline is its ancestor.
    `console_gpu_handoff=ap-defer,cpu0-compose` with positive owner compositions
    and AP deferrals, `pending=0`, and status 42. The final host marker must
    retain `toolchain_smp=kernel-least-loaded-ap`, `cpu_mask=0xe`,
-   `processes=15`, the same migration count/masks/policy with zero evidence
+   `processes=17`, the same migration count/masks/policy with zero evidence
    drops, `caller_selected=0`, `ownership=exclusive`,
    `device_mmio_owner=cpu0`, and the drained console/GPU handoff evidence.
    The Native gate must
@@ -133,8 +138,10 @@ acceptable if this baseline is its ancestor.
    must observe
    `MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,python,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle`.
    The cursor gate must retain seven positions,
-   zero changed scanout pixels, the virtio-GPU cursor plane, and hidden host
-   cursor.
+   zero changed scanout pixels, the virtio-GPU cursor plane, hidden host
+   cursor, `completion=fast-plus-bounded-recovery`, and zero GPU timeouts or
+   errors. Every delayed completion, if any, must have a matching recovered
+   record with the same queue and command.
 4. The historical `build/makos-integrated-a9c604254f094de2.img` predates
    Firefox patch `0057` and is not valid for this increment. Apply the complete
    pinned Firefox patch series to the pinned ESR source, require

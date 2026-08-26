@@ -193,7 +193,11 @@ build cannot bless partial output. Focused Pi/QEMU TCG runtime proves four-input
 hit/miss sequences `0/4`, `4/0`, `3/1`, `4/0`, `3/1`, `4/0`, and `0/4` for
 cold, warm, object corruption, rewarm, source edit, rewarm, and state
 corruption, followed by a separate three-input graph's cold `0/3` and warm
-`3/0` results. All eight CLI builds execute and reap with status 42.
+`3/0` results. A further persistent graph uses one assembly and two C inputs,
+cold-builds `0/3`, warm-reuses `3/0`, links 564 code bytes, emits a 1,583-byte
+two-segment ELF, and executes/reaps that file with status 42 through the normal
+loader. All sixteen authenticated CLI builds across the five focused graphs
+execute and reap with status 42.
 
 Pointer expressions also accept a scalar `int` parameter or non-address-taken
 scalar local as the element offset when the pointer's bound is unknown. AArch64
@@ -219,7 +223,7 @@ element addition and typed pointer difference, no pointer-provenance analysis
 or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs, nested/general blocks beyond the bounded depth-four
 assignment/control form, more than six functions or parameters per translation unit,
-more than six objects, aggregate linked code beyond 512 bytes, general
+more than six objects, aggregate linked code beyond 1,024 bytes, general
 relocations or preprocessing beyond the documented bounded subset,
 optimization, archives, dynamic linking, dependency/header discovery beyond
 the documented limits, variable
