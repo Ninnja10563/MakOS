@@ -348,15 +348,22 @@ either an empty replacement (for guards) or a signed decimal replacement of
 magnitude at most 65,535. It substitutes identifier tokens on active C lines
 and processes `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and `#endif`,
 bounded to four conditional levels within each source/header. `#if`/`#elif`
-use a bounded recursive evaluator for `defined(NAME)` or `defined NAME`,
-signed numeric literals and numeric object macros, unknown identifiers as
-zero, unary `!`, equality/relational operators, `&&`, and `||`, with C-like
-precedence. Exactly one branch may be selected. Redefinition, function-like
-defines, malformed/unbalanced expressions or conditionals, `#elif` after
-`#else`, and limit overflow fail closed. Each expanded header is capped at 768
-bytes. This is not a general preprocessor: it has no arithmetic, bitwise, or
-ternary expression operators, general function-like/text replacement, token
-pasting/stringification, system include search, or unbounded include graphs.
+use a bounded recursive evaluator with checked signed 32-bit semantics. It
+supports `defined(NAME)` or `defined NAME`, numeric literals and numeric
+object macros, unknown identifiers as zero, unary `+`, `-`, `!`, and `~`,
+multiplicative and additive arithmetic, shifts, equality/relations, bitwise
+`&`, `^`, and `|`, and short-circuit `&&` and `||`. The precedence and left
+associativity follow C for this subset. Active division or remainder by zero,
+invalid shift counts, negative or overflowing left shifts, and signed overflow
+fail closed; unevaluated logical operands are still parsed but do not trigger
+those semantic errors. Literal and macro magnitude remains capped at 65,535
+and every evaluated intermediate must fit `int32_t`. Exactly one branch may be
+selected. Redefinition, function-like defines, malformed/unbalanced
+expressions or conditionals, `#elif` after `#else`, and limit overflow fail
+closed. Each expanded header is capped at 1,024 bytes. This is not a general
+preprocessor: it has no ternary expression operator, general function-like/text
+replacement, token pasting/stringification, system include search, or
+unbounded include graphs.
 
 The fixture seeds `/home/user/generated-header.build`, a small assembly
 startup, `/home/user/generated-header.c`,
@@ -364,9 +371,10 @@ startup, `/home/user/generated-header.c`,
 defines a function before including the guarded root twice. The root's
 defined/undefined branches include a guarded leaf. That leaf sets
 `INCLUDED_DELTA=1`; a false `#if` is followed by a selected `#elif`, which
-defines `ACTIVE_DELTA=2` for the emitted function. A separate false compound
-expression remains inactive, and `1 == 2 < 3` selects the true arm only when
-relational precedence is applied before equality. The repeated root is
+defines `ACTIVE_DELTA=2` for the emitted function. The leaf also proves every
+new arithmetic, shift, and bitwise tier, C precedence with `1 == 2 < 3`, and
+short-circuit suppression of a zero divisor and invalid shift. Separate active
+zero-divisor, shift-range, and overflow fixtures fail closed. The repeated root is
 deduplicated and inactive missing-header branches are skipped. The focused gate
 builds this two-object graph cold (`0/2`) and warm
 (`2/0`), edits only the leaf header from the authenticated

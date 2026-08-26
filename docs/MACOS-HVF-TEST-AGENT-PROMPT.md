@@ -41,9 +41,9 @@ Branch: main
    `max_parameters=6`, `max_call_arguments=6`, `nonleaf_frame=96,112`, and
    `six_argument_object=elf64-et-rel:808`. It must also report the exact
    quoted-header/preprocessor guard and dependency markers:
-   `MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK headers=2 max_depth=2 macros=4 conditional_depth=2 include_guard=deduplicated missing=denied relative=denied cycle=denied overdepth=denied if_expression=defined,numeric,comparison,not,and,or elif=selected malformed=define,endif,unterminated,duplicate-else,expression,elif-after-else-denied depth_limit=4`
+   `MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK headers=2 max_depth=2 macros=4 conditional_depth=2 include_guard=deduplicated missing=denied relative=denied cycle=denied overdepth=denied if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit elif=selected malformed=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow-denied depth_limit=4`
    and
-   `MAKOS_AARCH64_C_HEADER_DEP_OK source=/home/user/generated-header.c root=/home/user/generated-inline.h leaf=/home/user/generated-leaf.h headers=2 max_depth=2 resolver=quoted-absolute-recursive depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,comparison,not,and,or elif=selected include_guard=deduplicated fingerprint=expanded-source`.
+   `MAKOS_AARCH64_C_HEADER_DEP_OK source=/home/user/generated-header.c root=/home/user/generated-inline.h leaf=/home/user/generated-leaf.h headers=2 max_depth=2 resolver=quoted-absolute-recursive depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit elif=selected include_guard=deduplicated fingerprint=expanded-source`.
    Prove the separate two-input
    graph cold `0/2`, warm `2/0`, edited-header selective `1/1`, and rewarm
    `2/0`, and execute `/home/user/generated-header.elf` with status 42 through
@@ -56,9 +56,9 @@ Branch: main
    headers must remain denied at depth limit four; the final host marker must
    contain `runtime_graphs=4,3,2,2`,
    `invalidations=object,source,state,header`, and
-   `header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,comparison,not,and,or elif=selected include_guard=deduplicated fingerprint=expanded-source`
+   `header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit elif=selected include_guard=deduplicated fingerprint=expanded-source`
    plus
-   `malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else-denied`.
+   `malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow-denied`.
    It must additionally prove the exact repository-source marker
    `MAKOS_AARCH64_REPOSITORY_SOURCE_OK c=user/aarch64_selfhost_probe.c asm=user/aarch64_selfhost_probe.S c_bytes=440 asm_bytes=53 c_fnv1a=5d0b854c29106f84 asm_fnv1a=7ad8871bd0e68af4 identity=build-generated-exact host_reference=compiled`.
    Require the separate `/home/user/makos-repo-probe.build` graph to report

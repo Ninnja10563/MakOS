@@ -201,7 +201,7 @@ enum {
     MAX_BUILD_PATH_BYTES = 96,
     BUILD_SOURCE_CAPACITY = 768,
     BUILD_EXPANDED_SOURCE_CAPACITY = 1536,
-    BUILD_HEADER_CAPACITY = 768,
+    BUILD_HEADER_CAPACITY = 1024,
     MAX_BUILD_HEADER_DEPTH = 4,
     MAX_BUILD_HEADER_DEPENDENCIES = 8,
     MAX_BUILD_MACROS = 8,
@@ -1720,6 +1720,7 @@ struct preprocessor_expression {
     const uint8_t *source;
     size_t cursor;
     size_t end;
+    int evaluate;
 };
 
 static void preprocessor_expression_space(
@@ -1776,6 +1777,17 @@ static int preprocessor_macro_integer(
     return 1;
 }
 
+static int preprocessor_checked_value(int64_t candidate, int32_t *value) {
+    if (candidate < INT32_MIN || candidate > INT32_MAX) return 0;
+    *value = (int32_t)candidate;
+    return 1;
+}
+
+static int32_t preprocessor_bit_value(uint32_t bits) {
+    if (bits <= INT32_MAX) return (int32_t)bits;
+    return -1 - (int32_t)(UINT32_MAX - bits);
+}
+
 static int preprocessor_expression_or(
     struct preprocessor_expression *expression, int32_t *value);
 
@@ -1788,13 +1800,6 @@ static int preprocessor_expression_primary(
             return 0;
         return 1;
     }
-    size_t saved = expression->cursor;
-    int negative = 0;
-    if (expression->cursor < expression->end &&
-        expression->source[expression->cursor] == '-') {
-        negative = 1;
-        ++expression->cursor;
-    }
     uint32_t magnitude = 0;
     size_t digits = 0;
     while (expression->cursor < expression->end &&
@@ -1806,10 +1811,9 @@ static int preprocessor_expression_primary(
         ++digits;
     }
     if (digits) {
-        *value = negative ? -(int32_t)magnitude : (int32_t)magnitude;
+        *value = (int32_t)magnitude;
         return 1;
     }
-    expression->cursor = saved;
     char name[MAX_LABEL_BYTES] = {0};
     size_t name_length = 0;
     if (!parse_macro_name(expression->source, expression->end,
@@ -1845,15 +1849,95 @@ static int preprocessor_expression_unary(
          expression->source[expression->cursor + 1] != '=')) {
         ++expression->cursor;
         if (!preprocessor_expression_unary(expression, value)) return 0;
-        *value = !*value;
+        if (expression->evaluate) *value = !*value;
+        return 1;
+    }
+    if (preprocessor_expression_punct(expression, '~')) {
+        if (!preprocessor_expression_unary(expression, value)) return 0;
+        if (expression->evaluate)
+            *value = preprocessor_bit_value(~(uint32_t)*value);
+        return 1;
+    }
+    if (preprocessor_expression_punct(expression, '+'))
+        return preprocessor_expression_unary(expression, value);
+    if (preprocessor_expression_punct(expression, '-')) {
+        if (!preprocessor_expression_unary(expression, value)) return 0;
+        if (expression->evaluate) {
+            if (*value == INT32_MIN) return 0;
+            *value = -*value;
+        }
         return 1;
     }
     return preprocessor_expression_primary(expression, value);
 }
 
-static int preprocessor_expression_relation(
+static int preprocessor_expression_multiplicative(
     struct preprocessor_expression *expression, int32_t *value) {
     if (!preprocessor_expression_unary(expression, value)) return 0;
+    for (;;) {
+        int operation = 0;
+        if (preprocessor_expression_punct(expression, '*')) operation = 1;
+        else if (preprocessor_expression_punct(expression, '/')) operation = 2;
+        else if (preprocessor_expression_punct(expression, '%')) operation = 3;
+        else return 1;
+        int32_t right = 0;
+        if (!preprocessor_expression_unary(expression, &right)) return 0;
+        if (!expression->evaluate) continue;
+        if (operation == 1) {
+            if (!preprocessor_checked_value((int64_t)*value * right, value))
+                return 0;
+        } else {
+            if (right == 0 || (*value == INT32_MIN && right == -1)) return 0;
+            *value = operation == 2 ? *value / right : *value % right;
+        }
+    }
+}
+
+static int preprocessor_expression_additive(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_multiplicative(expression, value)) return 0;
+    for (;;) {
+        int operation = 0;
+        if (preprocessor_expression_punct(expression, '+')) operation = 1;
+        else if (preprocessor_expression_punct(expression, '-')) operation = 2;
+        else return 1;
+        int32_t right = 0;
+        if (!preprocessor_expression_multiplicative(expression, &right))
+            return 0;
+        if (!expression->evaluate) continue;
+        int64_t result = operation == 1 ? (int64_t)*value + right
+                                        : (int64_t)*value - right;
+        if (!preprocessor_checked_value(result, value)) return 0;
+    }
+}
+
+static int preprocessor_expression_shift(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_additive(expression, value)) return 0;
+    for (;;) {
+        int operation = 0;
+        if (preprocessor_expression_operator(expression, "<<")) operation = 1;
+        else if (preprocessor_expression_operator(expression, ">>")) operation = 2;
+        else return 1;
+        int32_t right = 0;
+        if (!preprocessor_expression_additive(expression, &right)) return 0;
+        if (!expression->evaluate) continue;
+        if (right < 0 || right >= 32) return 0;
+        if (operation == 1) {
+            if (*value < 0 ||
+                !preprocessor_checked_value((int64_t)*value << right, value))
+                return 0;
+        } else if (*value >= 0) {
+            *value >>= right;
+        } else {
+            *value = -1 - ((-1 - *value) >> right);
+        }
+    }
+}
+
+static int preprocessor_expression_relation(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_shift(expression, value)) return 0;
     for (;;) {
         size_t operation = 4;
         if (preprocessor_expression_operator(expression, "<=")) operation = 0;
@@ -1862,11 +1946,13 @@ static int preprocessor_expression_relation(
         else if (preprocessor_expression_operator(expression, ">")) operation = 3;
         else return 1;
         int32_t right = 0;
-        if (!preprocessor_expression_unary(expression, &right)) return 0;
-        if (operation == 0) *value = *value <= right;
-        else if (operation == 1) *value = *value >= right;
-        else if (operation == 2) *value = *value < right;
-        else *value = *value > right;
+        if (!preprocessor_expression_shift(expression, &right)) return 0;
+        if (expression->evaluate) {
+            if (operation == 0) *value = *value <= right;
+            else if (operation == 1) *value = *value >= right;
+            else if (operation == 2) *value = *value < right;
+            else *value = *value > right;
+        }
     }
 }
 
@@ -1881,13 +1967,62 @@ static int preprocessor_expression_equality(
         else return 1;
         int32_t right = 0;
         if (!preprocessor_expression_relation(expression, &right)) return 0;
-        *value = operation == 1 ? *value == right : *value != right;
+        if (expression->evaluate)
+            *value = operation == 1 ? *value == right : *value != right;
     }
+}
+
+static int preprocessor_expression_single_operator(
+    struct preprocessor_expression *expression, char operation) {
+    preprocessor_expression_space(expression);
+    if (expression->cursor == expression->end ||
+        expression->source[expression->cursor] != (uint8_t)operation ||
+        (expression->cursor + 1 < expression->end &&
+         expression->source[expression->cursor + 1] == (uint8_t)operation))
+        return 0;
+    ++expression->cursor;
+    return 1;
+}
+
+static int preprocessor_expression_bitwise_and(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_equality(expression, value)) return 0;
+    while (preprocessor_expression_single_operator(expression, '&')) {
+        int32_t right = 0;
+        if (!preprocessor_expression_equality(expression, &right)) return 0;
+        if (expression->evaluate)
+            *value = preprocessor_bit_value((uint32_t)*value & (uint32_t)right);
+    }
+    return 1;
+}
+
+static int preprocessor_expression_bitwise_xor(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_bitwise_and(expression, value)) return 0;
+    while (preprocessor_expression_punct(expression, '^')) {
+        int32_t right = 0;
+        if (!preprocessor_expression_bitwise_and(expression, &right)) return 0;
+        if (expression->evaluate)
+            *value = preprocessor_bit_value((uint32_t)*value ^ (uint32_t)right);
+    }
+    return 1;
+}
+
+static int preprocessor_expression_bitwise_or(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_bitwise_xor(expression, value)) return 0;
+    while (preprocessor_expression_single_operator(expression, '|')) {
+        int32_t right = 0;
+        if (!preprocessor_expression_bitwise_xor(expression, &right)) return 0;
+        if (expression->evaluate)
+            *value = preprocessor_bit_value((uint32_t)*value | (uint32_t)right);
+    }
+    return 1;
 }
 
 static int preprocessor_expression_and(
     struct preprocessor_expression *expression, int32_t *value) {
-    if (!preprocessor_expression_equality(expression, value)) return 0;
+    if (!preprocessor_expression_bitwise_or(expression, value)) return 0;
     for (;;) {
         size_t saved = expression->cursor;
         if (!preprocessor_expression_operator(expression, "&&")) {
@@ -1895,8 +2030,12 @@ static int preprocessor_expression_and(
             return 1;
         }
         int32_t right = 0;
-        if (!preprocessor_expression_equality(expression, &right)) return 0;
-        *value = *value && right;
+        int evaluate = expression->evaluate;
+        expression->evaluate = evaluate && *value != 0;
+        int parsed = preprocessor_expression_bitwise_or(expression, &right);
+        expression->evaluate = evaluate;
+        if (!parsed) return 0;
+        if (evaluate) *value = *value && right;
     }
 }
 
@@ -1910,8 +2049,12 @@ static int preprocessor_expression_or(
             return 1;
         }
         int32_t right = 0;
-        if (!preprocessor_expression_and(expression, &right)) return 0;
-        *value = *value || right;
+        int evaluate = expression->evaluate;
+        expression->evaluate = evaluate && *value == 0;
+        int parsed = preprocessor_expression_and(expression, &right);
+        expression->evaluate = evaluate;
+        if (!parsed) return 0;
+        if (evaluate) *value = *value || right;
     }
 }
 
@@ -1923,6 +2066,7 @@ static int evaluate_preprocessor_expression(
         .source = source,
         .cursor = cursor,
         .end = line_end,
+        .evaluate = 1,
     };
     int32_t value = 0;
     if (!preprocessor_expression_or(&expression, &value)) return 0;
@@ -2871,7 +3015,8 @@ static void write_header_marker(const struct build_manifest *build,
     write_bytes(&macros, 1);
     write_text(" conditional_depth=");
     write_bytes(&conditional_depth, 1);
-    write_text(" if_expression=defined,numeric,comparison,not,and,or "
+    write_text(" if_expression=defined,numeric,arithmetic,shift,comparison,"
+               "bitwise,not,and,or,short-circuit "
                "elif=selected include_guard=deduplicated "
                "fingerprint=expanded-source\n");
 }
@@ -3095,6 +3240,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#else\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#endif\n"
+        "#if 2 + 3 * 4 == 14 && (1 + 1 << 3) == 16 && (32 >> 2) == 8 && (7 & 3) == 3 && (4 ^ 1) == 5 && (4 | 1) == 5 && ~0 == -1 && 9 / 2 == 4 && 9 % 2 == 1 && -8 >> 2 == -2\n"
+        "#else\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
+        "#if 0 && (1 / 0)\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#elif 1 || (1 << 32)\n"
+        "#else\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
         "#else\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#endif\n";
@@ -3138,6 +3293,15 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#if 0\n"
         "#else\n"
         "#elif 1\n"
+        "#endif\n";
+    static const char malformed_zero_divisor_expression_source[] =
+        "#if 1 / 0\n"
+        "#endif\n";
+    static const char malformed_shift_expression_source[] =
+        "#if 1 << 32\n"
+        "#endif\n";
+    static const char malformed_overflow_expression_source[] =
+        "#if 65535 * 65535\n"
         "#endif\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value | 2; }\n";
@@ -3466,15 +3630,33 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             expand_build_source(
                 &build, 1, (const uint8_t *)malformed_elif_after_else_source,
                 sizeof(malformed_elif_after_else_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1,
+                (const uint8_t *)malformed_zero_divisor_expression_source,
+                sizeof(malformed_zero_divisor_expression_source) - 1,
+                include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)malformed_shift_expression_source,
+                sizeof(malformed_shift_expression_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1,
+                (const uint8_t *)malformed_overflow_expression_source,
+                sizeof(malformed_overflow_expression_source) - 1,
+                include_output,
                 sizeof(include_output), &include_dependencies) != 0)
             fail(90);
         write_text("MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK "
                    "headers=2 max_depth=2 macros=4 conditional_depth=2 "
                    "include_guard=deduplicated missing=denied "
                    "relative=denied cycle=denied overdepth=denied "
-                   "if_expression=defined,numeric,comparison,not,and,or "
+                   "if_expression=defined,numeric,arithmetic,shift,"
+                   "comparison,bitwise,not,and,or,short-circuit "
                    "elif=selected malformed=define,endif,unterminated,"
-                   "duplicate-else,expression,elif-after-else-denied "
+                   "duplicate-else,expression,elif-after-else,zero-divisor,"
+                   "shift-range,overflow-denied "
                    "depth_limit=4\n");
     }
     if (build_mode) {

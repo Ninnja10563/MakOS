@@ -27,6 +27,39 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The AArch64 guest-native preprocessor now implements checked signed 32-bit
+  unary, multiplicative, additive, shift, comparison/equality, bitwise, and
+  short-circuit logical expression tiers with C precedence and associativity.
+  Active zero divisors, invalid shift counts, negative or overflowing left
+  shifts, and signed overflow fail closed; unevaluated logical operands remain
+  syntax-checked without evaluating those traps. Literal/object-macro
+  magnitude is capped at 65,535, intermediates at `int32_t`, and expanded
+  headers at 1,024 bytes. The real guest header graph proves every tier plus
+  short-circuit behavior, and separate malformed fixtures prove active
+  zero-divisor, shift-range, and overflow denial. Final Raspberry Pi/QEMU
+  10.0.11 TCG self-host evidence ran all 15 toolchain processes, reported
+  placements `3,4,8`, dispatches `178,178,185`, 39 migrations with zero
+  evidence drops, 238 CPU0 compositions for 247 AP deferrals, no pending
+  handoff, and status 42 throughout. Full `make unit check`, Firefox-role
+  production SMP (`9695,13737,10228`, exact Ctrl-A, status 42), Native SMP
+  (`10154,13198,9708`, status 42), and cursor runtime (`positions=7`, zero
+  changed scanout pixels) pass. Ternary expressions, general function-like or
+  text macros, token operations, system headers, and substantial in-guest
+  MakOS builds remain absent; SDK/self-hosting remain Partial.
+- Active visible Raspberry Pi/QEMU 10.0.11 TCG arithmetic-preprocessor
+  milestone: PID 850875, user service
+  `makos-visible-selfhost-if-arithmetic-final3.service`, session
+  `build/makos-pi-visible-selfhost-if-arithmetic-final3-IgEL0cQl`, private
+  read-only `boot.img`, blank sparse `data.img`, private `vars.fd`, `qmp.sock`,
+  `serial.log`, `qemu.pid`, and `login.ppm`. QMP reports `running`; the guest
+  reports `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
+  `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
+  `7c7be2f22ef732de8e898f960df0ea1108ef023e642cd854decc2840eadb9e05`;
+  login capture SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
+  The Pi-local QEMU build has no VNC backend, so use the recorded QMP socket
+  for capture/input and stop it through QMP before any runtime gate. This is
+  the sole active QEMU.
 - The AArch64 guest-native preprocessor now has a bounded, fail-closed
   `#if`/`#elif` expression evaluator. It supports `defined(NAME)` and
   `defined NAME`, signed numeric literals and object macros, unknown-name
@@ -147,7 +180,7 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG preprocessor/lifecycle milestone: PID
+- Prior visible Pi/QEMU 10.0.11 TCG preprocessor/lifecycle milestone: PID
   841525, user service
   `makos-visible-selfhost-if-lifecycle-precedence-final.service`, session
   `build/makos-pi-visible-selfhost-if-lifecycle-precedence-final-SIcwrHk7`,
@@ -160,9 +193,9 @@ Preserve existing files and changes.
   QMP login capture SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   The Pi-local QEMU build has no VNC backend, so the rendered login is exposed
-  through QMP capture/input rather than a live VNC listener. This is the sole
-  QEMU process; stop it through the recorded QMP socket before any runtime
-  gate.
+  through QMP capture/input rather than a live VNC listener. It was stopped
+  cleanly through its recorded QMP socket before the arithmetic-expression
+  gates; its private files remain.
 - Prior preprocessor-expression capture PID 830138, service
   `makos-visible-selfhost-if-expression-final.service`, session
   `build/makos-pi-visible-selfhost-if-expression-final-cknA5ric`, was stopped
@@ -700,10 +733,26 @@ Preserve existing files and changes.
   nested headers/eight dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 841525 in
-  `build/makos-pi-visible-selfhost-if-lifecycle-precedence-final-SIcwrHk7` is
-  the sole
+- At this handoff PID 850875 in
+  `build/makos-pi-visible-selfhost-if-arithmetic-final3-IgEL0cQl` is the sole
   QEMU and no runtime-test harness is active. It runs under
+  `makos-visible-selfhost-if-arithmetic-final3.service` with private read-only
+  `boot.img`, blank sparse `data.img`, private `vars.fd`, QMP `qmp.sock`,
+  serial `serial.log`, PID file `qemu.pid`, and QMP login capture `login.ppm`.
+  The guest reached `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
+  `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
+  `7c7be2f22ef732de8e898f960df0ea1108ef023e642cd854decc2840eadb9e05`;
+  login capture SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
+  The Pi-local QEMU build has no VNC backend. Stop this guest through its QMP
+  socket before any runtime gate; never start concurrent QEMU. Two earlier
+  launch-topology attempts in `...final-NacDVNg3` and `...final2-n71jQY38`
+  attached the read-only boot clone as an MMIO data device and therefore
+  failed closed on the first MakFS commit; both were stopped through QMP and
+  their private evidence remains.
+- Prior PID 841525 in
+  `build/makos-pi-visible-selfhost-if-lifecycle-precedence-final-SIcwrHk7` is
+  a private visible-login session. It ran under
   `makos-visible-selfhost-if-lifecycle-precedence-final.service` with private
   read-only
   `boot.img`, sparse `data.img`, private `vars.fd`, QMP `qmp.sock`, serial
@@ -714,8 +763,9 @@ Preserve existing files and changes.
   `02a6520d560c5ba595386b57dce7ab6e8a9ca2a71ee81dfeb87b41b7301b6818`;
   login capture SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
-  Check process state before every runtime gate and stop this guest through its
-  recorded QMP socket; never start concurrent QEMU. Prior PID 837185 in
+  It was stopped cleanly through the recorded QMP socket before the
+  arithmetic-expression runtime; never start concurrent QEMU. Prior PID
+  837185 in
   `build/makos-pi-visible-selfhost-if-lifecycle-final-eqUyVeKz` was stopped
   cleanly through QMP before the precedence-specific guest gate; its private
   files remain. Prior PID 830138 in
