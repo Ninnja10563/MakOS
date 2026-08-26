@@ -28,7 +28,7 @@ for fragment in (
     "pub fn set_task_affinity(tid: u64, mask: u64)",
     "mask & !ONLINE_CPU_MASK",
     "slot.affinity_mask & (1u8 << cpu)",
-    "ProcessRole::Firefox | ProcessRole::Native",
+    "ProcessRole::Firefox | ProcessRole::Native | ProcessRole::Python",
     "notify_idle_cpus();",
 ):
     require(PROCESS, fragment)
@@ -59,5 +59,5 @@ require(DOC, "`thread_affinity`")
 print(
     "MAKOS_CPU_AFFINITY_TEST_OK abi=148 masks=kernel-owned "
     "validation=online,same-process migration=automatic-load,forced "
-    "placement=least-reserved-ap runtime=firefox-musl"
+    "placement=least-reserved-ap runtime=firefox,native,python-musl"
 )

@@ -251,6 +251,19 @@ static int native_smp_overlap_probe(void)
 	return 0;
 }
 
+static int python_smp_overlap_probe(void)
+{
+	int worker_result = production_smp_worker_probe();
+	if (worker_result) return worker_result;
+	static const char marker[] =
+		"MAKOS_PYTHON_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready "
+		"release=bounded affinity=default:0xe,explicit singleton=0x2,0x4,0x8 "
+		"restored=0xe get=kernel-owned placement=least-reserved-ap "
+		"migrations=automatic:load,forced:3 caller_selected_automatic=0\n";
+	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
+	return 0;
+}
+
 struct pipe_worker_args {
 	int read_fd;
 	int write_fd;
@@ -710,6 +723,8 @@ int main(int argc, char **argv)
 	if (argc == 2 && !strcmp(argv[1], "native-smp") &&
 	    native_smp_overlap_probe())
 		return 253;
+	if (argc == 2 && !strcmp(argv[1], "python-smp"))
+		return python_smp_overlap_probe() ? 252 : 42;
 	main_parent_pid = getppid();
 	if (main_parent_pid <= 0 || main_parent_pid == getpid()) return 221;
 	main_tid = syscall(SYS_gettid);

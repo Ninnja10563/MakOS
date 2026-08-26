@@ -131,9 +131,9 @@ reap. This qualifies interrupt-driven input on QEMU, not Firefox timing.
 Production thread affinity is now explicit kernel state rather than an
 adapter-reported constant. Native syscall 148 gets or replaces the mask of the
 caller or a same-thread-group TID. Masks must be nonempty subsets of the four
-online CPUs. Firefox and native non-leader threads may choose those CPUs;
+online CPUs. Firefox, native, and Python-role non-leader threads may choose those CPUs;
 process leaders retain mask `0x1` because desktop and device service remains
-CPU0-owned. Clone gives Firefox and native workers the production default
+CPU0-owned. Clone gives Firefox, native, and Python-role workers the production default
 `0xe` plus a least-reserved AP preference, while forked/new process leaders
 begin at `0x1`. Normal scheduler selection consults both the stored mask and
 automatic preference; surface priority may bypass the preference but never
@@ -145,6 +145,16 @@ its Ready queue. A running remote target also rechecks at its next bounded
 timer preemption. The musl Linux-number adapter maps
 `sched_setaffinity(122)` and `sched_getaffinity(123)` to this native ABI and
 fully clears/copies the caller's bounded `cpu_set_t`.
+
+`make test-aarch64-native-smp-runtime` follows its ordinary Native phase with
+a separately tagged `python-smp` phase. Both use the freshly built
+upstream-musl pthread binary, but the latter is registered with the Python
+security and scheduler role and must independently cover AP1-3, prove a locked
+Running-owner overlap snapshot with distinct TIDs, migrate automatically,
+join, exit, wait, and reap status 42. The current Pi/TCG pass reports Python
+dispatches `12997,9286,9224`, placements `1,1,1`, and one automatic migration.
+This proves the built-in Python role's scheduler behavior; it is not evidence
+that MicroPython or CPython executed this fixture.
 
 A third embedded EL0 program proves remote-running group teardown. Its leader
 clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
@@ -318,21 +328,21 @@ The offline scheduler foundation adds:
 These changes preserve existing CPU0 wrappers. The boot probe is genuine
 parallel EL0 evidence, but it is not evidence of real Firefox overlap.
 Separate production-role fixtures use the upstream musl pthread ELF under the
-exact Firefox and ordinary native scheduler roles to exercise clone, futex,
-pipe, signal, AP block/wake, join, exit, wait, and reap after the desktop has
-initialized. The Firefox-role fixture is explicitly not a substitute for real
-Firefox.
+exact Firefox, ordinary native, and Python scheduler roles to exercise clone,
+futex, pipe, signal, AP block/wake, join, exit, wait, and reap after the desktop
+has initialized. The Firefox-role fixture is explicitly not a substitute for
+real Firefox, and the Python-role fixture is not Python execution.
 
 ## Next enablement blockers
 
-- Initial and exception-time AP selectors admit non-leader Firefox/Native
+- Initial and exception-time AP selectors admit non-leader Firefox/Native/Python
   application workers plus singleton-affinity `Toolchain` leaders after
-  desktop startup. Firefox/Native leaders, PID1, shell, UI, and service roles
+  desktop startup. Firefox/Native/Python leaders, PID1, shell, UI, and service roles
   remain on CPU0. Eligible application threads may select kernel-owned masks
   through syscall 148. Toolchain spawn now performs least-dispatched,
   idle-first AP placement with rotating ties, and timer-safe Toolchain work now
   migrates automatically at a measured eight-dispatch imbalance. Default
-  Firefox/Native workers use least-reserved preferred APs and one timer-safe
+  Firefox/Native/Python workers use least-reserved preferred APs and one timer-safe
   migration at a 64-dispatch imbalance. Genuine Firefox on idle macOS/HVF and
   additional built-in/service roles remain gated.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive

@@ -4,6 +4,35 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the bounded AArch64 production scheduler now admits non-leader
+  `ProcessRole::Python` threads to the same kernel-owned AP1-3 placement,
+  affinity, blocking/wake, and timer-migration policy already used by Firefox
+  and ordinary native workers; Python leaders remain on CPU0 and device MMIO
+  remains CPU0-owned. The ordinary native runtime now follows its native phase
+  with a separately tagged upstream-musl pthread phase under the Python
+  security/scheduler role. This proves the role and scheduler path, not actual
+  Python execution. A Firefox-role regression exposed a genuine overlap-proof
+  race when a migrated TID's long-lived source-AP entry marker remained
+  published. Overlap is now sampled from the scheduler's locked Running-owner
+  table, retaining fail-stop duplicate-owner checks without accepting stale
+  entry state. Fresh Raspberry Pi/QEMU 10.0.11 TCG evidence passes Firefox
+  (`9915,13301,10577` dispatches, two automatic migrations, input watcher on
+  AP2, exact Ctrl-A, status 42), Native (`10096,9841,13848`, two migrations,
+  status 42), and Python-role (`12997,9286,9224`, one migration, status 42).
+  The focused self-host gate passes all 15 processes with placements `8,4,3`,
+  dispatches `186,182,183`, 41 migrations, zero drops, and status 42; cursor
+  passes seven positions and zero changed scanout pixels, and full `make unit
+  check` passes. Strict real-Firefox timing remains pending unchanged on an
+  idle macOS/HVF host: the latest high-pressure runs painted in 248584/255543
+  ms but exceeded the 10000 ms Ctrl-A limit at 10971/14363 ms. A fresh visible
+  login is the sole QEMU, PID 899613, service
+  `makos-visible-python-smp-final.service`, private session
+  `build/makos-pi-visible-python-smp-final-muepCbzb`; QMP reports running. Its
+  read-only boot clone SHA-256 is
+  `7240a6ed1e8bfc84533e62a8ef28126fd0025ef553f3dae3c883cd2d8b3d6dd9`;
+  login PPM/PNG SHA-256 values are
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382` and
+  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
 - 2026-08-26 the AArch64 guest-native preprocessor now performs bounded
   object-text and function-like macro expansion on active C lines. Definitions
   allow four distinct parameters and 64 replacement bytes; invocation parses
@@ -25,11 +54,12 @@ Last updated: 2026-08-26.
   missed its 30-second completion marker under Pi pressure; its unchanged
   rerun passed (`10525,13675,10034`, exact Ctrl-A, three automatic migrations,
   status 42). This is Pi/TCG functional evidence, not strict Firefox browser
-  performance evidence; idle macOS/HVF qualification remains pending. A fresh
-  visible login from the exact tested image is active as the sole QEMU, PID
+  performance evidence; idle macOS/HVF qualification remains pending. That
+  visible login from the tested image was stopped cleanly through QMP; it used
+  PID
   869495, service `makos-visible-selfhost-macro-final.service`, private session
-  `build/makos-pi-visible-selfhost-macro-final-qgeLzRmM`. QMP reports running;
-  the boot clone SHA-256 is
+  `build/makos-pi-visible-selfhost-macro-final-qgeLzRmM`. Its boot clone
+  SHA-256 is
   `13ad44f51dc5f1b2287a19267e8a0a8b0423246b71ce091fa19d7163bd67c24a`
   and the 800x600 login PPM SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.

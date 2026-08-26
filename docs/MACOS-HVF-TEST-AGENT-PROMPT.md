@@ -108,11 +108,15 @@ acceptable if this baseline is its ancestor.
    64-dispatch imbalance, Ready/unowned full-context migration, no caller CPU
    selection, zero evidence drops, kernel-owned affinity get/set/migration and
    restoration, explicit-affinity authority, `device_mmio_owner=cpu0`, and
-   status 42. The Firefox production gate must retain its exact-role,
+   status 42. The same host marker must contain `builtin_role=python`, nonzero
+   `python_dispatches` on AP1/AP2/AP3, Python placements covering AP1/AP2/AP3,
+   at least one automatic Python-role migration, and `python_status=42`. Treat
+   that as scheduler-role evidence, not proof that Python executed. The Firefox
+   production gate must retain its exact-role,
    exact-group, surface-wake, IRQ, and CPU0 device-ownership assertions and add
    the equivalent `role=firefox` automatic-placement/migration proof before its
    explicit affinity phase. Both production gates must observe
-   `MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle`.
+   `MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,python,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle`.
    The cursor gate must retain seven positions,
    zero changed scanout pixels, the virtio-GPU cursor plane, and hidden host
    cursor.

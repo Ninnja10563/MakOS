@@ -157,11 +157,14 @@ tables, and address-space root.
 
 The four-PE QEMU `virt` path has CPU-indexed ownership and a bounded production
 policy after desktop startup. CPU0 retains process leaders and device service;
-Firefox and native worker threads can execute on AP1-3. Each context owns an
-8-bit affinity mask. Native syscall 148 validates same-thread-group access and
-nonempty online masks; exception-time replacement forces Ready/unowned
-publication and a scheduler SGI when migration is required. The current policy
-is deliberately narrower than general work-stealing desktop SMP.
+Firefox, native, and Python-role worker threads can execute on AP1-3. Each
+context owns an 8-bit affinity mask. Native syscall 148 validates
+same-thread-group access and nonempty online masks; exception-time replacement
+forces Ready/unowned publication and a scheduler SGI when migration is
+required. Overlap qualification samples the scheduler's locked Running owners,
+so a migrated TID's stale outer-entry marker cannot masquerade as simultaneous
+ownership. The current policy is deliberately narrower than general
+work-stealing desktop SMP.
 
 Parent wait reaps exited scheduler slot, process-owned FDs/handles/surfaces,
 user leaf mappings, page tables, and address-space root. Shared kernel identity

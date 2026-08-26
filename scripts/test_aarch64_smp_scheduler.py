@@ -286,22 +286,29 @@ for token in (
     "explicit_affinity=authoritative",
     "fn production_worker_enter(",
     "fn production_worker_leave(",
+    "let (active, tids) = with_state(|state|",
+    "state.table.current_pid_on(candidate)",
+    "AArch64 production overlap caller lost CPU ownership",
     "fn production_ap_worker(slot: &ContextSlot)",
-    "matches!(slot.role, ProcessRole::Firefox | ProcessRole::Native)",
+    "ProcessRole::Firefox | ProcessRole::Native | ProcessRole::Python",
     "tracked_production_worker(worker.role, worker.group_pid)",
     "AArch64 production worker acquired duplicate CPU ownership",
     "MAKOS_AARCH64_PRODUCTION_SMP_READY",
     "toolchain-leaders-least-loaded-ap",
-    "roles=firefox,native,toolchain",
+    "roles=firefox,native,python,toolchain",
     "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK",
     "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK",
     "MAKOS_AARCH64_PRODUCTION_SMP_OK",
     "MAKOS_AARCH64_NATIVE_SMP_OVERLAP_OK",
     "MAKOS_AARCH64_NATIVE_SMP_DISPATCH_OK",
     "MAKOS_AARCH64_NATIVE_SMP_OK",
+    "MAKOS_AARCH64_PYTHON_SMP_OVERLAP_OK",
+    "MAKOS_AARCH64_PYTHON_SMP_DISPATCH_OK",
+    "MAKOS_AARCH64_PYTHON_SMP_OK",
     "tracked_production_worker(role, group_pid)",
     "pub fn spawn_firefox_smp_probe()",
     "pub fn spawn_native_smp_probe()",
+    "pub fn spawn_python_smp_probe()",
     "fixture=upstream-musl-pthread role=firefox",
     "SMP_PROBE_IO_IDLE_MASK",
     "SMP_PROBE_IO_RESUME_MASK",
@@ -579,6 +586,8 @@ for token in (
     "syscall4(SYS_PROCESS_SPAWN, 18, 0, 0, 0)",
     "MAKOS_AARCH64_NATIVE_SMP_REAP_OK",
     'exact(command, command_length, "native-smp")',
+    "MAKOS_AARCH64_PYTHON_SMP_REAP_OK",
+    'exact(command, command_length, "python-smp")',
 ):
     assert token in SHELL, token
 
@@ -589,6 +598,9 @@ for token in (
     "native_smp_overlap_probe",
     'strcmp(argv[1], "native-smp")',
     "MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK workers=3",
+    "python_smp_overlap_probe",
+    'strcmp(argv[1], "python-smp")',
+    "MAKOS_PYTHON_SMP_PTHREAD_OVERLAP_OK workers=3",
     "__atomic_fetch_or(&production_smp_ready",
     "production_auto_waiting",
     "production_auto_release",
@@ -634,6 +646,15 @@ for token in (
     "explicit_affinity=authoritative",
     "device_mmio_owner=cpu0",
     "status=42",
+    "PYTHON_PROCESS_MARKER",
+    "PYTHON_OVERLAP_MARKER",
+    "PYTHON_PTHREAD_MARKER",
+    "PYTHON_MIGRATION_MARKER",
+    "PYTHON_RESULT_MARKER",
+    "PYTHON_REAP_MARKER",
+    "validate_python_role(decoded)",
+    "builtin_role=python",
+    "python_status=42",
 ):
     assert token in NATIVE_RUNTIME, token
 
@@ -643,7 +664,7 @@ print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "
     "exception_paths=per-cpu kernel_return=per-cpu ttbr_cache=per-cpu "
     "tlbi=inner-shareable "
-    "runtime=boot-probe,production-firefox-native-workers,toolchain-leaders,4cpus "
+    "runtime=boot-probe,production-firefox-native-python-workers,toolchain-leaders,4cpus "
     "policy=interactive-leaders-cpu0,application-workers-kernel-balanced,"
     "toolchain-least-loaded-ap device_mmio_owner=cpu0"
 )

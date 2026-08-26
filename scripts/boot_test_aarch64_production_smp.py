@@ -24,7 +24,7 @@ IMAGE = pathlib.Path(
 READY_MARKER = (
     b"MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 "
     b"policy=interactive-leaders-cpu0,application-workers-shared-ap,"
-    b"toolchain-leaders-least-loaded-ap roles=firefox,native,toolchain "
+    b"toolchain-leaders-least-loaded-ap roles=firefox,native,python,toolchain "
     b"device_mmio_owner=cpu0 "
     b"wake=sgi block=ap-idle"
 )

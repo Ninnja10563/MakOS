@@ -197,17 +197,30 @@ fn production_role_code(role: ProcessRole) -> u8 {
     match role {
         ProcessRole::Firefox => 1,
         ProcessRole::Native => 2,
+        ProcessRole::Python => 3,
         _ => 0,
     }
 }
 
+fn application_worker_role(role: ProcessRole) -> bool {
+    matches!(role, ProcessRole::Firefox | ProcessRole::Native | ProcessRole::Python)
+}
+
+fn application_role_name(role: ProcessRole) -> &'static str {
+    match role {
+        ProcessRole::Firefox => "firefox",
+        ProcessRole::Native => "native",
+        ProcessRole::Python => "python",
+        _ => "invalid",
+    }
+}
+
 fn production_ap_worker(slot: &ContextSlot) -> bool {
-    slot.pid != slot.group_pid
-        && matches!(slot.role, ProcessRole::Firefox | ProcessRole::Native)
+    slot.pid != slot.group_pid && application_worker_role(slot.role)
 }
 
 fn production_ap_worker_fields(role: ProcessRole, pid: u64, group_pid: u64) -> bool {
-    pid != group_pid && matches!(role, ProcessRole::Firefox | ProcessRole::Native)
+    pid != group_pid && application_worker_role(role)
 }
 
 fn tracked_production_worker(role: ProcessRole, group_pid: u64) -> bool {
@@ -2568,7 +2581,7 @@ pub fn run_desktop_shell() -> ! {
         .unwrap_or_else(|| crate::fatal("AArch64 shell spawn failed"));
     crate::arch::enable_production_userspace_scheduler();
     crate::serial_println!(
-        "MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle"
+        "MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,python,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle"
     );
     crate::serial_println!(
         "MAKOS_AARCH64_SHELL_PROCESS_OK pid={} elf=1 el=0 entry={:#x} ttbr0={:#x} syscalls=input,auth,graphics,vfs process_table=owned",
@@ -2697,7 +2710,7 @@ pub fn task_affinity(tid: u64) -> Result<u64, i64> {
 }
 
 /// Replace a task's CPU mask. Process leaders remain CPU0-owned; production
-/// Firefox and native non-leader threads may select any online CPU. The return
+/// Firefox, native, and Python non-leader threads may select any online CPU. The return
 /// value tells the syscall path to yield when the caller excluded its CPU.
 pub fn set_task_affinity(tid: u64, mask: u64) -> Result<bool, i64> {
     const ONLINE_CPU_MASK: u64 = 0xf;
@@ -2723,7 +2736,7 @@ pub fn set_task_affinity(tid: u64, mask: u64) -> Result<bool, i64> {
             if mask != 1 {
                 return Err(-22i64);
             }
-        } else if !matches!(slot.role, ProcessRole::Firefox | ProcessRole::Native) {
+        } else if !application_worker_role(slot.role) {
             return Err(-22i64);
         }
         let prior = slot.affinity_mask;
@@ -3461,15 +3474,14 @@ pub fn clone_thread(
             .table
             .spawn(parent.group_pid, parent.context.ttbr0)
             .ok()?;
-        let application_placement =
-            matches!(parent.role, ProcessRole::Firefox | ProcessRole::Native)
-                .then(|| state.least_reserved_application_ap());
+        let application_placement = application_worker_role(parent.role)
+            .then(|| state.least_reserved_application_ap());
         let slot = state.contexts.iter_mut().find(|slot| slot.pid == 0)?;
         *slot = ContextSlot {
             pid: tid,
             group_pid: parent.group_pid,
             role: parent.role,
-            affinity_mask: if matches!(parent.role, ProcessRole::Firefox | ProcessRole::Native) {
+            affinity_mask: if application_worker_role(parent.role) {
                 0xe
             } else {
                 parent.affinity_mask
@@ -3502,7 +3514,7 @@ pub fn clone_thread(
             if prior_mask & cpu_bit == 0 {
                 crate::serial_println!(
                     "MAKOS_AARCH64_APPLICATION_PLACEMENT_OK role={} group_pid={} tid={} cpu={} allowed_affinity=0xe loads={},{},{} idle_mask={:#x} policy=least-reserved-ap caller_selected=0",
-                    if role == ProcessRole::Firefox { "firefox" } else { "native" },
+                    application_role_name(role),
                     group_pid,
                     tid,
                     placement.cpu,
@@ -4282,15 +4294,42 @@ fn production_worker_enter(cpu: usize, tid: u64, group_pid: u64) {
     }
     let cpu_bit = 1u64 << cpu;
     PRODUCTION_WORKER_ACTIVE_TIDS[cpu].store(tid, Ordering::Release);
-    let active = PRODUCTION_WORKER_ACTIVE_CPU_MASK.fetch_or(cpu_bit, Ordering::AcqRel) | cpu_bit;
+    PRODUCTION_WORKER_ACTIVE_CPU_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+
+    // A timer migration can transfer a worker after its source AP published
+    // ACTIVE_TIDS but before that AP's outer EL0-entry call unwinds. Build the
+    // qualification snapshot from the scheduler's locked Running ownership,
+    // not those deliberately long-lived entry markers. This preserves the
+    // duplicate-owner fail-stop while excluding a stale source-AP publication
+    // from the overlap proof.
+    let (active, tids) = with_state(|state| {
+        let mut active = 0u64;
+        let mut tids = [0u64; 4];
+        for candidate in 1..tids.len() {
+            let Some(candidate_tid) = state.table.current_pid_on(candidate) else {
+                continue;
+            };
+            let tracked = state.contexts.iter().any(|slot| {
+                slot.pid == candidate_tid
+                    && slot.group_pid == group_pid
+                    && production_ap_worker(slot)
+                    && tracked_production_worker(slot.role, slot.group_pid)
+            });
+            if tracked {
+                active |= 1u64 << candidate;
+                tids[candidate] = candidate_tid;
+            }
+        }
+        (active, tids)
+    });
+    if tids[cpu] != tid {
+        crate::fatal("AArch64 production overlap caller lost CPU ownership");
+    }
     if (active & 0xe).count_ones() < 2
         || PRODUCTION_WORKER_OVERLAP_REPORTED.swap(true, Ordering::AcqRel)
     {
         return;
     }
-    let tids: [u64; 4] = core::array::from_fn(|candidate| {
-        PRODUCTION_WORKER_ACTIVE_TIDS[candidate].load(Ordering::Acquire)
-    });
     let mut seen = [0u64; 4];
     for candidate in 1..PRODUCTION_WORKER_ACTIVE_TIDS.len() {
         if active & (1u64 << candidate) == 0 {
@@ -4304,25 +4343,38 @@ fn production_worker_enter(cpu: usize, tid: u64, group_pid: u64) {
         PRODUCTION_WORKER_OVERLAP_TIDS[candidate].store(candidate_tid, Ordering::Release);
     }
     PRODUCTION_WORKER_OVERLAP_CPU_MASK.store(active & 0xe, Ordering::Release);
-    if PRODUCTION_WORKER_ROLE.load(Ordering::Acquire) == production_role_code(ProcessRole::Firefox)
-    {
-        crate::serial_println!(
-            "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
-            group_pid,
-            active & 0xe,
-            seen[1],
-            seen[2],
-            seen[3],
-        );
-    } else {
-        crate::serial_println!(
-            "MAKOS_AARCH64_NATIVE_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
-            group_pid,
-            active & 0xe,
-            seen[1],
-            seen[2],
-            seen[3],
-        );
+    match PRODUCTION_WORKER_ROLE.load(Ordering::Acquire) {
+        role if role == production_role_code(ProcessRole::Firefox) => {
+            crate::serial_println!(
+                "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
+                group_pid,
+                active & 0xe,
+                seen[1],
+                seen[2],
+                seen[3],
+            );
+        }
+        role if role == production_role_code(ProcessRole::Native) => {
+            crate::serial_println!(
+                "MAKOS_AARCH64_NATIVE_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
+                group_pid,
+                active & 0xe,
+                seen[1],
+                seen[2],
+                seen[3],
+            );
+        }
+        role if role == production_role_code(ProcessRole::Python) => {
+            crate::serial_println!(
+                "MAKOS_AARCH64_PYTHON_SMP_OVERLAP_OK group_pid={} cpu_mask={:#x} tids={},{},{} concurrent=1 ownership=exclusive",
+                group_pid,
+                active & 0xe,
+                seen[1],
+                seen[2],
+                seen[3],
+            );
+        }
+        _ => crate::fatal("AArch64 tracked production worker role invalid"),
     }
 }
 
@@ -4336,7 +4388,7 @@ fn production_worker_leave(cpu: usize, group_pid: u64) {
 }
 
 /// AP dispatch loop for boot probes and the bounded production policy. Process
-/// interactive leaders stay on CPU0; non-leader Firefox/native threads and
+/// interactive leaders stay on CPU0; non-leader Firefox/native/Python threads and
 /// kernel-placed single-threaded toolchain leaders enter this path after the
 /// desktop opens the gate. Device MMIO remains CPU0-owned.
 pub(crate) fn run_secondary_scheduler() -> ! {
@@ -4400,22 +4452,29 @@ pub(crate) fn run_secondary_scheduler() -> ! {
             if tracked_production_worker(role, group_pid) {
                 let prior = PRODUCTION_WORKER_REPORTED_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
                 if prior & cpu_bit == 0 {
-                    if role == ProcessRole::Firefox {
-                        crate::serial_println!(
+                    match role {
+                        ProcessRole::Firefox => crate::serial_println!(
                             "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK tid={} pid={} cpu={} cpu_mask={:#x} ownership=exclusive policy=leader-cpu0,firefox-workers-shared-ap",
                             pid,
                             group_pid,
                             cpu,
                             PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
-                        );
-                    } else {
-                        crate::serial_println!(
+                        ),
+                        ProcessRole::Native => crate::serial_println!(
                             "MAKOS_AARCH64_NATIVE_SMP_DISPATCH_OK tid={} pid={} cpu={} cpu_mask={:#x} ownership=exclusive policy=leader-cpu0,native-workers-shared-ap",
                             pid,
                             group_pid,
                             cpu,
                             PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
-                        );
+                        ),
+                        ProcessRole::Python => crate::serial_println!(
+                            "MAKOS_AARCH64_PYTHON_SMP_DISPATCH_OK tid={} pid={} cpu={} cpu_mask={:#x} ownership=exclusive policy=leader-cpu0,python-workers-shared-ap",
+                            pid,
+                            group_pid,
+                            cpu,
+                            PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
+                        ),
+                        _ => crate::fatal("AArch64 AP worker role invalid"),
                     }
                 }
                 production_worker_enter(cpu, pid, group_pid);
@@ -5249,6 +5308,44 @@ pub fn spawn_native_smp_probe() -> Option<u64> {
     Some(pid)
 }
 
+/// Run the upstream musl pthread workload under the built-in Python
+/// application role. This qualifies the production policy used by real
+/// MicroPython/CPython threads without claiming that the fixture is Python.
+pub fn spawn_python_smp_probe() -> Option<u64> {
+    let parent_pid = current_pid();
+    if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
+        return None;
+    }
+    reset_production_worker_evidence();
+    let argv: [&[u8]; 2] = [b"/system/python-smp-probe", b"python-smp"];
+    let envp: [&[u8]; 1] = [b"MODE=python-smp"];
+    let (pid, process) = spawn_process_sysv(
+        parent_pid,
+        MUSL_PTHREAD_PROBE_ELF,
+        ProcessRole::Python,
+        &argv,
+        &envp,
+    )?;
+    if !crate::security::register_session_process(
+        pid,
+        crate::security::SessionProcessRole::Python,
+    ) {
+        discard_spawned(pid);
+        return None;
+    }
+    PRODUCTION_WORKER_GROUP_PID.store(pid, Ordering::Release);
+    PRODUCTION_WORKER_ROLE.store(production_role_code(ProcessRole::Python), Ordering::Release);
+    PRODUCTION_AUTOBALANCE_REQUIRED.store(true, Ordering::Release);
+    crate::serial_println!(
+        "MAKOS_AARCH64_PYTHON_SMP_PROCESS_OK pid={} parent={} fixture=upstream-musl-pthread role=python leader_cpu=0 workers=shared-ap entry={:#x} ttbr0={:#x}",
+        pid,
+        parent_pid,
+        process.entry,
+        process.root,
+    );
+    Some(pid)
+}
+
 pub fn spawn_musl_interp_probe() -> Option<u64> {
     let parent_pid = current_pid();
     if parent_pid == 0 || current_app_role() != ProcessRole::Shell {
@@ -5821,7 +5918,7 @@ pub fn wait(pid: u64) -> Option<u64> {
         for migration in &migration_records[..migration_record_count] {
             crate::serial_println!(
                 "MAKOS_AARCH64_APPLICATION_MIGRATION_OK role={} group_pid={} tid={} source_cpu={} target_cpu={} allowed_affinity=0xe loads={},{},{} idle_mask={:#x} policy=timer-safe-dispatch-imbalance delta={} context=gpr,sp,tls,simd ownership=ready-unowned evidence_emitter=cpu0 caller_selected=0 explicit_affinity=authoritative",
-                if role == ProcessRole::Firefox { "firefox" } else { "native" },
+                application_role_name(role),
                 migration.group_pid,
                 migration.pid,
                 migration.source_cpu,
@@ -5869,7 +5966,7 @@ pub fn wait(pid: u64) -> Option<u64> {
                 evidence_drops,
                 status,
             );
-        } else {
+        } else if role == ProcessRole::Native {
             crate::serial_println!(
                 "MAKOS_AARCH64_NATIVE_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=native leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle automatic_placements={},{},{} automatic_placement_mask={:#x} automatic_migrations={} automatic_source_mask={:#x} automatic_target_mask={:#x} automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance automatic_delta={} migration_evidence_drops={} caller_selected=0 explicit_affinity=authoritative status={}",
                 cpu_mask,
@@ -5891,6 +5988,30 @@ pub fn wait(pid: u64) -> Option<u64> {
                 evidence_drops,
                 status,
             );
+        } else if role == ProcessRole::Python {
+            crate::serial_println!(
+                "MAKOS_AARCH64_PYTHON_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=python leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle automatic_placements={},{},{} automatic_placement_mask={:#x} automatic_migrations={} automatic_source_mask={:#x} automatic_target_mask={:#x} automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance automatic_delta={} migration_evidence_drops={} caller_selected=0 explicit_affinity=authoritative status={}",
+                cpu_mask,
+                dispatches[1],
+                dispatches[2],
+                dispatches[3],
+                overlap_mask,
+                overlap_tids[1],
+                overlap_tids[2],
+                overlap_tids[3],
+                placements[0],
+                placements[1],
+                placements[2],
+                placement_mask,
+                migrations,
+                source_mask,
+                target_mask,
+                APPLICATION_REBALANCE_DISPATCH_DELTA,
+                evidence_drops,
+                status,
+            );
+        } else {
+            crate::fatal("AArch64 tracked production role report invalid");
         }
     }
     Some(status)
@@ -6980,10 +7101,11 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
         {
             crate::serial_println!(
                 "MAKOS_AARCH64_APPLICATION_MIGRATION_OK role={} group_pid={} tid={} source_cpu={} target_cpu={} allowed_affinity=0xe loads={},{},{} idle_mask={:#x} policy=timer-safe-dispatch-imbalance delta={} context=gpr,sp,tls,simd ownership=ready-unowned evidence_emitter=source-ap caller_selected=0 explicit_affinity=authoritative",
-                if migration.application_role == production_role_code(ProcessRole::Firefox) {
-                    "firefox"
-                } else {
-                    "native"
+                match migration.application_role {
+                    role if role == production_role_code(ProcessRole::Firefox) => "firefox",
+                    role if role == production_role_code(ProcessRole::Native) => "native",
+                    role if role == production_role_code(ProcessRole::Python) => "python",
+                    _ => "invalid",
                 },
                 migration.group_pid,
                 migration.pid,

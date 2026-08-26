@@ -27,6 +27,32 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The bounded AArch64 production scheduler now includes non-leader Python-role
+  threads in the Firefox/Native AP1-3 placement, affinity, block/wake, and
+  timer-migration policy. Leaders and all device MMIO remain CPU0-owned. The
+  runtime proof uses an upstream-musl pthread fixture registered as
+  `ProcessRole::Python`; it does not claim that Python itself ran. An unchanged
+  Firefox-role run exposed stale source-AP overlap accounting after migration;
+  overlap proof now snapshots the scheduler's locked Running owners and still
+  fails closed on genuine duplicate ownership. Final Raspberry Pi/QEMU 10.0.11
+  TCG gates pass Firefox (`9915,13301,10577`, two migrations, exact Ctrl-A,
+  watcher AP2, status 42), Native (`10096,9841,13848`, two migrations, status
+  42), Python-role (`12997,9286,9224`, one migration, status 42), self-host (15
+  processes, placements `8,4,3`, dispatches `186,182,183`, 41 migrations,
+  status 42), cursor (seven positions, zero scanout changes), and full `make
+  unit check`. Strict real Firefox remains pending on idle macOS/HVF with the
+  unchanged 10000 ms Ctrl-A limit.
+- Active visible Raspberry Pi/QEMU 10.0.11 TCG milestone: PID 899613, user
+  service `makos-visible-python-smp-final.service`, session
+  `build/makos-pi-visible-python-smp-final-muepCbzb`, private read-only
+  `boot.img`, blank sparse `data.img`, private `vars.fd`, `qmp.sock`,
+  `serial.log`, `qemu.pid`, `login.ppm`, and inspection-only `login.png`. QMP
+  reports running and it is the sole QEMU. Boot SHA-256 is
+  `7240a6ed1e8bfc84533e62a8ef28126fd0025ef553f3dae3c883cd2d8b3d6dd9`;
+  PPM/PNG SHA-256 values are
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382` and
+  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
+  Stop it through QMP before any runtime gate; never run concurrent QEMU.
 - Bounded-macro implementation baseline:
   `ffbce4f6179a7fef03c5cd2b32341ffa7498a7a0`.
 - The AArch64 guest-native preprocessor now expands bounded object-text and
@@ -47,20 +73,20 @@ Preserve existing files and changes.
   rerun passed with dispatches `10525,13675,10034`, exact Ctrl-A, three
   automatic migrations, and status 42. Strict integrated Firefox remains
   pending on an idle macOS/HVF host.
-- Active visible Raspberry Pi/QEMU 10.0.11 TCG bounded-macro milestone: PID
+- Stopped visible Raspberry Pi/QEMU 10.0.11 TCG bounded-macro milestone: PID
   869495, user service `makos-visible-selfhost-macro-final.service`, session
   `build/makos-pi-visible-selfhost-macro-final-qgeLzRmM`, private read-only
   `boot.img`, blank sparse `data.img`, private `vars.fd`, `qmp.sock`,
   `serial.log`, `qemu.pid`, `login.ppm`, and inspection-only `login.png`. QMP
-  reports `running`; the guest reports `MAKOS_LOGIN_UI_OK framebuffer=800x600`
+  last reported `running`; the guest reports `MAKOS_LOGIN_UI_OK framebuffer=800x600`
   and `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
   `13ad44f51dc5f1b2287a19267e8a0a8b0423246b71ce091fa19d7163bd67c24a`;
   login PPM SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`
   and PNG SHA-256 is
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
-  This is the sole active QEMU. Use the recorded QMP socket for input/capture
-  and stop it cleanly before any runtime gate.
+  It was stopped cleanly through QMP before the Python-role scheduler gates;
+  its private files remain.
 - The AArch64 guest-native preprocessor now implements conditional `?:` as
   its lowest-precedence, right-associative expression tier. It syntax-checks
   both arms but evaluates only the selected arm. The real guest header graph
@@ -801,16 +827,16 @@ Preserve existing files and changes.
   dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 869495 in
-  `build/makos-pi-visible-selfhost-macro-final-qgeLzRmM` is the sole
+- At this handoff PID 899613 in
+  `build/makos-pi-visible-python-smp-final-muepCbzb` is the sole
   QEMU and no runtime-test harness is active. It runs under
-  `makos-visible-selfhost-macro-final.service` with private read-only
+  `makos-visible-python-smp-final.service` with private read-only
   `boot.img`, blank sparse `data.img`, private `vars.fd`, QMP `qmp.sock`,
   serial `serial.log`, PID file `qemu.pid`, QMP login capture `login.ppm`, and
   inspection-only `login.png`.
   The guest reached `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
   `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
-  `13ad44f51dc5f1b2287a19267e8a0a8b0423246b71ce091fa19d7163bd67c24a`;
+  `7240a6ed1e8bfc84533e62a8ef28126fd0025ef553f3dae3c883cd2d8b3d6dd9`;
   login capture SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   PNG SHA-256 is

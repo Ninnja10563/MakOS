@@ -482,18 +482,24 @@ Run the ordinary native-application role gate with:
 make test-aarch64-native-smp-runtime
 ```
 
-The shell's `native-smp` command executes the same freshly built upstream-musl
-pthread workload under `ProcessRole::Native`. Its leader must retain mask
+The gate first sends the shell's `native-smp` command to execute the freshly
+built upstream-musl pthread workload under `ProcessRole::Native`. Its leader
+must retain mask
 `0x1` on CPU0; three non-leader workers are automatically placed across the
 shared AP pool, create and prove a natural load migration, then force and read
 back singleton migrations across AP1-3, restore mask `0xe`, and run
 the remaining pthread/IPC workload to status 42. The host gate requires every
 AP to have a nonzero dispatch count, a live/final matching overlap interval
 with at least two distinct TIDs, exclusive ownership, CPU0-only device MMIO,
-and shell wait/reap. The current Pi/TCG pass records placements `3,2,13`, two
-automatic migrations, dispatches `10067,13298,9605`, and zero evidence drops.
-This is production-policy evidence for normal native
-applications, not Firefox or macOS/HVF performance evidence.
+and shell wait/reap. It then sends `python-smp`, runs a separately tagged copy
+of that real pthread workload under `ProcessRole::Python`, and requires the
+same AP coverage, locked Running-owner overlap, automatic migration, join,
+status-42 exit, wait, and reap. The current Pi/TCG pass records Native
+placements `3,13,2`, two automatic migrations and dispatches
+`10096,9841,13848`; Python-role placements are `1,1,1`, with one automatic
+migration and dispatches `12997,9286,9224`. The Python phase proves scheduler
+policy for the built-in role, not execution of MicroPython or CPython. This is
+production-policy evidence, not Firefox or macOS/HVF performance evidence.
 
 The ordinary image also contains a bounded forced-migration proof, with a
 focused early-exit harness:
@@ -523,8 +529,8 @@ contention points, exclusive single-CPU ownership at every recorded selection,
 bounded dispatch skew, exact reap/frame balance, and the prior migration proof.
 The 2026-08-25 Raspberry Pi/QEMU 10.0.11 TCG pass records 99 dispatches on each
 AP (297 total). This is functional AP load-sharing evidence; production scope
-now includes Firefox and native workers, while automatic balancing, other
-built-in/service roles, and macOS/HVF Firefox qualification are still required.
+now includes Firefox, native, and Python-role workers, while additional
+built-in/service roles and macOS/HVF Firefox qualification are still required.
 
 The boot also runs a remote `exit_group` fixture. A CPU0 leader clones a worker
 fixed to AP1; after the worker proves active EL0 execution, the leader invokes
