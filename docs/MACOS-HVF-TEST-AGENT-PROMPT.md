@@ -12,7 +12,7 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required implementation baseline: 4f72dbb09227dbd2ab6dc117d2c799d69d055353
+Required implementation baseline: 07d8340596fa341e05219faef5d6a66d6192671e
 
 Verify that the checked-out `main` contains this exact implementation commit.
 Do not test an older commit. A later documentation-only handoff commit is

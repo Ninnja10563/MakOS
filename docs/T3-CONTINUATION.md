@@ -28,7 +28,8 @@ Preserve existing files and changes.
 ## Current verified state
 
 - Firefox packages are now required to carry bounded canonical provenance for
-  the pinned ESR source commit, all 56 ordered patches (series SHA-256
+  implementation baseline `07d8340596fa341e05219faef5d6a66d6192671e`, the
+  pinned ESR source commit, all 56 ordered patches (series SHA-256
   `9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c`),
   five post-build audited artifacts, and the exact five stripped runtime
   payloads. Build, packaging, integration, and strict-runtime preflight each

@@ -6,6 +6,7 @@ Last updated: 2026-08-26.
 
 - 2026-08-26 the Firefox build/package/runtime chain now fails closed on stale
   artifacts before QEMU. A canonical bounded provenance record binds the
+  implementation baseline `07d8340596fa341e05219faef5d6a66d6192671e`, the
   pinned ESR source commit, all 56 ordered patches (series SHA-256
   `9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c`),
   five post-build audited ELF outputs, and the exact five stripped runtime
