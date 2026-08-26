@@ -4,6 +4,22 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the guest-native AArch64 C seed now compiles bounded conditional
+  mutation blocks: `if (condition) { assignments; }` and the corresponding
+  `if`/`else`, followed by later statements and a terminal return. A focused
+  two-function source emits a genuine ELF64 `ET_REL`, validates three symbols
+  and no relocations, links `choose` and `bump` as separate entries, enforces
+  writable/NX then RX mappings, and executes results `42,2,5,8`. Empty `else`
+  bodies and declaration-bearing branch bodies fail closed; nested and general
+  blocks remain unsupported. The structural guard, AArch64 release/image
+  build, and full `make unit check` pass. The first focused Pi/QEMU 10.0.11 TCG
+  run proved the new branch marker but a later existing three-input warm-cache
+  child exited 81; its identical unchanged rerun passed all 15 processes with
+  placements `5,7,3`, dispatches `175,171,178`, 38 migrations, zero drops,
+  and status 42. Unchanged Pi/TCG Firefox-role, cursor, and Native SMP gates
+  also pass; these are functional Pi results, not macOS/HVF Firefox timing
+  evidence. No Firefox threshold changed, and the fresh patch-0057 package plus
+  idle-host strict macOS/HVF run remain pending.
 - 2026-08-26 the Firefox build/package/runtime chain now fails closed on stale
   artifacts before QEMU. A canonical bounded provenance record binds the
   implementation baseline `07d8340596fa341e05219faef5d6a66d6192671e`, the

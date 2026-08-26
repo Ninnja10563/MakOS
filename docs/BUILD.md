@@ -305,12 +305,18 @@ is bounded automatic placement and dynamic migration of single-threaded
 toolchain leaders, not general load-driven migration of arbitrary desktop
 processes.
 
+The gate also proves bounded assignment-only conditional bodies with
+continuation. It compiles `if` and `if`/`else` forms into a genuine ELF64
+`ET_REL`, links separate `choose` and `bump` entries, applies W^X, and requires
+results `42,2,5,8`; empty `else` and declaration-bearing branch bodies remain
+denied. This is not general block or nested-scope support.
+
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
-structs, nested/general
-blocks, more than six functions or parameters per translation unit, general object
+structs, nested/general blocks beyond that bounded conditional form, more than
+six functions or parameters per translation unit, general object
 count/relocation repertoire, a general preprocessor or transitive dependency
 engine, or
 unbounded input graphs. The

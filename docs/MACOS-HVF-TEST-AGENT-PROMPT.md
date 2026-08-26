@@ -34,6 +34,12 @@ acceptable if this baseline is its ancestor.
        make test-aarch64-cursor-runtime
 
    The self-hosting gate must report
+   `MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else body=bounded-assignment continuation=return object=elf64-et-rel symbols=choose,bump linked=1 wx=denied results=42,2,5,8 malformed=empty-else,branch-declaration-denied`.
+   Its final host marker must include `branch_blocks=if,if-else`,
+   `branch_block_body=bounded-assignment`, `branch_block_results=42,2,5,8`,
+   `branch_block_object=elf64-et-rel`, and
+   `malformed_branch_blocks=empty-else,branch-declaration-denied`.
+   It must also report
    `MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5` with ELF64 ET_REL
    emission, five `R_AARCH64_CALL26` relocations, one-object guest linking,
    W^X execution result 42, `max_functions=6`, and a denied seventh function.

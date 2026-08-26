@@ -27,6 +27,19 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The guest-native AArch64 C seed now supports bounded assignment-only
+  conditional bodies with continuation: `if (...) { assignments; }` and
+  `if (...) { assignments; } else { assignments; }`. A genuine ELF64
+  `ET_REL` fixture links and executes `choose(40)=42`, `choose(4)=2`,
+  `bump(4)=5`, and `bump(8)=8` after W^X enforcement; empty `else` and a
+  branch-local declaration fail closed. Nested/general blocks are still
+  absent. Structural, release/image, full `make unit check`, and unchanged
+  Pi/TCG Firefox-role, cursor, and Native SMP gates pass. The first focused
+  self-host run passed the new marker but a later existing warm-cache child
+  exited 81; an identical rerun passed all 15 toolchain processes with
+  placements `5,7,3`, dispatches `175,171,178`, 38 migrations, zero drops,
+  and status 42. This is Pi functional evidence only and does not change the
+  pending strict macOS/HVF Firefox qualification or any threshold.
 - Firefox packages are now required to carry bounded canonical provenance for
   implementation baseline `07d8340596fa341e05219faef5d6a66d6192671e`, the
   pinned ESR source commit, all 56 ordered patches (series SHA-256

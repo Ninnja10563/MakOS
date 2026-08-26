@@ -203,11 +203,20 @@ this seed cannot yet prove their range. Conditions accept signed `==`, `!=`,
 `<`, `<=`, `>`, and `>=`; focused guest execution covers every relation and a
 `pointer + -1` load.
 
+Conditional statements also accept a deliberately bounded mutation form:
+`if (condition) { one-or-more assignments; }`, optionally followed by
+`else { one-or-more assignments; }`, after which parsing continues to later
+statements and the terminal return. The focused guest fixture emits and parses
+a genuine ELF64 `ET_REL`, links separate `choose` and `bump` entries, enforces
+writable/NX then RX mappings, and executes results `42,2,5,8`. Empty branch
+bodies and declarations inside branch bodies fail closed. This does not add
+nested scopes or general compound statements.
+
 This seed has no general pointer arithmetic beyond constant/scalar-variable
 element addition and typed pointer difference, no pointer-provenance analysis
 or broader pointer/lvalue expressions, variable-length/global/multidimensional
-arrays, structs,
-nested/general blocks, more than six functions or parameters per translation unit,
+arrays, structs, nested/general blocks beyond the bounded assignment-only
+conditional form, more than six functions or parameters per translation unit,
 more than six objects, aggregate linked code beyond 512 bytes, general
 relocations or preprocessing beyond the documented bounded subset,
 optimization, archives, dynamic linking, dependency/header discovery beyond
