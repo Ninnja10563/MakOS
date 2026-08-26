@@ -280,13 +280,22 @@ Each authenticated compiler/assembler/linker invocation is a real sandboxed
 EL0 process with the distinct `Toolchain` role. Its leader is not pinned to
 CPU0: the kernel snapshots AP1-3 dispatch counts, prefers idle APs, chooses the
 least-dispatched candidate, rotates ties, and installs a singleton affinity.
+That affinity is not permanent. At a timer-safe exception boundary, an
+eight-dispatch imbalance causes the kernel to capture the full context, move
+the singleton affinity to an idle lower-load AP under the scheduler lock,
+publish the task Ready/unowned, and wake the destination by SGI. The source
+cannot retain ownership and the destination restores GPR/SP/TLS/SIMD state.
 The focused gate validates every placement decision and requires all three APs
-to receive work across 15 toolchain processes. Console bytes written by an AP
+to receive work across 15 toolchain processes. It also validates every
+migration's measured loads and affinity transition, requires nonzero source
+and destination masks contained in `0xe`, and rejects dropped evidence.
+Console bytes written by an AP
 still update retained terminal state, but graphics composition is coalesced
 and deferred to CPU0; the final marker requires nonzero AP deferrals and CPU0
 owner compositions with no pending handoff or off-owner virtio-GPU MMIO. This
-is bounded automatic placement of single-threaded toolchain leaders, not
-general load-driven migration of arbitrary desktop processes.
+is bounded automatic placement and dynamic migration of single-threaded
+toolchain leaders, not general load-driven migration of arbitrary desktop
+processes.
 
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element

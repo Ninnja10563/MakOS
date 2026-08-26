@@ -4,6 +4,25 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 `Toolchain` leaders now migrate automatically after
+  initial placement instead of remaining on one AP for life. At each timer
+  preemption the kernel captures the complete user context under the scheduler
+  lock, compares cumulative dispatch load, and, at an eight-dispatch imbalance,
+  changes the singleton affinity to an idle lower-load AP before publishing the
+  task Ready/unowned and sending the scheduler SGI. CPU0 emits bounded evidence
+  only after child exit, preventing AP telemetry from splitting guest stdout;
+  buffer saturation is counted, never fatal. The final Pi/QEMU 10.0.11 TCG
+  self-host run naturally made 42 migrations across source and target masks
+  `0xe`, corrected initial placements `4,4,7` to dispatch totals
+  `180,184,180`, preserved GPR/SP/TLS/SIMD state and exclusive ownership, and
+  recorded zero evidence drops. All 15 compiler/assembler/linker processes
+  still exited 42; CPU0 handled 242 deferred compositions, APs made 247
+  deferrals, and no GPU handoff remained pending. Full `make unit check`,
+  Firefox-role production SMP (`9582,9289,10673` dispatches, watcher AP3,
+  INTID 78), ordinary Native SMP (`13706,12466,12616`), and cursor runtime
+  pass.
+  This is genuine dynamic load-driven migration for one safe role, not general
+  Firefox/Native/service balancing; the scheduler audit row remains Partial.
 - 2026-08-26 AArch64 guest-native compiler, assembler, and linker process
   leaders now use a distinct `Toolchain` scheduler role and kernel-owned
   automatic placement instead of inheriting CPU0-only `Native` leader policy.

@@ -200,7 +200,9 @@ EXECUTION_MARKER = (
 )
 
 
-def validate_toolchain_smp(output: bytes) -> tuple[list[int], list[int], int, int]:
+def validate_toolchain_smp(
+    output: bytes,
+) -> tuple[list[int], list[int], int, int, int, int, int]:
     placements = re.findall(
         rb"MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK pid=(\d+) cpu=([1-3]) "
         rb"affinity=0x([0-9a-f]+) loads=(\d+),(\d+),(\d+) "
@@ -234,9 +236,46 @@ def validate_toolchain_smp(output: bytes) -> tuple[list[int], list[int], int, in
                 f"loads={loads} idle_mask={idle_mask:#x}"
             )
 
+    migrations = re.findall(
+        rb"MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK pid=(\d+) source_cpu=([1-3]) "
+        rb"target_cpu=([1-3]) old_affinity=0x([0-9a-f]+) "
+        rb"new_affinity=0x([0-9a-f]+) loads=(\d+),(\d+),(\d+) "
+        rb"idle_mask=0x([0-9a-f]+) policy=timer-safe-dispatch-imbalance "
+        rb"delta=(\d+) context=gpr,sp,tls,simd ownership=ready-unowned "
+        rb"evidence_emitter=cpu0 device_mmio_owner=cpu0 caller_selected=0",
+        output,
+    )
+    if not migrations:
+        raise AssertionError("no automatic Toolchain migration was observed")
+    for migration in migrations:
+        source_cpu = int(migration[1])
+        target_cpu = int(migration[2])
+        old_affinity = int(migration[3], 16)
+        new_affinity = int(migration[4], 16)
+        loads = [int(value) for value in migration[5:8]]
+        idle_mask = int(migration[8], 16)
+        delta = int(migration[9])
+        if (
+            source_cpu == target_cpu
+            or old_affinity != 1 << source_cpu
+            or new_affinity != 1 << target_cpu
+            or idle_mask & (1 << target_cpu) == 0
+            or loads[source_cpu - 1] < loads[target_cpu - 1] + delta
+            or delta != 8
+        ):
+            raise AssertionError(
+                "invalid automatic Toolchain migration: "
+                f"source={source_cpu} target={target_cpu} loads={loads} "
+                f"idle_mask={idle_mask:#x} delta={delta}"
+            )
+
     summaries = re.findall(
         rb"MAKOS_AARCH64_TOOLCHAIN_SMP_OK cpu_mask=0x([0-9a-f]+) "
         rb"placements=(\d+),(\d+),(\d+) dispatches=(\d+),(\d+),(\d+) "
+        rb"migrations=(\d+) migration_source_mask=0x([0-9a-f]+) "
+        rb"migration_target_mask=0x([0-9a-f]+) "
+        rb"migration_policy=timer-safe-dispatch-imbalance migration_delta=(\d+) "
+        rb"migration_evidence_drops=(\d+) "
         rb"leader=ap kernel_placement=least-dispatched-idle caller_selected=0 "
         rb"ownership=exclusive device_mmio_owner=cpu0 "
         rb"console_gpu_handoff=ap-defer,cpu0-compose owner_composes=(\d+) "
@@ -248,16 +287,30 @@ def validate_toolchain_smp(output: bytes) -> tuple[list[int], list[int], int, in
             f"expected {TOOLCHAIN_PROCESS_COUNT} toolchain SMP summaries, "
             f"observed {len(summaries)}"
         )
-    final = [int(value, 16 if index == 0 else 10) for index, value in enumerate(summaries[-1])]
-    cpu_mask, *counts = final
-    final_placements = counts[:3]
-    final_dispatches = counts[3:6]
-    owner_composes, ap_deferrals = counts[6:]
+    final = summaries[-1]
+    cpu_mask = int(final[0], 16)
+    final_placements = [int(value) for value in final[1:4]]
+    final_dispatches = [int(value) for value in final[4:7]]
+    migration_count = int(final[7])
+    migration_source_mask = int(final[8], 16)
+    migration_target_mask = int(final[9], 16)
+    migration_delta = int(final[10])
+    migration_evidence_drops = int(final[11])
+    owner_composes = int(final[12])
+    ap_deferrals = int(final[13])
     if (
         cpu_mask != 0xE
         or sum(final_placements) != TOOLCHAIN_PROCESS_COUNT
         or min(final_placements) == 0
         or min(final_dispatches) == 0
+        or migration_count != len(migrations)
+        or migration_count == 0
+        or migration_source_mask == 0
+        or migration_source_mask & ~0xE != 0
+        or migration_target_mask == 0
+        or migration_target_mask & ~0xE != 0
+        or migration_delta != 8
+        or migration_evidence_drops != 0
         or owner_composes == 0
         or ap_deferrals == 0
     ):
@@ -273,7 +326,15 @@ def validate_toolchain_smp(output: bytes) -> tuple[list[int], list[int], int, in
     }
     if dispatched_cpus != {1, 2, 3}:
         raise AssertionError(f"missing toolchain AP dispatch markers: {dispatched_cpus}")
-    return final_placements, final_dispatches, owner_composes, ap_deferrals
+    return (
+        final_placements,
+        final_dispatches,
+        migration_count,
+        migration_source_mask,
+        migration_target_mask,
+        owner_composes,
+        ap_deferrals,
+    )
 
 
 def main() -> int:
@@ -608,6 +669,9 @@ def main() -> int:
                 (
                     toolchain_placements,
                     toolchain_dispatches,
+                    toolchain_migrations,
+                    toolchain_migration_source_mask,
+                    toolchain_migration_target_mask,
                     toolchain_owner_composes,
                     toolchain_ap_deferrals,
                 ) = validate_toolchain_smp(bytes(output))
@@ -627,7 +691,7 @@ def main() -> int:
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
         "toolchain_startup=sysv manifest_arg=1 cli_builds=14 seeded_modes=fixture,existing "
-        f"toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe placements={toolchain_placements[0]},{toolchain_placements[1]},{toolchain_placements[2]} dispatches={toolchain_dispatches[0]},{toolchain_dispatches[1]},{toolchain_dispatches[2]} processes={TOOLCHAIN_PROCESS_COUNT} caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={toolchain_owner_composes} ap_deferrals={toolchain_ap_deferrals} pending=0 "
+        f"toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe placements={toolchain_placements[0]},{toolchain_placements[1]},{toolchain_placements[2]} dispatches={toolchain_dispatches[0]},{toolchain_dispatches[1]},{toolchain_dispatches[2]} processes={TOOLCHAIN_PROCESS_COUNT} migrations={toolchain_migrations} migration_source_mask={toolchain_migration_source_mask:#x} migration_target_mask={toolchain_migration_target_mask:#x} migration_policy=timer-safe-dispatch-imbalance migration_delta=8 migration_evidence_drops=0 caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={toolchain_owner_composes} ap_deferrals={toolchain_ap_deferrals} pending=0 "
         "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2 invalidations=object,source,state,header "
         "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0 "
         f"repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes={len(REPOSITORY_C_SOURCE)} asm_bytes={len(REPOSITORY_ASM_SOURCE)} c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} identity=build-generated-exact host_reference=compiled guest_execution=42 "

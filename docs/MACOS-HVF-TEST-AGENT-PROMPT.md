@@ -72,15 +72,25 @@ Branch: main
    affinity, the selected AP at the minimum recorded load, an idle AP selected
    whenever `idle_mask` is nonzero,
    `policy=least-dispatched-idle-ap caller_selected=0`, and CPU0 device
-   ownership. Require dispatch markers covering AP1, AP2, and AP3. The final
+   ownership. Require dispatch markers covering AP1, AP2, and AP3. Require
+   nonzero `MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK` records emitted by CPU0 only
+   after child exit. Every record must move between distinct singleton AP
+   affinities, select an idle target, prove source load is at least eight
+   dispatches above target load, retain GPR/SP/TLS/SIMD context and
+   Ready/unowned source publication, use SGI wake, preserve exclusive
+   ownership, and report no caller-selected affinity. The final
    `MAKOS_AARCH64_TOOLCHAIN_SMP_OK` must report `cpu_mask=0xe`, 15 total
    placements with every AP nonzero, every AP dispatch count nonzero,
+   nonzero migrations, nonzero source/target masks contained in `0xe`,
+   `migration_policy=timer-safe-dispatch-imbalance migration_delta=8`, and
+   `migration_evidence_drops=0`,
    `leader=ap kernel_placement=least-dispatched-idle caller_selected=0`,
    exclusive ownership, and
    `console_gpu_handoff=ap-defer,cpu0-compose` with positive owner compositions
    and AP deferrals, `pending=0`, and status 42. The final host marker must
    retain `toolchain_smp=kernel-least-loaded-ap`, `cpu_mask=0xe`,
-   `processes=15`, `caller_selected=0`, `ownership=exclusive`,
+   `processes=15`, the same migration count/masks/policy with zero evidence
+   drops, `caller_selected=0`, `ownership=exclusive`,
    `device_mmio_owner=cpu0`, and the drained console/GPU handoff evidence.
    The Native gate must
    report all of the following without borrowing Firefox

@@ -27,6 +27,22 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- AArch64 Toolchain leaders now dynamically rebalance after their kernel-owned
+  initial placement. At timer preemption an eight-dispatch imbalance causes a
+  full context capture, singleton-affinity move to an idle lower-load AP,
+  Ready/unowned source publication, and target SGI. The final Pi/QEMU 10.0.11
+  TCG self-host run executed 15 real compiler/assembler/linker processes and
+  naturally made 42 migrations across source/target masks `0xe`, correcting
+  initial placements `4,4,7` to dispatch totals `180,184,180`. GPR/SP/TLS/SIMD
+  context and exclusive ownership remained valid; CPU0 drained the bounded
+  evidence after each child so guest stdout stayed intact, with zero evidence
+  drops. CPU0 also completed 242 graphics compositions for 247 AP deferrals,
+  pending zero. Full `make unit check`, Firefox-role production SMP
+  (`9582,9289,10673`, watcher AP3, keyboard INTID 78), Native SMP
+  (`13706,12466,12616`), and cursor runtime pass. This is genuine automatic
+  dynamic migration for Toolchain only; Firefox/Native and service-role load
+  balancing and unchanged idle-macOS/HVF real-Firefox qualification remain
+  Partial.
 - AArch64 authenticated guest compiler, assembler, and linker invocations now
   have a distinct `Toolchain` process role. The kernel automatically assigns
   each single-threaded leader a singleton AP affinity using idle-first,
@@ -107,13 +123,14 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG Toolchain-placement milestone: PID 780052,
-  user service `makos-visible-toolchain-load-placement-final.service`, session
-  `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd`, private
+- Active visible Pi/QEMU 10.0.11 TCG Toolchain dynamic-balancing milestone:
+  PID 786423, user service
+  `makos-visible-toolchain-dynamic-balance-final2.service`, session
+  `build/makos-pi-visible-toolchain-dynamic-balance-final2-R6RvFZp2`, private
   read-only `boot.img`, sparse `data.img`, private `vars.fd`, `qmp.sock`,
   `serial.log`, `qemu.pid`, and `login.ppm`. The boot clone and current
   release image both have SHA-256
-  `5f3223dabae1f35e9ce213f55e9e3ac0ffc6be88c3c834d3922db1578d8f6f7a`;
+  `be80a2e33f462b30a56696b9b93fe0c2cdafc5459575561972c6544090fb6202`;
   the 800x600 QMP login capture has SHA-256
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   It reports `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, four online PEs,
@@ -122,6 +139,16 @@ Preserve existing files and changes.
   build lacks the optional VNC module, so live display is disabled while the
   guest remains fully inspectable and controllable through QMP captures/input.
   It is the sole QEMU process. Stop it with QMP `quit` before any runtime gate.
+- Prior dynamic-balancing capture PID 784352, service
+  `makos-visible-toolchain-dynamic-balance-final.service`, session
+  `build/makos-pi-visible-toolchain-dynamic-balance-final-WPqYbYfK`, was
+  stopped cleanly through QMP before the final evidence-ordering runtime. Its
+  private files remain.
+- Prior visible Toolchain-placement milestone PID 780052, service
+  `makos-visible-toolchain-load-placement-final.service`, session
+  `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd`, was
+  stopped cleanly through QMP before the dynamic-balancing runtime. Its private
+  files remain.
 - Prior visible repository-source milestone PID 775104, service
   `makos-visible-selfhost-repository-final.service`, session
   `build/makos-pi-visible-selfhost-repository-final-JJyWajUO`, was stopped
@@ -622,11 +649,15 @@ Preserve existing files and changes.
   nested headers/eight dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 780052 in
-  `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd` is the sole
+- At this handoff PID 786423 in
+  `build/makos-pi-visible-toolchain-dynamic-balance-final2-R6RvFZp2` is the sole
   QEMU and no runtime-test harness is active. Check process state before every
   runtime gate and stop this guest through its recorded QMP socket; never start
-  concurrent QEMU. Prior PID 775104 in
+  concurrent QEMU. Prior PID 784352 in
+  `build/makos-pi-visible-toolchain-dynamic-balance-final-WPqYbYfK` was stopped
+  cleanly through QMP before the final runtime. Prior PID 780052 in
+  `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd` was stopped
+  cleanly through QMP before this increment. Prior PID 775104 in
   `build/makos-pi-visible-selfhost-repository-final-JJyWajUO` was stopped
   cleanly through QMP before this increment. PID 766987 in
   `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr` was stopped
@@ -807,8 +838,9 @@ Preserve existing files and changes.
 2. The strict target now requires overlapping distinct Firefox TIDs on multiple
    guest CPUs; inspect that evidence in the next genuine macOS/HVF run. The
    Toolchain role now has automatic idle-first least-dispatched initial AP
-   placement. Continue into safe dynamic migration/rebalancing and repeated
-   contention for other roles while retaining CPU0-exclusive device ownership.
+   placement plus timer-safe dynamic migration. Continue that policy into
+   Firefox/Native workers only with exact interaction/ownership proof, and add
+   repeated contention while retaining CPU0-exclusive device ownership.
    Stop the visible QEMU through QMP before any focused runtime.
 3. Expand the bounded guest C compiler beyond its current six-function and
    six-parameter per-translation-unit limits. The primary runtime graph now

@@ -36,8 +36,11 @@ remain on CPU0, while non-leader Firefox and ordinary native-application
 threads are AP-eligible on the shared Ready queue. Single-threaded guest
 compiler, assembler, and linker leaders have a separate `Toolchain` role: the
 kernel places each new process on one least-dispatched AP, preferring idle APs
-and rotating equal-load ties, then gives it a singleton affinity. Device MMIO
-remains CPU0-owned. The production
+and rotating equal-load ties, then gives it a singleton affinity. Timer
+preemption also re-evaluates that process: when the current AP exceeds an idle
+candidate by eight dispatches, the scheduler captures the full context, moves
+the singleton affinity under the ownership lock, publishes Ready/unowned, and
+wakes the target by SGI. Device MMIO remains CPU0-owned. The production
 scheduler scope remains bounded; this is not unrestricted desktop SMP
 scheduling.
 
@@ -65,16 +68,23 @@ interval. This proves the production policy is no longer Firefox-only; the
 Firefox evidence counters and markers remain scoped to the launched Firefox
 group and cannot be satisfied by the native fixture.
 
-The self-host gate covers automatic leader placement with real guest work.
+The self-host gate covers automatic leader placement and migration with real
+guest work.
 Fifteen authenticated toolchain processes compile, assemble, and link the
-fixture and tracked repository probe. The Pi/TCG run placed them `4,6,5`
-across AP1-3 and recorded nonzero dispatch totals `188,171,182`; each recorded
-decision selects a minimum-load AP and an idle AP whenever one exists. AP
+fixture and tracked repository probe. The final Pi/TCG run initially placed
+them `4,4,7`, then made 42 natural timer-boundary migrations with source and
+target masks `0xe` and converged to dispatch totals `180,184,180`. Each initial
+decision selects a minimum-load AP and an idle AP whenever one exists; each
+migration proves an eight-dispatch imbalance, singleton affinity transition,
+full GPR/SP/TLS/SIMD context, and Ready/unowned source release. AP
 console writes retain their bytes but never submit GPU MMIO: they coalesce a
 composition request for CPU0, which the wait/reap path services. The final
 proof requires positive owner compositions and AP deferrals, zero pending
-handoff, and status 42. This placement is kernel-owned and caller-selected
-affinity is absent, but it does not yet rebalance an already-running process.
+handoff, zero dropped migration records, and status 42. APs record bounded
+evidence while CPU0 emits it only after child exit, so telemetry cannot split
+guest stdout. This policy is kernel-owned and caller-selected affinity is
+absent. It qualifies dynamic balancing for the single-threaded Toolchain role,
+not Firefox/Native workers or built-in/service processes.
 
 Surface-key priority follows the same affinity split. A Firefox thread blocked
 in `surface_wait_event` publishes its TID; AP1-3 may select that non-leader
@@ -301,17 +311,19 @@ Firefox.
   desktop startup. Firefox/Native leaders, PID1, shell, UI, and service roles
   remain on CPU0. Eligible application threads may select kernel-owned masks
   through syscall 148. Toolchain spawn now performs least-dispatched,
-  idle-first AP placement with rotating ties, but dynamic migration/rebalancing
-  of running work and additional built-in/service roles remain gated until
-  their ownership paths are qualified.
+  idle-first AP placement with rotating ties, and timer-safe Toolchain work now
+  migrates automatically at a measured eight-dispatch imbalance. Dynamic
+  balancing of Firefox/Native workers and additional built-in/service roles
+  remains gated until their ownership paths are qualified.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
   ownership through a Ready/unowned publication. Six load tasks also contend
   through 288 yields on the shared Ready queue and receive 99 dispatches on
   each AP with exclusive ownership. The musl production fixture also forces
   three caller-selected cross-AP migrations and restores its AP-pool masks.
-  Broader production policy/priorities, automatic load-driven migration after
-  initial placement, and
-  Firefox/desktop contention remain open.
+  The real Toolchain workload now adds 42 kernel-selected migrations across
+  all AP source/destination masks. Broader production policy/priorities,
+  automatic load-driven migration for other roles, and Firefox/desktop
+  contention remain open.
 - `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
   loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit
@@ -431,4 +443,5 @@ The post-desktop marker reports `userspace_scheduler_cpus=4` only for this
 bounded policy. The original audit remains Partial until genuine Firefox
 threads overlap on multiple guest CPUs under the unchanged idle-macOS/HVF
 runtime gate and dynamic balancing plus additional built-in/service roles are
-safely scheduled.
+safely scheduled. Toolchain-only automatic balancing does not close those
+broader requirements.

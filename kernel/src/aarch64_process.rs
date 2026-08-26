@@ -220,6 +220,9 @@ struct SchedulerState {
     timer_dispatches: [u64; MAX_PROCESSES],
     cpu_dispatches: [u64; 4],
     compute_placement_cursor: u8,
+    toolchain_migration_records: [ComputeMigration; MAX_TOOLCHAIN_MIGRATIONS],
+    toolchain_migration_count: usize,
+    toolchain_migration_reported: usize,
     spawned_roots: [u64; MAX_PROCESSES],
     reaped_processes: u64,
     reclaimed_frames: usize,
@@ -239,6 +242,9 @@ impl SchedulerState {
             timer_dispatches: [0; MAX_PROCESSES],
             cpu_dispatches: [0; 4],
             compute_placement_cursor: 1,
+            toolchain_migration_records: [ComputeMigration::EMPTY; MAX_TOOLCHAIN_MIGRATIONS],
+            toolchain_migration_count: 0,
+            toolchain_migration_reported: 0,
             spawned_roots: [0; MAX_PROCESSES],
             reaped_processes: 0,
             reclaimed_frames: 0,
@@ -351,6 +357,51 @@ impl SchedulerState {
             idle_mask,
         }
     }
+
+    fn rebalance_toolchain_on_timer(
+        &mut self,
+        cpu: usize,
+        pid: u64,
+    ) -> Option<ComputeMigration> {
+        if cpu == 0 || cpu >= self.cpu_dispatches.len() {
+            return None;
+        }
+        let index = self.contexts.iter().position(|slot| slot.pid == pid)?;
+        let slot = self.contexts[index];
+        if slot.role != ProcessRole::Toolchain
+            || slot.pid != slot.group_pid
+            || slot.affinity_mask != 1u8 << cpu
+        {
+            return None;
+        }
+        let placement = self.least_loaded_compute_ap();
+        let source_load = placement.loads[cpu - 1];
+        let target_load = placement.loads[placement.cpu - 1];
+        if placement.cpu == cpu
+            || source_load
+                < target_load.saturating_add(TOOLCHAIN_REBALANCE_DISPATCH_DELTA)
+        {
+            return None;
+        }
+        self.contexts[index].affinity_mask = 1u8 << placement.cpu;
+        let migration = ComputeMigration {
+            pid,
+            source_cpu: cpu,
+            target_cpu: placement.cpu,
+            loads: placement.loads,
+            idle_mask: placement.idle_mask,
+        };
+        if self.toolchain_migration_count < MAX_TOOLCHAIN_MIGRATIONS {
+            self.toolchain_migration_records[self.toolchain_migration_count] = migration;
+            self.toolchain_migration_count += 1;
+        } else {
+            TOOLCHAIN_MIGRATION_EVIDENCE_DROPS.fetch_add(1, Ordering::AcqRel);
+        }
+        TOOLCHAIN_MIGRATIONS.fetch_add(1, Ordering::AcqRel);
+        TOOLCHAIN_MIGRATION_SOURCE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+        TOOLCHAIN_MIGRATION_TARGET_MASK.fetch_or(1u64 << placement.cpu, Ordering::AcqRel);
+        Some(migration)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -358,6 +409,25 @@ struct ComputePlacement {
     cpu: usize,
     loads: [u64; 3],
     idle_mask: u8,
+}
+
+#[derive(Clone, Copy)]
+struct ComputeMigration {
+    pid: u64,
+    source_cpu: usize,
+    target_cpu: usize,
+    loads: [u64; 3],
+    idle_mask: u8,
+}
+
+impl ComputeMigration {
+    const EMPTY: Self = Self {
+        pid: 0,
+        source_cpu: 0,
+        target_cpu: 0,
+        loads: [0; 3],
+        idle_mask: 0,
+    };
 }
 
 struct LockedProcesses {
@@ -461,8 +531,16 @@ static PRODUCTION_WORKER_OVERLAP_TIDS: [AtomicU64; 4] =
 static PRODUCTION_WORKER_OVERLAP_REPORTED: AtomicBool = AtomicBool::new(false);
 static TOOLCHAIN_CPU_MASK: AtomicU64 = AtomicU64::new(0);
 static TOOLCHAIN_REPORTED_MASK: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_DISPATCH_EMITTED_MASK: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_FIRST_DISPATCH_PID: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static TOOLCHAIN_PLACEMENTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 static TOOLCHAIN_DISPATCHES: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static TOOLCHAIN_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_MIGRATION_SOURCE_MASK: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_MIGRATION_EVIDENCE_DROPS: AtomicU64 = AtomicU64::new(0);
+const TOOLCHAIN_REBALANCE_DISPATCH_DELTA: u64 = 8;
+const MAX_TOOLCHAIN_MIGRATIONS: usize = 128;
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -3914,15 +3992,44 @@ fn reset_production_worker_evidence() {
 fn reset_toolchain_smp_evidence() {
     TOOLCHAIN_CPU_MASK.store(0, Ordering::Release);
     TOOLCHAIN_REPORTED_MASK.store(0, Ordering::Release);
+    TOOLCHAIN_DISPATCH_EMITTED_MASK.store(0, Ordering::Release);
+    TOOLCHAIN_MIGRATIONS.store(0, Ordering::Release);
+    TOOLCHAIN_MIGRATION_SOURCE_MASK.store(0, Ordering::Release);
+    TOOLCHAIN_MIGRATION_TARGET_MASK.store(0, Ordering::Release);
+    TOOLCHAIN_MIGRATION_EVIDENCE_DROPS.store(0, Ordering::Release);
     for placements in &TOOLCHAIN_PLACEMENTS {
         placements.store(0, Ordering::Release);
     }
     for dispatches in &TOOLCHAIN_DISPATCHES {
         dispatches.store(0, Ordering::Release);
     }
+    for pid in &TOOLCHAIN_FIRST_DISPATCH_PID {
+        pid.store(0, Ordering::Release);
+    }
+    with_state(|state| {
+        state.toolchain_migration_count = 0;
+        state.toolchain_migration_reported = 0;
+    });
 }
 
-fn toolchain_smp_evidence() -> (u64, [u64; 3], [u64; 3]) {
+fn take_unreported_toolchain_migrations(
+) -> ([ComputeMigration; MAX_TOOLCHAIN_MIGRATIONS], usize) {
+    with_state(|state| {
+        let start = state.toolchain_migration_reported;
+        let end = state.toolchain_migration_count;
+        if start > end || end > MAX_TOOLCHAIN_MIGRATIONS {
+            crate::fatal("AArch64 Toolchain migration evidence indices invalid");
+        }
+        let mut output = [ComputeMigration::EMPTY; MAX_TOOLCHAIN_MIGRATIONS];
+        let count = end - start;
+        output[..count].copy_from_slice(&state.toolchain_migration_records[start..end]);
+        state.toolchain_migration_count = 0;
+        state.toolchain_migration_reported = 0;
+        (output, count)
+    })
+}
+
+fn toolchain_smp_evidence() -> (u64, [u64; 3], [u64; 3], u64, u64, u64, u64) {
     (
         TOOLCHAIN_CPU_MASK.load(Ordering::Acquire),
         [
@@ -3935,6 +4042,10 @@ fn toolchain_smp_evidence() -> (u64, [u64; 3], [u64; 3]) {
             TOOLCHAIN_DISPATCHES[2].load(Ordering::Acquire),
             TOOLCHAIN_DISPATCHES[3].load(Ordering::Acquire),
         ],
+        TOOLCHAIN_MIGRATIONS.load(Ordering::Acquire),
+        TOOLCHAIN_MIGRATION_SOURCE_MASK.load(Ordering::Acquire),
+        TOOLCHAIN_MIGRATION_TARGET_MASK.load(Ordering::Acquire),
+        TOOLCHAIN_MIGRATION_EVIDENCE_DROPS.load(Ordering::Acquire),
     )
 }
 
@@ -4105,12 +4216,7 @@ pub(crate) fn run_secondary_scheduler() -> ! {
         } else if role == ProcessRole::Toolchain {
             let prior = TOOLCHAIN_REPORTED_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
             if prior & cpu_bit == 0 {
-                crate::serial_println!(
-                    "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK pid={} cpu={} affinity={:#x} ownership=exclusive policy=kernel-least-loaded-ap device_mmio_owner=cpu0",
-                    pid,
-                    cpu,
-                    cpu_bit,
-                );
+                TOOLCHAIN_FIRST_DISPATCH_PID[cpu].store(pid, Ordering::Release);
             }
         }
         crate::arch::switch_address_space(context.ttbr0);
@@ -5426,12 +5532,52 @@ pub fn wait(pid: u64) -> Option<u64> {
             crate::fatal("AArch64 toolchain parent wait escaped CPU0");
         }
         crate::graphics::service_deferred_actions();
-        let (cpu_mask, placements, dispatches) = toolchain_smp_evidence();
+        let observed_dispatches = TOOLCHAIN_REPORTED_MASK.load(Ordering::Acquire);
+        let emitted_dispatches = TOOLCHAIN_DISPATCH_EMITTED_MASK.load(Ordering::Acquire);
+        let new_dispatches = observed_dispatches & !emitted_dispatches;
+        for cpu in 1..4 {
+            let bit = 1u64 << cpu;
+            if new_dispatches & bit == 0 {
+                continue;
+            }
+            let dispatch_pid = TOOLCHAIN_FIRST_DISPATCH_PID[cpu].load(Ordering::Acquire);
+            if dispatch_pid == 0 {
+                crate::fatal("AArch64 Toolchain dispatch evidence missing PID");
+            }
+            crate::serial_println!(
+                "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK pid={} cpu={} affinity={:#x} ownership=exclusive policy=kernel-least-loaded-ap evidence_emitter=cpu0 device_mmio_owner=cpu0",
+                dispatch_pid,
+                cpu,
+                bit,
+            );
+        }
+        TOOLCHAIN_DISPATCH_EMITTED_MASK.fetch_or(new_dispatches, Ordering::AcqRel);
+        let (migration_records, migration_record_count) =
+            take_unreported_toolchain_migrations();
+        for migration in &migration_records[..migration_record_count] {
+            crate::serial_println!(
+                "MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK pid={} source_cpu={} target_cpu={} old_affinity={:#x} new_affinity={:#x} loads={},{},{} idle_mask={:#x} policy=timer-safe-dispatch-imbalance delta={} context=gpr,sp,tls,simd ownership=ready-unowned evidence_emitter=cpu0 device_mmio_owner=cpu0 caller_selected=0",
+                migration.pid,
+                migration.source_cpu,
+                migration.target_cpu,
+                1u8 << migration.source_cpu,
+                1u8 << migration.target_cpu,
+                migration.loads[0],
+                migration.loads[1],
+                migration.loads[2],
+                migration.idle_mask,
+                TOOLCHAIN_REBALANCE_DISPATCH_DELTA,
+            );
+        }
+        let (cpu_mask, placements, dispatches, migrations, source_mask, target_mask, evidence_drops) =
+            toolchain_smp_evidence();
         let (owner_composes, ap_deferrals, pending) =
             crate::graphics::gpu_service_affinity_evidence();
         if cpu_mask & 1 != 0
             || placements.iter().sum::<u64>() == 0
             || dispatches.iter().sum::<u64>() == 0
+            || source_mask & 1 != 0
+            || target_mask & 1 != 0
             || owner_composes == 0
             || ap_deferrals == 0
             || pending
@@ -5439,7 +5585,7 @@ pub fn wait(pid: u64) -> Option<u64> {
             crate::fatal("AArch64 toolchain SMP evidence invalid");
         }
         crate::serial_println!(
-            "MAKOS_AARCH64_TOOLCHAIN_SMP_OK cpu_mask={:#x} placements={},{},{} dispatches={},{},{} leader=ap kernel_placement=least-dispatched-idle caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={} ap_deferrals={} pending=0 status={}",
+            "MAKOS_AARCH64_TOOLCHAIN_SMP_OK cpu_mask={:#x} placements={},{},{} dispatches={},{},{} migrations={} migration_source_mask={:#x} migration_target_mask={:#x} migration_policy=timer-safe-dispatch-imbalance migration_delta={} migration_evidence_drops={} leader=ap kernel_placement=least-dispatched-idle caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={} ap_deferrals={} pending=0 status={}",
             cpu_mask,
             placements[0],
             placements[1],
@@ -5447,6 +5593,11 @@ pub fn wait(pid: u64) -> Option<u64> {
             dispatches[0],
             dispatches[1],
             dispatches[2],
+            migrations,
+            source_mask,
+            target_mask,
+            TOOLCHAIN_REBALANCE_DISPATCH_DELTA,
+            evidence_drops,
             owner_composes,
             ap_deferrals,
             status,
@@ -6477,9 +6628,9 @@ fn report_surface_priority_dispatch(tid: u64, cpu: usize, leader: bool) {
 fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool) {
     let cpu = scheduler_cpu();
     let captured = crate::arch::UserContext::capture(frame);
-    let (prior_pid, next, remote_stopped) = with_state(|state| {
+    let (prior_pid, next, remote_stopped, migration) = with_state(|state| {
         if !state.session_active {
-            return (0, None, false);
+            return (0, None, false, None);
         }
         let prior_pid = state
             .table
@@ -6511,10 +6662,18 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             let bit = 1u64 << cpu;
             REMOTE_GROUP_STOP_EARLY_MASK.fetch_or(bit, Ordering::AcqRel);
             REMOTE_GROUP_STOP_ACK_MASK.fetch_or(bit, Ordering::AcqRel);
-            return (prior_pid, None, true);
+            return (prior_pid, None, true, None);
         }
+        let migration = if timer {
+            state.rebalance_toolchain_on_timer(cpu, prior_pid)
+        } else {
+            None
+        };
         let priority = select_surface_priority(state, prior_pid, cpu);
         let next = priority.or_else(|| state.schedule_next_for_cpu(cpu));
+        if migration.is_some() && state.table.running_cpu(prior_pid).is_some() {
+            crate::fatal("AArch64 Toolchain migration retained source ownership");
+        }
         let Some(next) = next else {
             if cpu == 0 {
                 crate::fatal("AArch64 schedule found no runnable process");
@@ -6524,7 +6683,7 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             // outer secondary dispatcher idle until an eligible task arrives.
             crate::arch::switch_address_space(crate::arch::kernel_root());
             crate::arch::return_to_kernel(frame, 0);
-            return (prior_pid, None, true);
+            return (prior_pid, None, true, migration);
         };
         record_smp_load_dispatch(state, next.pid, cpu);
         let index = state
@@ -6545,8 +6704,12 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
                 state.contexts[index].pid == state.contexts[index].group_pid,
             )),
             false,
+            migration,
         )
     });
+    if migration.is_some() {
+        notify_idle_cpus();
+    }
     if remote_stopped {
         return;
     }

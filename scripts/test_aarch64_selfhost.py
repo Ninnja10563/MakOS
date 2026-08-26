@@ -327,8 +327,13 @@ for fragment in (
     "ProcessRole::Toolchain",
     "reset_toolchain_smp_evidence()",
     "state.least_loaded_compute_ap()",
+    "state.rebalance_toolchain_on_timer(cpu, prior_pid)",
+    "TOOLCHAIN_REBALANCE_DISPATCH_DELTA",
     "MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK",
     "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK",
+    "MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK",
+    "take_unreported_toolchain_migrations",
+    "evidence_emitter=cpu0",
     "MAKOS_AARCH64_TOOLCHAIN_SMP_OK",
     "kernel_placement=least-dispatched-idle",
     "console_gpu_handoff=ap-defer,cpu0-compose",
@@ -480,6 +485,11 @@ require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 15")
 require(FOCUSED_RUNTIME, "def validate_toolchain_smp(")
 require(FOCUSED_RUNTIME, "expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements")
 require(FOCUSED_RUNTIME, "toolchain placement was not least-loaded")
+require(FOCUSED_RUNTIME, "no automatic Toolchain migration was observed")
+require(FOCUSED_RUNTIME, "invalid automatic Toolchain migration")
+require(FOCUSED_RUNTIME, "migration_policy=timer-safe-dispatch-imbalance")
+require(FOCUSED_RUNTIME, "migration_count != len(migrations)")
+require(FOCUSED_RUNTIME, "migration_evidence_drops != 0")
 require(FOCUSED_RUNTIME, "cpu_mask != 0xE")
 require(FOCUSED_RUNTIME, "dispatched_cpus != {1, 2, 3}")
 require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
