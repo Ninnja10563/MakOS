@@ -4,6 +4,27 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 Firefox input now has an explicit post-enqueue
+  watcher-to-main contract. Firefox patch `0057` invokes syscall 149 only after
+  a key is in the widget's bounded queue and a Gecko main-thread drain runnable
+  already exists or was successfully posted. The kernel records the exact
+  Firefox watcher/group at dequeue, accepts the acknowledgement only from that
+  watcher, refreshes bounded CPU0 leader priority, and sends a scheduler SGI;
+  the old dequeue boost remains a documented compatibility fallback. ABI
+  discovery reports AArch64 target max 149 and feature bit 23 while x86_64
+  truthfully remains at 148. Fresh Raspberry Pi/QEMU 10.0.11 TCG evidence
+  records arm, accepted post-enqueue acknowledgement, CPU0 leader dispatch,
+  direct Ctrl-A IRQ, exact-handle wake, AP2 watcher, dispatches
+  `10650,13916,10330`, three automatic migrations, and status 42. The first
+  attempt stopped at the unchanged boot SMP-balance gate (`44,119,144`); a
+  second reached AP watcher dispatch but missed the focused 30-second marker
+  window under Pi pressure; no threshold changed. The AArch64 image/artifact
+  build and full `make unit check` pass. This is fixture/Pi functional evidence,
+  not a real-Firefox performance pass: the Firefox source patch still needs a
+  new staged package/integrated image, and the unchanged strict gate remains
+  pending on an idle Apple Silicon macOS/HVF host. The older integrated
+  `a9c604254f094de2` image does not contain patch `0057` and is not accepted as
+  qualification for this increment.
 - 2026-08-26 the bounded AArch64 production scheduler now admits non-leader
   `ProcessRole::Python` threads to the same kernel-owned AP1-3 placement,
   affinity, blocking/wake, and timer-migration policy already used by Firefox

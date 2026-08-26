@@ -41,6 +41,8 @@ file "$out_dir/MakOSSurface.o" | grep -q 'ELF 64-bit.*ARM aarch64'
 # across the kernel ABI and Gecko widget bridge.
 grep -Fq 'const SYS_SURFACE_WAIT_EVENT: u64 = 140;' \
     "$repo_dir/kernel/src/arch/aarch64.rs"
+grep -Fq 'const SYS_SURFACE_MAIN_HANDOFF_READY: u64 = 149;' \
+    "$repo_dir/kernel/src/arch/aarch64.rs"
 grep -Fq 'SYS_SURFACE_WAIT_EVENT => {' \
     "$repo_dir/kernel/src/arch/aarch64.rs"
 grep -Fq 'block_current_for_input(frame)' \
@@ -49,6 +51,12 @@ grep -Fq 'wake_input_waiters();' "$repo_dir/kernel/src/graphics.rs"
 grep -Fq 'SurfaceWaitEvent = 140' \
     "$source_dir/widget/makos/MakOSSurface.cpp"
 grep -Fq 'makos::WaitSurfaceEvent(surface, event)' \
+    "$source_dir/widget/makos/MakOSWindow.cpp"
+grep -Fq 'makos::NotifySurfaceMainHandoffReady()' \
+    "$source_dir/widget/makos/MakOSWindow.cpp"
+grep -Fq 'mainRunnableReady' \
+    "$source_dir/widget/makos/MakOSWindow.cpp"
+grep -Fq 'MAKOS_WIDGET_MAIN_HANDOFF_' \
     "$source_dir/widget/makos/MakOSWindow.cpp"
 grep -Fq 'kEventQueueCapacity = 256' \
     "$source_dir/widget/makos/MakOSWindow.cpp"
@@ -60,4 +68,4 @@ grep -Fq 'pthread_join(mEventWatcher' \
     "$source_dir/widget/makos/MakOSWindow.cpp"
 git -C "$source_dir" diff --check
 
-echo "MAKOS_FIREFOX_WIDGET_ABI_OK toolkit=makos arch=aarch64 svc=surface,event,yield nsIWidget=blocked input_wake=blocking-watcher queue=ordered,bounded main_dispatch=gecko-runnable teardown=wake,join"
+echo "MAKOS_FIREFOX_WIDGET_ABI_OK toolkit=makos arch=aarch64 svc=surface,event,yield,main-handoff nsIWidget=blocked input_wake=blocking-watcher queue=ordered,bounded main_dispatch=gecko-runnable,post-enqueue-ack teardown=wake,join"

@@ -163,6 +163,9 @@ static void *production_input_watcher(void *argument)
 		return result == -1 ? 0 : (void *)(uintptr_t)2;
 	if (result != sizeof event || event.kind != 1 || event.key != 132)
 		return (void *)(uintptr_t)1;
+	/* Model Gecko's successful post-enqueue acknowledgement, not dequeue. */
+	if (makos_call(149, 0, 0) != 1)
+		return (void *)(uintptr_t)3;
 	return 0;
 }
 
@@ -233,7 +236,7 @@ static int production_smp_overlap_probe(void)
 	if (makos_call4(123, production_input_surface, 0, 0, 0) != 1) return 8;
 	static const char marker[] =
 		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded affinity=default:0xe,explicit singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned placement=least-reserved-ap migrations=automatic:load,forced:3 caller_selected_automatic=0\n"
-		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event routing=exact-handle decoy=blocked-until-destroy\n";
+		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event routing=exact-handle decoy=blocked-until-destroy handoff=post-enqueue-syscall:149\n";
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;
 }

@@ -32,6 +32,9 @@ route = function_body(INPUT, "fn route_surface_key")
 poll = function_body(INPUT, "pub fn poll()")
 prioritize = function_body(PROCESS, "pub(crate) fn prioritize_firefox_surface_thread")
 handoff = function_body(PROCESS, "pub(crate) fn arm_firefox_process_leader_handoff")
+handoff_ready = function_body(
+    PROCESS, "pub(crate) fn complete_firefox_process_leader_handoff"
+)
 set_priority = function_body(PROCESS, "fn set_surface_priority")
 active_priority = function_body(PROCESS, "fn active_surface_priority_tid")
 priority_affinity = function_body(PROCESS, "fn surface_priority_cpu_eligible")
@@ -65,14 +68,24 @@ assert "slot.role == ProcessRole::Firefox" in priority_affinity
 assert "slot.affinity_mask & (1u8 << cpu) != 0" in priority_affinity
 assert "FIREFOX_INPUT_WATCHER_BLOCK_REPORTED" in input_block
 assert "MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK" in input_block
-assert "SURFACE_MAIN_HANDOFF_PENDING.store(true" in handoff
+assert "SURFACE_MAIN_HANDOFF_WATCHER_TID.store(watcher" in handoff
+assert "SURFACE_MAIN_HANDOFF_PENDING_GROUP.store(group_pid" in handoff
+assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_ARM_OK" in handoff
 assert "SURFACE_PRIORITY_TID.store(0" in handoff
 assert "slot.pid == slot.group_pid" in handoff
 assert "set_surface_priority(leader)" in handoff
 assert "source=watcher-dequeue-fallback" in handoff
+assert "SURFACE_MAIN_HANDOFF_WATCHER_TID.load" in handoff_ready
+assert "SURFACE_MAIN_HANDOFF_PENDING_GROUP" in handoff_ready
+assert ".compare_exchange(group_pid, 0" in handoff_ready
+assert "set_surface_priority(leader)" in handoff_ready
+assert "notify_idle_cpus();" in handoff_ready
+assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK" in handoff_ready
+assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_REJECT" in handoff_ready
+assert "source=watcher-post-enqueue wake=sgi" in handoff_ready
 assert "activate_futex_wakes(state" in futex_wake
 assert "slot.pid == slot.group_pid" in activate_wakes
-assert "SURFACE_MAIN_HANDOFF_PENDING.swap(false" in activate_wakes
+assert "SURFACE_MAIN_HANDOFF_PENDING_GROUP.load" in activate_wakes
 assert "set_surface_priority(task.thread)" in activate_wakes
 assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_OK" in activate_wakes
 assert "const SURFACE_PRIORITY_TICKS: u64 = 1_000;" in PROCESS
@@ -121,6 +134,8 @@ for token in (
     "production_input_watcher",
     "makos_call4(140, surface",
     "event.key != 132",
+    "makos_call(149, 0, 0) != 1",
+    "handoff=post-enqueue-syscall:149",
     "MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK",
 ):
     assert token in PTHREAD_PROBE, token
@@ -141,14 +156,15 @@ for token in (
     'common.send_key(stream, "ctrl-a")',
     "WATCHER_AP_MARKER",
     "LEADER_DISPATCH_MARKER",
-    "input_priority=watcher-ap,leader-cpu0",
+    "HANDOFF_READY_MARKER",
+    "handoff=watcher-post-enqueue-syscall:149",
 ):
     assert token in PRODUCTION_RUNTIME, token
 
 print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_TEST_OK "
     "trigger=queued-key target=firefox-input-watcher wait=exact-handle decoy=not-woken blocked,active=retain-hint fallback=process-leader "
-    "ready=next-schedule boost=one-shot,stale-deadline handoff=watcher-ap,leader-cpu0,futex-refresh "
+    "ready=next-schedule boost=one-shot,stale-deadline handoff=watcher-ap,post-enqueue-syscall:149,leader-cpu0,futex-refresh "
     "delivery=gicv2-spi recovery_poll=100hz owner=cpu0 expiry=ticks "
     "fallback=round-robin pointer=unchanged"
 )

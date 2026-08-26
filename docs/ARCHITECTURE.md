@@ -163,7 +163,12 @@ same-thread-group access and nonempty online masks; exception-time replacement
 forces Ready/unowned publication and a scheduler SGI when migration is
 required. Overlap qualification samples the scheduler's locked Running owners,
 so a migrated TID's stale outer-entry marker cannot masquerade as simultaneous
-ownership. The current policy is deliberately narrower than general
+ownership. AArch64 target syscall 149 closes the Firefox native-watcher handoff:
+the kernel records the exact watcher/group at key dequeue, then accepts a
+one-shot acknowledgement only after the widget has queued the event and has a
+Gecko main-thread drain runnable. Acceptance refreshes bounded leader priority
+and sends a scheduler SGI; feature bit 23 advertises this target-specific ABI.
+The current policy is deliberately narrower than general
 work-stealing desktop SMP.
 
 Parent wait reaps exited scheduler slot, process-owned FDs/handles/surfaces,

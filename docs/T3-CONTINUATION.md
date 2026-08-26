@@ -27,6 +27,26 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- Firefox priority increment: patch `0057` adds AArch64 target syscall 149 as
+  an explicit post-enqueue watcher-to-main acknowledgement. The kernel records
+  the exact Firefox watcher/group when syscall 140 dequeues a key, accepts 149
+  only from that watcher after Gecko has a queued/existing main drain runnable,
+  refreshes bounded CPU0 leader priority, and sends a scheduler SGI. Feature
+  bit 23 advertises the contract; AArch64 target max is 149 while x86_64 stays
+  148. Fresh Raspberry Pi/QEMU 10.0.11 TCG evidence records
+  `MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_ARM_OK`, accepted
+  `MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK`, CPU0 leader dispatch, exact
+  Ctrl-A/direct IRQ, AP2 watcher, dispatches `10650,13916,10330`, three
+  automatic migrations, and status 42. The first unchanged attempt failed the
+  earlier stochastic boot SMP-balance gate at `44,119,144`; the next reached
+  AP watcher dispatch but missed the focused 30-second marker window under Pi
+  pressure; no gate changed. AArch64 image/artifact build and full `make unit
+  check` pass. Real Firefox is not yet requalified: package
+  `a9c604254f094de2` predates patch `0057`, so a fresh Firefox package and
+  integrated image must be built before the unchanged strict idle-macOS/HVF
+  gate. The high-pressure paint/Ctrl-A evidence remains
+  248584/10971 ms and 255543/14363 ms against the unchanged 10000 ms Ctrl-A
+  limit.
 - The bounded AArch64 production scheduler now includes non-leader Python-role
   threads in the Firefox/Native AP1-3 placement, affinity, block/wake, and
   timer-migration policy. Leaders and all device MMIO remain CPU0-owned. The
@@ -42,12 +62,12 @@ Preserve existing files and changes.
   status 42), cursor (seven positions, zero scanout changes), and full `make
   unit check`. Strict real Firefox remains pending on idle macOS/HVF with the
   unchanged 10000 ms Ctrl-A limit.
-- Active visible Raspberry Pi/QEMU 10.0.11 TCG milestone: PID 899613, user
+- Stopped visible Raspberry Pi/QEMU 10.0.11 TCG milestone: PID 899613, user
   service `makos-visible-python-smp-final.service`, session
   `build/makos-pi-visible-python-smp-final-muepCbzb`, private read-only
   `boot.img`, blank sparse `data.img`, private `vars.fd`, `qmp.sock`,
-  `serial.log`, `qemu.pid`, `login.ppm`, and inspection-only `login.png`. QMP
-  reports running and it is the sole QEMU. Boot SHA-256 is
+  `serial.log`, `qemu.pid`, `login.ppm`, and inspection-only `login.png`. It
+  was stopped cleanly through QMP before this Firefox increment. Boot SHA-256 is
   `7240a6ed1e8bfc84533e62a8ef28126fd0025ef553f3dae3c883cd2d8b3d6dd9`;
   PPM/PNG SHA-256 values are
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382` and

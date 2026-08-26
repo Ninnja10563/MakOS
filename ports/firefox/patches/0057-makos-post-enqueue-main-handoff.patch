@@ -1,0 +1,84 @@
+From: MakOS Project <makos@localhost>
+Subject: widget/makos: acknowledge main-thread handoff after enqueue
+
+The blocking surface syscall returns before the watcher has posted its Gecko
+runnable. A one-shot scheduler hint armed at dequeue can therefore be consumed
+too early when the main thread is already runnable, and no later futex wake is
+guaranteed. Acknowledge target syscall 149 only after a key is in the bounded
+widget queue and a main-thread drain runnable either already exists or was
+successfully dispatched.
+
+diff --git a/widget/makos/MakOSSurface.h b/widget/makos/MakOSSurface.h
+--- a/widget/makos/MakOSSurface.h
++++ b/widget/makos/MakOSSurface.h
+@@ -58,6 +58,7 @@ bool ReadSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent);
+ // Blocking dequeue for a dedicated widget watcher thread. The main Gecko
+ // native pump must retain ReadSurfaceEvent's nonblocking startup semantics.
+ bool WaitSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent);
++bool NotifySurfaceMainHandoffReady();
+ void YieldThread();
+ 
+ }  // namespace mozilla::widget::makos
+diff --git a/widget/makos/MakOSSurface.cpp b/widget/makos/MakOSSurface.cpp
+--- a/widget/makos/MakOSSurface.cpp
++++ b/widget/makos/MakOSSurface.cpp
+@@ -19,6 +19,7 @@ enum class Syscall : uint64_t {
+   SurfaceBlit = 113,
+   SurfaceDestroy = 123,
+   SurfaceWaitEvent = 140,
++  SurfaceMainHandoffReady = 149,
+ };
+ 
+ uint64_t Svc6(Syscall aNumber, uint64_t aFirst, uint64_t aSecond,
+@@ -112,6 +113,10 @@ bool WaitSurfaceEvent(SurfaceHandle aSurface, SurfaceEvent& aEvent) {
+          sizeof(aEvent);
+ }
+ 
++bool NotifySurfaceMainHandoffReady() {
++  return Svc4(Syscall::SurfaceMainHandoffReady, 0, 0, 0, 0) == 1;
++}
++
+ void YieldThread() { (void)Svc4(Syscall::Yield, 0, 0, 0, 0); }
+ 
+ }  // namespace mozilla::widget::makos
+diff --git a/widget/makos/MakOSWindow.cpp b/widget/makos/MakOSWindow.cpp
+--- a/widget/makos/MakOSWindow.cpp
++++ b/widget/makos/MakOSWindow.cpp
+@@ -473,6 +473,7 @@ class MakOSWindow final : public HeadlessWidget {
+             "source=blocking-watcher\n",
+             static_cast<unsigned long long>(sequence), event.kind, event.key);
+       }
++      bool mainRunnableReady = !scheduleDrain;
+       if (scheduleDrain) {
+         RefPtr<MakOSWindow> self(this);
+         nsresult result = NS_DispatchToMainThread(NS_NewRunnableFunction(
+@@ -486,6 +487,21 @@ class MakOSWindow final : public HeadlessWidget {
+               static_cast<unsigned long long>(sequence),
+               static_cast<unsigned>(result));
+         }
++        if (NS_SUCCEEDED(result)) {
++          mainRunnableReady = true;
++        }
++      }
++      if (event.kind ==
++              static_cast<uint32_t>(makos::SurfaceEventKind::Key) &&
++          mainRunnableReady) {
++        bool accepted = makos::NotifySurfaceMainHandoffReady();
++        if (!mMainHandoffTraceReported.exchange(true)) {
++          printf_stderr(
++              "MAKOS_WIDGET_MAIN_HANDOFF_%s source=post-enqueue "
++              "syscall=149 sequence=%llu\n",
++              accepted ? "OK" : "FAIL",
++              static_cast<unsigned long long>(sequence));
++        }
+       }
+     }
+   }
+@@ -589,6 +605,7 @@ class MakOSWindow final : public HeadlessWidget {
+   mozilla::Atomic<uint32_t> mEnqueueTraceCount{0};
+   uint32_t mDispatchTraceCount = 0;
+   uint32_t mPointerButtons = 0;
++  mozilla::Atomic<bool> mMainHandoffTraceReported{false};
+   mozilla::Atomic<bool> mEventWatcherRunning{false};
+   mozilla::Atomic<bool> mMainDrainScheduled{false};
+   pthread_t mEventWatcher{};

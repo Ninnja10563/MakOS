@@ -42,6 +42,7 @@ TARGET_WAKE_MARKER = (
 )
 WATCHER_AP_MARKER = b"MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK"
 LEADER_DISPATCH_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK"
+HANDOFF_READY_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK"
 INPUT_PRIORITY_MARKER = b"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK"
 INPUT_IRQ_MARKER = b"MAKOS_AARCH64_INPUT_IRQ_OK"
 AFFINITY_MARKER = (
@@ -202,6 +203,9 @@ def main() -> int:
                 )
                 common.wait_for_output(selector, process, output, WATCHER_AP_MARKER, 30)
                 common.wait_for_output(
+                    selector, process, output, HANDOFF_READY_MARKER, 30
+                )
+                common.wait_for_output(
                     selector, process, output, LEADER_DISPATCH_MARKER, 30
                 )
                 common.wait_for_output(
@@ -266,6 +270,12 @@ def main() -> int:
                     r"source=bounded-handoff affinity=leader-cpu0",
                     decoded,
                 )
+                handoff_ready_matches = re.findall(
+                    r"MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK tid=(\d+) "
+                    r"watcher_tid=(\d+) group_pid=(\d+) "
+                    r"source=watcher-post-enqueue wake=sgi bounded_ticks=(\d+)",
+                    decoded,
+                )
                 target_matches = re.findall(
                     r"MAKOS_AARCH64_FIREFOX_INPUT_TARGET_OK tid=(\d+) "
                     r"handle=(\d+) selection=queued-surface",
@@ -286,6 +296,7 @@ def main() -> int:
                     not watcher_matches
                     or not priority_matches
                     or not leader_matches
+                    or not handoff_ready_matches
                     or not target_matches
                     or not target_wake_matches
                     or not input_irq_matches
@@ -297,6 +308,9 @@ def main() -> int:
                 blocked_tid, blocked_group, _blocked_cpu = watcher_matches[-1]
                 priority_tid, priority_cpu = priority_matches[-1]
                 leader_tid = leader_matches[-1]
+                ready_leader, ready_watcher, ready_group, ready_ticks = (
+                    handoff_ready_matches[-1]
+                )
                 target_tid, target_handle = target_matches[-1]
                 surface_woken, surface_skipped = map(int, target_wake_matches[-1])
                 input_irq_intid = int(input_irq_matches[-1])
@@ -310,13 +324,18 @@ def main() -> int:
                     or surface_skipped < 1
                     or input_irq_intid not in (77, 78)
                     or leader_tid != process_matches[-1]
+                    or ready_leader != leader_tid
+                    or ready_watcher != priority_tid
+                    or ready_group != process_matches[-1]
+                    or int(ready_ticks) != 1000
                     or watcher_tid == int(leader_tid)
                     or watcher_cpu not in (1, 2, 3)
                 ):
                     raise AssertionError(
                         "Firefox watcher/leader affinity handoff was inconsistent: "
                         f"blocked={watcher_matches[-1]} priority={priority_matches[-1]} "
-                        f"target={target_matches[-1]} leader={leader_matches[-1]}"
+                        f"target={target_matches[-1]} leader={leader_matches[-1]} "
+                        f"ready={handoff_ready_matches[-1]}"
                     )
                 matches = re.findall(
                     r"MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask=(0x[0-9a-f]+) "
@@ -407,6 +426,7 @@ def main() -> int:
         f"input_watcher_tid={watcher_tid} input_watcher_cpu={watcher_cpu} "
         "fixture=upstream-musl-pthread role=firefox leader_cpu=0 "
         "input_priority=watcher-ap,leader-cpu0 key=ctrl-a routing=exact-handle "
+        "handoff=watcher-post-enqueue-syscall:149 "
         f"input_irq_intid={input_irq_intid} delivery=gicv2-spi "
         f"surface_woken={surface_woken} surface_skipped={surface_skipped} "
         "decoy=blocked-until-destroy "

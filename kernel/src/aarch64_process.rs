@@ -586,8 +586,12 @@ static IDLE_SLEEP_REPORTED: AtomicBool = AtomicBool::new(false);
 static FIREFOX_INPUT_WATCHER_TID: AtomicU64 = AtomicU64::new(0);
 static SURFACE_PRIORITY_TID: AtomicU64 = AtomicU64::new(0);
 static SURFACE_PRIORITY_DEADLINE: AtomicU64 = AtomicU64::new(0);
-static SURFACE_MAIN_HANDOFF_PENDING: AtomicBool = AtomicBool::new(false);
+static SURFACE_MAIN_HANDOFF_PENDING_GROUP: AtomicU64 = AtomicU64::new(0);
+static SURFACE_MAIN_HANDOFF_WATCHER_TID: AtomicU64 = AtomicU64::new(0);
 static SURFACE_MAIN_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_MAIN_HANDOFF_ARM_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_MAIN_HANDOFF_READY_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_MAIN_HANDOFF_REJECT_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_PRIORITY_REPORTED: AtomicBool = AtomicBool::new(false);
 static FIREFOX_INPUT_WATCHER_BLOCK_REPORTED: AtomicBool = AtomicBool::new(false);
 static INPUT_HANDLE_WAITERS_REPORTED: AtomicBool = AtomicBool::new(false);
@@ -3302,23 +3306,54 @@ pub(crate) fn prioritize_firefox_surface_thread() -> bool {
 }
 
 /// The watcher has dequeued a key but has not posted its Gecko runnable yet.
-/// Drop the watcher hint, then attach the bounded leader hint to the futex wake
-/// that NS_DispatchToMainThread emits after enqueueing the runnable.
+/// Drop the watcher hint and remember the exact watcher/group. The old
+/// pre-enqueue boost remains a compatibility fallback; syscall 149 completes
+/// the contract only after Gecko has a main-thread runnable to execute.
 pub(crate) fn arm_firefox_process_leader_handoff() {
     SURFACE_PRIORITY_TID.store(0, Ordering::Release);
     SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
-    let leader = with_state(|state| {
-        state
+    let (watcher, group_pid, leader) = with_state(|state| {
+        let watcher = state.table.current_pid_on(scheduler_cpu()).unwrap_or(0);
+        let group_pid = state
             .contexts
             .iter()
             .find(|slot| {
-                slot.pid != 0 && slot.pid == slot.group_pid && slot.role == ProcessRole::Firefox
+                slot.pid == watcher
+                    && slot.pid != slot.group_pid
+                    && slot.role == ProcessRole::Firefox
+            })
+            .map(|slot| slot.group_pid)
+            .unwrap_or(0);
+        let leader = state
+            .contexts
+            .iter()
+            .find(|slot| {
+                slot.pid == group_pid
+                    && slot.pid == slot.group_pid
+                    && slot.role == ProcessRole::Firefox
             })
             .map(|slot| slot.pid)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        (watcher, group_pid, leader)
     });
+    if watcher == 0 || group_pid == 0 || leader == 0 {
+        return;
+    }
+    // Publish the exact watcher/group before the compatibility boost. A new
+    // widget acknowledges syscall 149 only after Gecko has actually queued
+    // the main-thread runnable; until then this one-shot boost is recovery for
+    // an older widget binary, not completion of the handoff contract.
+    SURFACE_MAIN_HANDOFF_WATCHER_TID.store(watcher, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_PENDING_GROUP.store(group_pid, Ordering::Release);
+    if !SURFACE_MAIN_HANDOFF_ARM_REPORTED.swap(true, Ordering::AcqRel) {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_ARM_OK watcher_tid={} group_pid={} leader_tid={} source=watcher-dequeue state=pending-post-enqueue",
+            watcher,
+            group_pid,
+            leader,
+        );
+    }
     let fallback_armed = set_surface_priority(leader);
-    SURFACE_MAIN_HANDOFF_PENDING.store(true, Ordering::Release);
     if fallback_armed && !SURFACE_MAIN_HANDOFF_REPORTED.swap(true, Ordering::AcqRel) {
         crate::serial_println!(
             "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_OK tid={} source=watcher-dequeue-fallback bounded_ticks={}",
@@ -3326,6 +3361,74 @@ pub(crate) fn arm_firefox_process_leader_handoff() {
             SURFACE_PRIORITY_TICKS,
         );
     }
+}
+
+/// Complete the watcher -> Gecko-main handoff only after the watcher has
+/// successfully posted its runnable. This closes the ready/running-leader race
+/// where the pre-enqueue compatibility boost was consumed and no futex wake
+/// existed to refresh it.
+pub(crate) fn complete_firefox_process_leader_handoff() -> bool {
+    let (watcher, group_pid, leader) = with_state(|state| {
+        let watcher = state.table.current_pid_on(scheduler_cpu()).unwrap_or(0);
+        let group_pid = state
+            .contexts
+            .iter()
+            .find(|slot| {
+                slot.pid == watcher
+                    && slot.pid != slot.group_pid
+                    && slot.role == ProcessRole::Firefox
+            })
+            .map(|slot| slot.group_pid)
+            .unwrap_or(0);
+        let leader = state
+            .contexts
+            .iter()
+            .find(|slot| {
+                slot.pid == group_pid
+                    && slot.pid == slot.group_pid
+                    && slot.role == ProcessRole::Firefox
+            })
+            .map(|slot| slot.pid)
+            .unwrap_or(0);
+        (watcher, group_pid, leader)
+    });
+    let armed_watcher = SURFACE_MAIN_HANDOFF_WATCHER_TID.load(Ordering::Acquire);
+    let pending_group = SURFACE_MAIN_HANDOFF_PENDING_GROUP.load(Ordering::Acquire);
+    if watcher == 0
+        || group_pid == 0
+        || leader == 0
+        || armed_watcher != watcher
+        || SURFACE_MAIN_HANDOFF_PENDING_GROUP
+            .compare_exchange(group_pid, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+    {
+        if !SURFACE_MAIN_HANDOFF_REJECT_REPORTED.swap(true, Ordering::AcqRel) {
+            crate::serial_println!(
+                "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_REJECT caller_tid={} caller_group={} leader_tid={} armed_watcher_tid={} pending_group={} reason=identity-or-state",
+                watcher,
+                group_pid,
+                leader,
+                armed_watcher,
+                pending_group,
+            );
+        }
+        return false;
+    }
+    SURFACE_MAIN_HANDOFF_WATCHER_TID.store(0, Ordering::Release);
+    if !set_surface_priority(leader) {
+        return false;
+    }
+    notify_idle_cpus();
+    if !SURFACE_MAIN_HANDOFF_READY_REPORTED.swap(true, Ordering::AcqRel) {
+        crate::serial_println!(
+            "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK tid={} watcher_tid={} group_pid={} source=watcher-post-enqueue wake=sgi bounded_ticks={}",
+            leader,
+            watcher,
+            group_pid,
+            SURFACE_PRIORITY_TICKS,
+        );
+    }
+    true
 }
 
 fn set_surface_priority(tid: u64) -> bool {
@@ -3875,11 +3978,14 @@ fn activate_futex_wakes(
 ) {
     for index in 0..count {
         let task = tasks[index];
-        let firefox_leader = state
+        let firefox_leader_group = state
             .contexts
             .iter()
             .find(|slot| slot.pid == task.thread)
-            .is_some_and(|slot| slot.role == ProcessRole::Firefox && slot.pid == slot.group_pid);
+            .and_then(|slot| {
+                (slot.role == ProcessRole::Firefox && slot.pid == slot.group_pid)
+                    .then_some(slot.group_pid)
+            });
         if let Some(slot) = state
             .contexts
             .iter_mut()
@@ -3888,7 +3994,9 @@ fn activate_futex_wakes(
             slot.futex_wait = None;
         }
         let _ = state.table.wake(task.thread);
-        if firefox_leader && SURFACE_MAIN_HANDOFF_PENDING.swap(false, Ordering::AcqRel) {
+        if firefox_leader_group.is_some_and(|group_pid| {
+            SURFACE_MAIN_HANDOFF_PENDING_GROUP.load(Ordering::Acquire) == group_pid
+        }) {
             set_surface_priority(task.thread);
             if !SURFACE_MAIN_HANDOFF_REPORTED.swap(true, Ordering::AcqRel) {
                 crate::serial_println!(
@@ -4140,8 +4248,12 @@ fn reset_production_worker_evidence() {
     FIREFOX_INPUT_WATCHER_TID.store(0, Ordering::Release);
     SURFACE_PRIORITY_TID.store(0, Ordering::Release);
     SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
-    SURFACE_MAIN_HANDOFF_PENDING.store(false, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_PENDING_GROUP.store(0, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_WATCHER_TID.store(0, Ordering::Release);
     SURFACE_MAIN_HANDOFF_REPORTED.store(false, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_ARM_REPORTED.store(false, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_READY_REPORTED.store(false, Ordering::Release);
+    SURFACE_MAIN_HANDOFF_REJECT_REPORTED.store(false, Ordering::Release);
     SURFACE_PRIORITY_REPORTED.store(false, Ordering::Release);
     FIREFOX_INPUT_WATCHER_BLOCK_REPORTED.store(false, Ordering::Release);
     INPUT_HANDLE_WAITERS_REPORTED.store(false, Ordering::Release);

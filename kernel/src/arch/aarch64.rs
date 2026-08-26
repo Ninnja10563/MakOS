@@ -2438,6 +2438,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const SYS_TYPED_CHANNEL_SEND: u64 = 146;
     const SYS_TYPED_CHANNEL_RECEIVE: u64 = 147;
     const SYS_THREAD_AFFINITY: u64 = 148;
+    const SYS_SURFACE_MAIN_HANDOFF_READY: u64 = 149;
     const ABI_FEATURE_IPC: u64 = 1 << 0;
     const ABI_FEATURE_PROCESS: u64 = 1 << 1;
     const ABI_FEATURE_VM: u64 = 1 << 2;
@@ -2457,6 +2458,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
     const ABI_FEATURE_TTY_SIGNALS: u64 = 1 << 20;
     const ABI_FEATURE_TYPED_IPC: u64 = 1 << 21;
     const ABI_FEATURE_CPU_AFFINITY: u64 = 1 << 22;
+    const ABI_FEATURE_SURFACE_MAIN_HANDOFF: u64 = 1 << 23;
     const ABI_FEATURES: u64 = ABI_FEATURE_IPC
         | ABI_FEATURE_PROCESS
         | ABI_FEATURE_VM
@@ -2475,7 +2477,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         | ABI_FEATURE_PROCESS_STARTUP
         | ABI_FEATURE_TTY_SIGNALS
         | ABI_FEATURE_TYPED_IPC
-        | ABI_FEATURE_CPU_AFFINITY;
+        | ABI_FEATURE_CPU_AFFINITY
+        | ABI_FEATURE_SURFACE_MAIN_HANDOFF;
     const ERROR_INVALID: u64 = u64::MAX;
 
     match frame.registers[8] {
@@ -4367,7 +4370,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             1 => 57,
             2 => ABI_FEATURES,
             // Highest AArch64 extension implemented by this kernel.
-            3 => SYS_THREAD_AFFINITY,
+            3 => SYS_SURFACE_MAIN_HANDOFF_READY,
             _ => ERROR_INVALID,
         },
         SYS_STAT => {
@@ -4954,6 +4957,9 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 }
             }
         }
+        SYS_SURFACE_MAIN_HANDOFF_READY => u64::from(
+            crate::aarch64_process::complete_firefox_process_leader_handoff(),
+        ),
         SYS_ROBUST_LIST => match frame.registers[0] {
             0 => {
                 if crate::aarch64_process::set_robust_list(frame.registers[1], frame.registers[2]) {

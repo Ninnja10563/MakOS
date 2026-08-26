@@ -430,8 +430,20 @@ def verify_firefox_probe_markers(output: bytearray, start: int) -> None:
     firefox_output = output[start:]
     missing = [
         marker
-        for marker in (b"MAKOS_JIT_POOL_OK", b"MAKOS_FIREFOX_BLIT")
-        if marker not in firefox_output
+        for marker, source in (
+            (b"MAKOS_JIT_POOL_OK", firefox_output),
+            (b"MAKOS_FIREFOX_BLIT", firefox_output),
+            (
+                b"MAKOS_WIDGET_MAIN_HANDOFF_OK source=post-enqueue "
+                b"syscall=149",
+                firefox_output,
+            ),
+            (
+                b"MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK",
+                output,
+            ),
+        )
+        if marker not in source
     ]
     if missing:
         raise AssertionError(f"missing Firefox probe markers: {missing!r}")
@@ -783,7 +795,7 @@ def main() -> int:
                 b"MAKOS_AARCH64_SCHEDULER_OK processes=2 timer_preemptions=",
                 b"context=x0-x30,elr,spsr,sp_el0,ttbr0,tpidr_el0,q0-q31,fpcr,fpsr isolated_ttbr0=1 spawn=1 concurrent=1 patterns=distinct exit=1 wait=1 reap=1 free_balance=1",
                 b"MAKOS_AARCH64_USER_OK pid=1 el=0 elf=1 svc=1 write=1 abi=1 clock=1 isolation=ttbr0",
-                b"MAKOS_AARCH64_ABI_OK version=1.0 normative_max=57 target_extension_max=148 features=ipc,process,vm,vfs,network,graphics,auth,log,sync,ipv6,selfhost-seed,sockets,packages,vm-regions,exec-path,startup-vectors,tty-signals,typed-ipc,cpu-affinity truthful=1",
+                b"MAKOS_AARCH64_ABI_OK version=1.0 normative_max=57 target_extension_max=149 features=ipc,process,vm,vfs,network,graphics,auth,log,sync,ipv6,selfhost-seed,sockets,packages,vm-regions,exec-path,startup-vectors,tty-signals,typed-ipc,cpu-affinity,surface-main-handoff truthful=1",
                 b"MAKOS_AARCH64_LOG_OK structured=1 ring=32 pid=1 severity=5 monotonic=1 readback=1",
                 b"MAKOS_STRUCTURED_LOG_PERSIST_OK path=/.makos-system-log format=MAKLOG01 records=",
                 b"MAKOS_AARCH64_PROCESS_OK pid=1 exit=42 scheduler=saved-context address_space=isolated lifecycle=ready,running,zombie,reaped",

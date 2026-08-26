@@ -458,8 +458,14 @@ explicit affinity request disables automatic preference and stays authoritative.
 It then creates two real process-owned overflow surfaces and blocks target and
 decoy pthreads in `surface_wait_event`. Input waits retain their exact handle;
 QMP Ctrl-A must select handle 7, wake exactly that watcher on AP1-3, leave the
-decoy and every unrelated empty-surface waiter blocked, and then dispatch the
-leader once on CPU0. Destroying surface 8 must wake its decoy so the retried
+decoy and every unrelated empty-surface waiter blocked. On key dequeue the
+kernel records the exact Firefox watcher/group and arms an older-widget
+compatibility boost. The widget/fixture invokes AArch64 target syscall 149 only
+after the key is in its bounded queue and a Gecko-main drain runnable is
+already present or was successfully posted. The kernel accepts only that exact
+watcher, refreshes bounded CPU0 leader priority, sends a scheduler SGI, and
+then requires the leader to dispatch on CPU0. Feature bit 23 advertises this
+post-enqueue contract. Destroying surface 8 must wake its decoy so the retried
 syscall fails closed and the join completes. Priority is one-shot after a
 successful dispatch; the deadline only expires stale hints. The gate also requires an AP CPU mask, nonzero dispatch counters, a
 simultaneous multi-AP interval with distinct TIDs, exclusive ownership, the
@@ -467,14 +473,19 @@ complete upstream-musl pthread/IPC workload, and status-42 reap. The final
 Raspberry Pi/QEMU 10.0.11 TCG pass records all APs (`cpu_mask=0xe`), automatic
 placements `4,2,14`, three natural load migrations with zero evidence drops,
 live/final overlap on AP1/AP2 (`overlap_mask=0x6`, TIDs 5/6), watcher TID 8 on
-AP2, dispatch counts `10376,13208,9671`, one targeted wake, and three skipped
+AP2, dispatch counts `10650,13916,10330`, one targeted wake, accepted syscall
+149, and three skipped
 unrelated surface waiters. The runtime also requires at least three explicit
 affinity changes that exclude the source PE and confirms all three workers
 restore mask `0xe`. AArch64 serial output is protected by an
 IRQ-masked cross-PE lock so these records cannot interleave by byte. This is a
 scheduler-role fixture, not real Firefox or
 macOS/HVF performance evidence. Real Firefox must still pass the unchanged
-strict Gate 3 on the intended idle host.
+strict Gate 3 on the intended idle host. The historical integrated image
+`makos-integrated-a9c604254f094de2.img` predates patch `0057`; rebuild and stage
+a new Firefox package/integrated image as
+`build/makos-integrated-firefox-handoff149.img` (or override
+`AARCH64_FIREFOX_PACKAGE_IMAGE`) before running that gate.
 
 Run the ordinary native-application role gate with:
 

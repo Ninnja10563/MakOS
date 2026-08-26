@@ -22,6 +22,9 @@ WHEEL_DIRECTION_PATCH = (
 ).read_text()
 PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
+MAIN_HANDOFF_PATCH = (
+    ROOT / "ports/firefox/patches/0057-makos-post-enqueue-main-handoff.patch"
+).read_text()
 
 for fragment in (
     'os.environ.get("MAKOS_AARCH64_FIREFOX_CLIPBOARD") == "1"',
@@ -102,9 +105,24 @@ for fragment in (
 for fragment in ("user_resident_pages", "resident_pages={}", "resident_kib={}"):
     assert fragment in PROCESS or fragment in ARCH, fragment
 
+for fragment in (
+    "SurfaceMainHandoffReady = 149",
+    "NotifySurfaceMainHandoffReady",
+    "mainRunnableReady = !scheduleDrain",
+    "if (NS_SUCCEEDED(result))",
+    "MAKOS_WIDGET_MAIN_HANDOFF_%s source=post-enqueue",
+):
+    assert fragment in MAIN_HANDOFF_PATCH, fragment
+
+for fragment in (
+    "SYS_SURFACE_MAIN_HANDOFF_READY",
+    "complete_firefox_process_leader_handoff",
+):
+    assert fragment in ARCH, fragment
+
 print(
     "MAKOS_AARCH64_FIREFOX_INTERACTION_TEST_OK "
     "clipboard=round-trip mouse=left-link selection=document-drag-copy-paste "
     "sustained=wheel,form,repeated-navigation,resources tls=builtin-root "
-    "pixels=changed"
+    "handoff=post-enqueue-syscall:149 pixels=changed"
 )
