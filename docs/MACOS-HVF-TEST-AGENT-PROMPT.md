@@ -12,6 +12,11 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
+Required implementation baseline: ffbce4f6179a7fef03c5cd2b32341ffa7498a7a0
+
+Verify that the checked-out `main` contains this exact implementation commit.
+Do not test an older commit. A later documentation-only handoff commit is
+acceptable if this baseline is its ancestor.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, and docs/INTEGRATED-DATA-IMAGE.md.

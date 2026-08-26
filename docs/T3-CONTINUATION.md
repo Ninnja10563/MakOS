@@ -27,6 +27,8 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- Bounded-macro implementation baseline:
+  `ffbce4f6179a7fef03c5cd2b32341ffa7498a7a0`.
 - The AArch64 guest-native preprocessor now expands bounded object-text and
   function-like macros on active C lines. It supports four distinct parameters,
   nested-parenthesis arguments, argument pre-expansion, recursive rescanning
