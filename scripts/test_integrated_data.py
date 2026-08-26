@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import struct
 import tempfile
 
+import firefox_provenance
 import integrate_data_image as integrated
 import mkpackage
+import verify_firefox_runtime_image as runtime_image
 
 
 def elf(interpreter: bool) -> bytes:
@@ -90,11 +93,35 @@ def test_preserved_clone(base: pathlib.Path) -> None:
 
 def test_package_verification(base: pathlib.Path) -> None:
     package_root = base / "package-root"
+    runtime_payloads = {
+        "firefox": elf(True),
+        "plugin-container": b"runtime-plugin-container",
+        "xpcshell": b"runtime-xpcshell",
+        "libxul.so": elf(False),
+        "libnspr4.so": b"runtime-libnspr4",
+    }
+    provenance_record = {
+        **firefox_provenance.expected_identity(),
+        "build_artifacts": {
+            name: hashlib.sha256(name.encode()).hexdigest()
+            for name in firefox_provenance.BUILD_ARTIFACTS
+        },
+        "runtime_artifacts": {
+            name: hashlib.sha256(payload).hexdigest()
+            for name, payload in runtime_payloads.items()
+        },
+    }
     sources = {
-        "/usr/lib/firefox/firefox": write(package_root / "firefox", elf(True)),
-        "/usr/lib/firefox/libxul.so": write(package_root / "libxul.so", elf(False)),
+        **{
+            f"/usr/lib/firefox/{name}": write(package_root / name, payload)
+            for name, payload in runtime_payloads.items()
+        },
         "/usr/lib/firefox/omni.ja": write(package_root / "omni.ja", b"omni"),
         "/usr/lib/firefox/application.ini": write(package_root / "application.ini", b"app"),
+        firefox_provenance.GUEST_PATH: write(
+            package_root / "makos-build-provenance.json",
+            firefox_provenance.canonical_bytes(provenance_record),
+        ),
         "/usr/lib/firefox/licenses/LICENSE": write(package_root / "LICENSE", b"MPL license\n" * 20),
         "/usr/lib/firefox/licenses/license.html": write(package_root / "license.html", b"Mozilla licenses\n" * 20),
         "/fonts/LICENSE-MPLUS.txt": write(package_root / "font-license", b"M+ font license\n" * 20),
@@ -115,6 +142,66 @@ def test_package_verification(base: pathlib.Path) -> None:
         path.is_file() for path in package_root.rglob("*")
     )
     assert len(tree) == 64
+    assert runtime_image.verify(image) == provenance_record
+
+    stale_record = dict(provenance_record)
+    stale_record["patch_series_sha256"] = "0" * 64
+    stale_source = write(
+        package_root / "stale-provenance.json",
+        firefox_provenance.canonical_bytes(stale_record),
+    )
+    stale_sources = dict(sources)
+    stale_sources[firefox_provenance.GUEST_PATH] = stale_source
+    stale_image = base / "stale-package.img"
+    stale_additions = [
+        (guest.encode(), source) for guest, source in stale_sources.items()
+    ]
+    mkpackage.install(stale_image, package_root, "fixture", additions=stale_additions)
+    try:
+        integrated.verify_components(stale_image, stale_sources)
+    except ValueError as error:
+        assert "provenance identity mismatch" in str(error)
+    else:
+        raise AssertionError("stale Firefox patch provenance passed verification")
+
+    mismatched_sources = dict(sources)
+    mismatched_sources["/usr/lib/firefox/plugin-container"] = write(
+        package_root / "mismatched-plugin-container", b"stale-runtime-plugin"
+    )
+    mismatched_image = base / "mismatched-runtime.img"
+    mkpackage.install(
+        mismatched_image,
+        package_root,
+        "fixture",
+        additions=[
+            (guest.encode(), source) for guest, source in mismatched_sources.items()
+        ],
+    )
+    try:
+        runtime_image.verify(mismatched_image)
+    except ValueError as error:
+        assert "differs from provenance" in str(error)
+    else:
+        raise AssertionError("mismatched Firefox runtime artifact passed preflight")
+
+    legacy_image = base / "legacy-package.img"
+    legacy_sources = {
+        guest: source
+        for guest, source in sources.items()
+        if guest != firefox_provenance.GUEST_PATH
+    }
+    mkpackage.install(
+        legacy_image,
+        package_root,
+        "fixture",
+        additions=[(guest.encode(), source) for guest, source in legacy_sources.items()],
+    )
+    try:
+        runtime_image.verify(legacy_image)
+    except ValueError as error:
+        assert "makos-build-provenance.json" in str(error)
+    else:
+        raise AssertionError("unprovenanced Firefox runtime image passed preflight")
     with image.open("r+b") as stream:
         stream.seek(entries["/usr/bin/python3"].offset)
         byte = stream.read(1)
@@ -137,7 +224,9 @@ def main() -> int:
     print(
         "MAKOS_INTEGRATED_DATA_TEST_OK deterministic_package_zero=1 "
         "preserved_hashes=filesystem-metadata,account-profile "
-        "crc_rejection=1 elf=aarch64-pie,interp licenses=6"
+        "crc_rejection=1 elf=aarch64-pie,interp licenses=6 "
+        "firefox_provenance=pinned-source,ordered-patches,build-and-runtime-sha256 "
+        "stale_image=denied mismatched_runtime=denied pre_qemu=1"
     )
     return 0
 

@@ -4,6 +4,8 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 OBJ=${MAKOS_FIREFOX_OBJ:-$ROOT/build/ports/firefox/obj-aarch64-makos}
 DIST=${MAKOS_FIREFOX_DIST:-$OBJ/dist/firefox}
+BIN=${MAKOS_FIREFOX_BIN_DIR:-$OBJ/dist/bin}
+BUILD_PROVENANCE=${MAKOS_FIREFOX_BUILD_PROVENANCE:-$OBJ/makos-build-provenance.json}
 STRIPPED=${MAKOS_FIREFOX_LIBXUL:-$ROOT/build/ports/firefox/package-aarch64-makos/libxul.so}
 IMAGE=${1:-$ROOT/build/makos-data-aarch64.img}
 FONT_SOURCE=$ROOT/build/ports/firefox/source/layout/reftests/fonts/mplus/mplus-1p-regular.ttf
@@ -23,6 +25,15 @@ CPYTHON_LICENSE=$ROOT/build/ports/cpython/package/usr/share/licenses/cpython/LIC
 # Keep the final system image reproducible from a clean tree: stage the real
 # CPython runtime before deciding whether its payload is available.
 "$ROOT/ports/cpython/stage-makos.sh"
+
+# Refuse stale incremental outputs. The build stamp is written only after a
+# successful full mach build and binary audit, binds five unstripped artifacts
+# to the pinned source commit and ordered patch series, and is reverified here
+# before stage-package modifies distribution output.
+python3 "$ROOT/scripts/firefox_provenance.py" verify-build-stamp \
+    --source-dir "$ROOT/build/ports/firefox/source" \
+    --bin-dir "$BIN" \
+    --stamp "$BUILD_PROVENANCE"
 
 # Always refresh Mozilla's packaged runtime after incremental builds. Gecko's
 # build output in dist/bin can otherwise be newer than dist/firefox.
@@ -78,6 +89,16 @@ cp "$DIST/libxul.so" "$stripped_tmp"
 mv "$stripped_tmp" "$STRIPPED"
 trap - EXIT HUP INT TERM
 
+# Bind the exact stripped runtime payloads to the already-verified build stamp.
+# The image preflight compares these hashes with package metadata before QEMU.
+python3 "$ROOT/scripts/firefox_provenance.py" create-runtime-record \
+    --source-dir "$ROOT/build/ports/firefox/source" \
+    --bin-dir "$BIN" \
+    --stamp "$BUILD_PROVENANCE" \
+    --package-dir "$DIST" \
+    --stripped-libxul "$STRIPPED" \
+    --output "$DIST/makos-build-provenance.json"
+
 set -- "$ROOT/scripts/mkpackage.py" \
     "$IMAGE" "$DIST" \
     --prefix usr/lib/firefox \
@@ -106,4 +127,4 @@ fi
 python3 "$@"
 python3 "$ROOT/scripts/verify_package.py" "$IMAGE"
 
-echo "MAKOS_FIREFOX_PACKAGE_OK image=$IMAGE exec=/usr/lib/firefox/firefox libxul=stripped font=mplus nano=$NANO_STATUS cpython=$CPYTHON_STATUS"
+echo "MAKOS_FIREFOX_PACKAGE_OK image=$IMAGE exec=/usr/lib/firefox/firefox libxul=stripped font=mplus provenance=source,patch-series,artifact-sha256 nano=$NANO_STATUS cpython=$CPYTHON_STATUS"

@@ -134,6 +134,11 @@ acceptable if this baseline is its ancestor.
    Firefox binaries, package them, and create a new content-addressed integrated
    image from a private clone of the intended data image. Never overwrite the
    source data image. Record the new package/image identities and manifest.
+   Require the build/package markers to report 56 patches with exact ordered
+   series SHA-256
+   `9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c`,
+   five audited build hashes, and five exact stripped runtime hashes. Do not
+   manually create, copy from another build, or edit the provenance record.
    If those prerequisites cannot be built, return the exact blocker and do not
    run the old image.
 
@@ -145,6 +150,13 @@ acceptable if this baseline is its ancestor.
    content-addressed filename:
 
        make test-aarch64-firefox-runtime
+
+   Before QEMU, the target must print
+   `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the pinned source, 56-patch series
+   identity above, `artifacts=build-audited,runtime-sha256-matched`, and
+   AArch64 Firefox PIE/libxul validation. Missing provenance, an old patch
+   identity, or any packaged-runtime hash mismatch is a preflight refusal, not
+   permission to bypass the check.
 
    Do not weaken the 10,000 ms Ctrl-A limit or any paint, first-input,
    navigation, clipboard, selection, scrolling, form, CPU, RSS, resident-page,

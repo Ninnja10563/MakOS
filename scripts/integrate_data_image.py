@@ -15,6 +15,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 
+import firefox_provenance
 import mkpackage
 import verify_package
 
@@ -201,6 +202,7 @@ def expected_sources() -> dict[str, pathlib.Path]:
         "/usr/lib/firefox/libxul.so": stripped,
         "/usr/lib/firefox/omni.ja": dist / "omni.ja",
         "/usr/lib/firefox/application.ini": dist / "application.ini",
+        firefox_provenance.GUEST_PATH: dist / "makos-build-provenance.json",
         "/usr/lib/firefox/licenses/LICENSE": dist / "licenses/LICENSE",
         "/usr/lib/firefox/licenses/license.html": dist / "licenses/license.html",
         "/fonts/LICENSE-MPLUS.txt": ROOT / "build/ports/firefox/source/layout/reftests/fonts/mplus/mplus-license.txt",
@@ -260,6 +262,7 @@ def verify_components(
             raise FileNotFoundError(f"required source artifact absent: {source}")
         if entries[guest].sha256 != sha256_path(source):
             raise ValueError(f"packaged payload differs from source artifact: {guest}")
+    verify_firefox_provenance(image, entries)
     for guest in ("/usr/lib/firefox/firefox", "/usr/bin/nano", "/usr/bin/python3"):
         verify_aarch64_elf(image, entries[guest], True)
     verify_aarch64_elf(image, entries["/usr/lib/firefox/libxul.so"], False)
@@ -279,6 +282,30 @@ def verify_components(
         tree.update(struct.pack("<Q", entry.size))
         tree.update(bytes.fromhex(entry.sha256))
     return entries, tree.hexdigest()
+
+
+def verify_firefox_provenance(
+    image: pathlib.Path, entries: dict[str, Entry]
+) -> dict:
+    entry = entries.get(firefox_provenance.GUEST_PATH)
+    if entry is None:
+        raise ValueError("Firefox build provenance absent from package")
+    if entry.size > firefox_provenance.MAX_RECORD_BYTES:
+        raise ValueError("Firefox build provenance exceeds bounded size")
+    record = firefox_provenance.parse_record(
+        read_entry_slice(image, entry, 0, entry.size)
+    )
+    runtime_hashes = firefox_provenance.validate_runtime_record(record)
+    for name, expected_hash in runtime_hashes.items():
+        guest = f"/usr/lib/firefox/{name}"
+        runtime_entry = entries.get(guest)
+        if runtime_entry is None:
+            raise ValueError(f"Firefox proven runtime artifact absent: {guest}")
+        if runtime_entry.sha256 != expected_hash:
+            raise ValueError(
+                f"Firefox runtime artifact differs from provenance: {guest}"
+            )
+    return record
 
 
 def lock_value(path: pathlib.Path, key: str) -> str:
@@ -339,6 +366,7 @@ def build(source: pathlib.Path, output_dir: pathlib.Path, package_script: pathli
         if before != after_output:
             raise ValueError("package staging modified account/profile state")
         entries, tree_hash = verify_components(temporary, expected_sources())
+        firefox_build_provenance = verify_firefox_provenance(temporary, entries)
         identity_input = {
             "layout": {
                 "image_bytes": mkpackage.IMAGE_BYTES,
@@ -347,6 +375,7 @@ def build(source: pathlib.Path, output_dir: pathlib.Path, package_script: pathli
             },
             "preservation": before,
             "package_tree_sha256": tree_hash,
+            "firefox_build_provenance": firefox_build_provenance,
             "versions": versions,
         }
         semantic_identity = hashlib.sha256(
@@ -379,6 +408,7 @@ def build(source: pathlib.Path, output_dir: pathlib.Path, package_script: pathli
                 "metadata_crc32": True,
                 "payload_crc32": True,
                 "elf": "AArch64 ET_DYN; executables use /lib/ld-musl-aarch64.so.1",
+                "firefox_provenance": "pinned-source,ordered-patches,audited-artifact-sha256",
             },
         }
         write_manifest(output.with_suffix(".manifest.json"), manifest)
@@ -386,7 +416,9 @@ def build(source: pathlib.Path, output_dir: pathlib.Path, package_script: pathli
             "MAKOS_INTEGRATED_DATA_OK "
             f"image={output} sha256={image_hash} files={len(entries)} "
             "preserved=filesystem-metadata,account-profile "
-            "firefox=140.13.0esr nano=9.1 ncurses=6.5 cpython=3.14.7"
+            f"firefox=140.13.0esr patches={firefox_build_provenance['patch_count']} "
+            f"patch_series_sha256={firefox_build_provenance['patch_series_sha256']} "
+            "nano=9.1 ncurses=6.5 cpython=3.14.7"
         )
         return output
     finally:

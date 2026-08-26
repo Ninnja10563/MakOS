@@ -6,6 +6,7 @@ set -eu
 port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)
 source_dir="$repo_dir/build/ports/firefox/source"
+obj="$repo_dir/build/ports/firefox/obj-aarch64-makos"
 sysroot=${MAKOS_SYSROOT:-"$repo_dir/build/ports/firefox/sysroot-runtime"}
 build_python=${FIREFOX_BUILD_PYTHON:-/opt/homebrew/opt/python@3.12/bin/python3.12}
 rust_toolchain="$repo_dir/build/ports/rust/toolchain-makos"
@@ -107,4 +108,8 @@ export MOZCONFIG="$port_dir/mozconfig.makos"
 # required.
 export MOZ_BUILD_DATE=${MOZ_BUILD_DATE:-20260818193048}
 "$build_python" "$source_dir/mach" build "$@"
-"$port_dir/audit-binary.sh"
+FIREFOX_BIN_DIR="$obj/dist/bin" "$port_dir/audit-binary.sh"
+python3 "$repo_dir/scripts/firefox_provenance.py" create-build-stamp \
+    --source-dir "$source_dir" \
+    --bin-dir "$obj/dist/bin" \
+    --output "$obj/makos-build-provenance.json"

@@ -27,6 +27,20 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- Firefox packages are now required to carry bounded canonical provenance for
+  the pinned ESR source commit, all 56 ordered patches (series SHA-256
+  `9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c`),
+  five post-build audited artifacts, and the exact five stripped runtime
+  payloads. Build, packaging, integration, and strict-runtime preflight each
+  validate their part of the chain; stale/unprovenanced/mismatched images fail
+  before QEMU. Offline focused tests and full `make unit check` pass. The first
+  unchanged Pi/TCG Firefox-role preservation run reached accepted syscall-149
+  handoff but missed the next 30-second leader-dispatch marker under host
+  pressure; its identical rerun passed with dispatches `10203,13550,10804`,
+  three automatic migrations, watcher TID 8 on AP1, CPU0 handoff, and status
+  42. No threshold changed. The Pi lacks the Firefox source/output tree, so a
+  real patch-0057 package has not yet been produced and idle-macOS/HVF
+  qualification remains pending.
 - Firefox priority increment: patch `0057` adds AArch64 target syscall 149 as
   an explicit post-enqueue watcher-to-main acknowledgement. The kernel records
   the exact Firefox watcher/group when syscall 140 dequeues a key, accepts 149
@@ -47,18 +61,19 @@ Preserve existing files and changes.
   gate. The high-pressure paint/Ctrl-A evidence remains
   248584/10971 ms and 255543/14363 ms against the unchanged 10000 ms Ctrl-A
   limit.
-- Active visible Firefox-handoff milestone from implementation commit
-  `4f72dbb09227dbd2ab6dc117d2c799d69d055353`: PID 926500, sole QEMU, user
+- Stopped visible Firefox-handoff milestone from implementation commit
+  `4f72dbb09227dbd2ab6dc117d2c799d69d055353`: PID 926500, user
   service `makos-visible-firefox-handoff-final.service`, private session
   `build/makos-pi-visible-firefox-handoff-final-wstXm6dk`, read-only
   `boot.img`, blank sparse `data.img`, private `vars.fd`, `qmp.sock`,
-  `serial.log`, and `login.ppm`. QMP reports running; the guest reached
+  `serial.log`, and `login.ppm`. It was stopped cleanly through QMP before the
+  provenance runtime gate; the guest reached
   `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
   `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
   `80f706777cfd92c7938e33088a4572c9b5829c7b5faf0313df65040e92579dbc`;
   login PPM SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
-  Stop it through QMP before any runtime gate; never start concurrent QEMU.
+  Its private files remain; never start concurrent QEMU.
 - The bounded AArch64 production scheduler now includes non-leader Python-role
   threads in the Firefox/Native AP1-3 placement, affinity, block/wake, and
   timer-migration policy. Leaders and all device MMIO remain CPU0-owned. The
@@ -860,8 +875,8 @@ Preserve existing files and changes.
   system, debugger, or substantial
   in-guest MakOS build.
 - At this handoff PID 926500 in
-  `build/makos-pi-visible-firefox-handoff-final-wstXm6dk` is the sole
-  QEMU and no runtime-test harness is active. It runs under
+  `build/makos-pi-visible-firefox-handoff-final-wstXm6dk` has been stopped and
+  no QEMU or runtime-test harness is active. It ran under
   `makos-visible-firefox-handoff-final.service` with private read-only
   `boot.img`, blank sparse `data.img`, private `vars.fd`, QMP `qmp.sock`,
   serial `serial.log`, and QMP login capture `login.ppm`.
@@ -870,8 +885,8 @@ Preserve existing files and changes.
   `80f706777cfd92c7938e33088a4572c9b5829c7b5faf0313df65040e92579dbc`;
   login capture SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
-  The Pi-local QEMU build has no VNC backend. Stop this guest through its QMP
-  socket before any runtime gate; never start concurrent QEMU.
+  The Pi-local QEMU build has no VNC backend. The private session remains;
+  never start concurrent QEMU.
 - Prior PID 850875 in
   `build/makos-pi-visible-selfhost-if-arithmetic-final3-IgEL0cQl` was a
   private visible-login session. It ran under

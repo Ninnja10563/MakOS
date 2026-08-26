@@ -168,6 +168,7 @@ test-aarch64-cursor-runtime: image-aarch64
 
 test-aarch64-firefox-runtime: image-aarch64
 	@test -f "$(AARCH64_FIREFOX_PACKAGE_IMAGE)" || { echo "Firefox package image not found: $(AARCH64_FIREFOX_PACKAGE_IMAGE)" >&2; exit 2; }
+	python3 scripts/verify_firefox_runtime_image.py "$(AARCH64_FIREFOX_PACKAGE_IMAGE)"
 	MAKOS_AARCH64_PACKAGE_IMAGE="$(AARCH64_FIREFOX_PACKAGE_IMAGE)" \
 	MAKOS_AARCH64_FIREFOX_PROBE=1 \
 	MAKOS_AARCH64_FIREFOX_PROBE_SECONDS=600 \
@@ -235,6 +236,7 @@ unit:
 	python3 scripts/test_cpu_affinity.py
 	python3 scripts/test_aarch64_surface_priority.py
 	python3 scripts/test_aarch64_firefox_interaction.py
+	python3 scripts/test_firefox_provenance.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
 	ports/firefox/test-toolchain.sh
 	python3 scripts/test_aarch64_stack_protector.py
@@ -286,6 +288,7 @@ check:
 	python3 scripts/test_cpu_affinity.py
 	python3 scripts/test_aarch64_surface_priority.py
 	python3 scripts/test_aarch64_firefox_interaction.py
+	python3 scripts/test_firefox_provenance.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
 	ports/firefox/test-toolchain.sh
 	python3 scripts/test_aarch64_stack_protector.py

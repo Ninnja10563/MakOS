@@ -43,6 +43,17 @@ SHA-256 values must equal staging artifacts. Firefox, nano, Python must be
 AArch64 `ET_DYN` executables using `/lib/ld-musl-aarch64.so.1`; `libxul.so`
 must be an AArch64 `ET_DYN` shared library. Empty licenses are rejected.
 
+Firefox additionally carries
+`/usr/lib/firefox/makos-build-provenance.json`. The bounded canonical record
+pins the ESR source commit and ordered patch-series identity, hashes five
+outputs only after `mach build` and `audit-binary.sh` succeed, then hashes the
+five exact post-strip runtime payloads. Package construction revalidates the
+build stamp; integration compares every runtime hash to package metadata and
+includes the full record in the semantic image identity. The strict Firefox
+target repeats CRC, ELF, and provenance validation before it creates QEMU, so
+old images without a record and current-looking images with stale payloads
+fail before boot.
+
 Focused network- and QEMU-independent regression test:
 
 ```sh

@@ -4,6 +4,25 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the Firefox build/package/runtime chain now fails closed on stale
+  artifacts before QEMU. A canonical bounded provenance record binds the
+  pinned ESR source commit, all 56 ordered patches (series SHA-256
+  `9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c`),
+  five post-build audited ELF outputs, and the exact five stripped runtime
+  payloads. Packaging rechecks source HEAD, applied-patch marker, and build
+  hashes; integration verifies the runtime hashes against package metadata and
+  includes the record in semantic image identity. The strict Firefox Make
+  target runs the same CRC/ELF/provenance preflight before starting QEMU.
+  Offline regressions reject stale patches, changed build files, missing
+  legacy provenance, extra/noncanonical fields, and a mismatched runtime file;
+  full `make unit check` passes. The first unchanged Pi/TCG Firefox-role
+  preservation run reached the accepted post-enqueue handoff but missed the
+  following 30-second leader-dispatch marker window under host pressure. Its
+  identical rerun passed with AP dispatches `10203,13550,10804`, three
+  automatic migrations, Ctrl-A watcher TID 8 on AP1, CPU0 handoff, and status
+  42; no threshold changed. No fresh patch-0057 Firefox binary exists on this
+  Pi, so actual build/package preflight and the unchanged idle-macOS/HVF browser
+  gate remain pending and are not claimed.
 - 2026-08-26 AArch64 Firefox input now has an explicit post-enqueue
   watcher-to-main contract. Firefox patch `0057` invokes syscall 149 only after
   a key is in the widget's bounded queue and a Gecko main-thread drain runnable
@@ -26,11 +45,12 @@ Last updated: 2026-08-26.
   `a9c604254f094de2` image does not contain patch `0057` and is not accepted as
   qualification for this increment.
   A fresh visible login from implementation commit
-  `4f72dbb09227dbd2ab6dc117d2c799d69d055353` is the sole QEMU: PID 926500,
+  `4f72dbb09227dbd2ab6dc117d2c799d69d055353` used PID 926500,
   service `makos-visible-firefox-handoff-final.service`, private session
   `build/makos-pi-visible-firefox-handoff-final-wstXm6dk`, read-only boot clone,
-  blank sparse data image, private vars, QMP socket, and serial log. QMP reports
-  running. The boot clone SHA-256 is
+  blank sparse data image, private vars, QMP socket, and serial log. It was
+  stopped cleanly through QMP before the provenance runtime gate. The boot
+  clone SHA-256 is
   `80f706777cfd92c7938e33088a4572c9b5829c7b5faf0313df65040e92579dbc`;
   the 800x600 login PPM SHA-256 is
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
@@ -55,9 +75,10 @@ Last updated: 2026-08-26.
   check` passes. Strict real-Firefox timing remains pending unchanged on an
   idle macOS/HVF host: the latest high-pressure runs painted in 248584/255543
   ms but exceeded the 10000 ms Ctrl-A limit at 10971/14363 ms. A fresh visible
-  login is the sole QEMU, PID 899613, service
+  login used PID 899613, service
   `makos-visible-python-smp-final.service`, private session
-  `build/makos-pi-visible-python-smp-final-muepCbzb`; QMP reports running. Its
+  `build/makos-pi-visible-python-smp-final-muepCbzb`; it was later stopped
+  cleanly through QMP. Its
   read-only boot clone SHA-256 is
   `7240a6ed1e8bfc84533e62a8ef28126fd0025ef553f3dae3c883cd2d8b3d6dd9`;
   login PPM/PNG SHA-256 values are

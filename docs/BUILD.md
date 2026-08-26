@@ -82,6 +82,14 @@ Focused `test-aarch64-cursor-runtime` uses a fresh private sparse data disk,
 moves the guest cursor through seven positions, and requires zero changed
 virtio-GPU scanout pixels. QEMU still renders the separate guest cursor plane.
 Focused `test-aarch64-firefox-runtime` requires the integrated Firefox package,
+and first runs a no-QEMU fail-closed preflight. The package must carry a
+canonical record for the pinned Firefox source commit and current ordered
+patch-series SHA-256, the five successfully audited build artifacts, and the
+five exact stripped runtime artifacts. Package CRCs, AArch64 PIE/shared-object
+shape, and runtime hashes are checked before QEMU creation; a historical,
+unprovenanced, stale-patch, or mismatched-payload image is rejected. The
+successful preflight marker is `MAKOS_FIREFOX_RUNTIME_IMAGE_OK`.
+The runtime then requires
 strict paint/input/TLS/exact-URI/page-pixel proof, then copies the selected URL
 through the MakOS system clipboard, clears the URL bar, pastes, and requires a
 second exact-URI page completion. It then left-clicks the real `example.com`

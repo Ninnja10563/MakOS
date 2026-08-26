@@ -103,6 +103,12 @@ signal, socket, profile-storage, compositor, audio, and sandbox contracts.
 Mozilla's `stage-package` emits a real 28-file runtime tree. `package-makos.sh`
 replaces the 2.1 GiB debug `libxul.so` with the audited 191 MiB stripped ELF,
 then writes and fully CRC-verifies a 344 MiB sector-backed package image.
+The full build writes a canonical provenance stamp only after the binary audit.
+Packaging rechecks its pinned source HEAD, exact applied-patch-series marker,
+and SHA-256 of `firefox`, `plugin-container`, `xpcshell`, `libxul.so`, and
+`libnspr4.so`; after stripping it emits a runtime record with hashes of those
+exact five packaged payloads. Integrated-image and strict-runtime preflights
+reject a missing/stale record or any package hash mismatch before QEMU.
 MakOS VFS now mounts its checksummed package manifest and streams arbitrary
 offset reads directly from virtio-blk/ATA, avoiding fixed in-kernel file
 buffers. Guest Firefox now launches genuine packaged binaries through
