@@ -31,9 +31,11 @@ PROCESS_MARKER = b"MAKOS_AARCH64_NATIVE_SMP_PROCESS_OK"
 OVERLAP_MARKER = b"MAKOS_AARCH64_NATIVE_SMP_OVERLAP_OK"
 PTHREAD_MARKER = (
     b"MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready "
-    b"release=bounded affinity=explicit singleton=0x2,0x4,0x8 restored=0xe "
-    b"get=kernel-owned migrations=forced:3"
+    b"release=bounded affinity=default:0xe,explicit singleton=0x2,0x4,0x8 "
+    b"restored=0xe get=kernel-owned placement=least-reserved-ap "
+    b"migrations=automatic:load,forced:3 caller_selected_automatic=0"
 )
+AUTOMATIC_MIGRATION_MARKER = b"MAKOS_AARCH64_APPLICATION_MIGRATION_OK role=native"
 RESULT_MARKER = b"MAKOS_AARCH64_NATIVE_SMP_OK"
 REAP_MARKER = (
     b"MAKOS_AARCH64_NATIVE_SMP_REAP_OK fixture=upstream-musl-pthread "
@@ -75,6 +77,8 @@ def main() -> int:
     dispatches = (0, 0, 0)
     overlap_mask = 0
     overlap_tids = (0, 0, 0)
+    automatic_placements = (0, 0, 0)
+    automatic_migrations = 0
 
     with tempfile.TemporaryDirectory(
         prefix="makos-native-smp-focused-", dir=output_root
@@ -165,6 +169,9 @@ def main() -> int:
                 common.wait_for_output(selector, process, output, PROCESS_MARKER, 30)
                 common.wait_for_output(selector, process, output, OVERLAP_MARKER, 60)
                 common.wait_for_output(selector, process, output, PTHREAD_MARKER, 30)
+                common.wait_for_output(
+                    selector, process, output, AUTOMATIC_MIGRATION_MARKER, 30
+                )
                 common.wait_for_output(selector, process, output, RESULT_MARKER, 90)
                 common.wait_for_output(selector, process, output, REAP_MARKER, 20)
 
@@ -182,25 +189,55 @@ def main() -> int:
                     r"dispatches=(\d+),(\d+),(\d+) overlap_mask=(0x[0-9a-f]+) "
                     r"overlap_tids=(\d+),(\d+),(\d+) worker_role=native "
                     r"leader_cpu=0 run_queue=shared-ready ownership=exclusive "
-                    r"block=ap-idle status=42",
+                    r"block=ap-idle automatic_placements=(\d+),(\d+),(\d+) "
+                    r"automatic_placement_mask=(0x[0-9a-f]+) automatic_migrations=(\d+) "
+                    r"automatic_source_mask=(0x[0-9a-f]+) "
+                    r"automatic_target_mask=(0x[0-9a-f]+) "
+                    r"automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance "
+                    r"automatic_delta=(\d+) migration_evidence_drops=(\d+) "
+                    r"caller_selected=0 explicit_affinity=authoritative status=42",
                     decoded,
                 )
                 if not process_matches or not overlap_matches or not result_matches:
                     raise AssertionError("native production-SMP fields were malformed")
                 group, marker_mask, mt1, mt2, mt3 = overlap_matches[-1]
-                mask_text, d1, d2, d3, final_mask, t1, t2, t3 = result_matches[-1]
+                (
+                    mask_text, d1, d2, d3, final_mask, t1, t2, t3,
+                    p1, p2, p3, placement_text, migration_text,
+                    source_text, target_text, delta_text, drops_text,
+                ) = result_matches[-1]
                 if group != process_matches[-1]:
                     raise AssertionError("native overlap group did not match launch")
                 cpu_mask = int(mask_text, 16) & 0xE
                 dispatches = (int(d1), int(d2), int(d3))
                 overlap_mask = int(final_mask, 16) & 0xE
                 overlap_tids = (int(t1), int(t2), int(t3))
+                automatic_placements = (int(p1), int(p2), int(p3))
+                automatic_migrations = int(migration_text)
+                placement_mask = int(placement_text, 16)
+                source_mask = int(source_text, 16)
+                target_mask = int(target_text, 16)
                 marker_overlap_mask = int(marker_mask, 16) & 0xE
                 marker_overlap_tids = (int(mt1), int(mt2), int(mt3))
                 if cpu_mask != 0xE or any(value == 0 for value in dispatches):
                     raise AssertionError(
                         f"native workers did not use every AP: mask={cpu_mask:#x} "
                         f"dispatches={dispatches}"
+                    )
+                if (
+                    placement_mask != 0xE
+                    or any(value == 0 for value in automatic_placements)
+                    or automatic_migrations < 1
+                    or source_mask & 0xE == 0
+                    or target_mask & 0xE == 0
+                    or int(delta_text) != 64
+                    or int(drops_text) != 0
+                ):
+                    raise AssertionError(
+                        "native automatic-balancing evidence was incomplete: "
+                        f"placements={automatic_placements} mask={placement_mask:#x} "
+                        f"migrations={automatic_migrations} source={source_mask:#x} "
+                        f"target={target_mask:#x} delta={delta_text} drops={drops_text}"
                     )
                 if (
                     marker_overlap_mask != overlap_mask
@@ -250,8 +287,12 @@ def main() -> int:
         f"dispatches={dispatches[0]},{dispatches[1]},{dispatches[2]} "
         f"overlap_mask={overlap_mask:#x} "
         f"overlap_tids={overlap_tids[0]},{overlap_tids[1]},{overlap_tids[2]} "
+        f"automatic_placements={automatic_placements[0]},{automatic_placements[1]},{automatic_placements[2]} "
+        f"automatic_migrations={automatic_migrations} "
         "fixture=upstream-musl-pthread role=native leader_cpu=0 "
         "workers=shared-ap affinity=kernel-owned ownership=exclusive "
+        "automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance "
+        "caller_selected_automatic=0 explicit_affinity=authoritative "
         "device_mmio_owner=cpu0 status=42"
     )
     return 0

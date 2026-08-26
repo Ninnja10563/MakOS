@@ -152,6 +152,9 @@ struct ContextSlot {
     group_pid: u64,
     role: ProcessRole,
     affinity_mask: u8,
+    automatic_cpu: u8,
+    automatic_migrated: bool,
+    affinity_user_set: bool,
     context: crate::arch::UserContext,
     clear_child_tid: u64,
     robust_list_head: u64,
@@ -172,6 +175,9 @@ impl ContextSlot {
         group_pid: 0,
         role: ProcessRole::None,
         affinity_mask: 0,
+        automatic_cpu: 0,
+        automatic_migrated: false,
+        affinity_user_set: false,
         context: crate::arch::UserContext::initial(0, 0, 0, 0),
         clear_child_tid: 0,
         robust_list_head: 0,
@@ -220,9 +226,12 @@ struct SchedulerState {
     timer_dispatches: [u64; MAX_PROCESSES],
     cpu_dispatches: [u64; 4],
     compute_placement_cursor: u8,
+    application_placement_cursor: u8,
     toolchain_migration_records: [ComputeMigration; MAX_TOOLCHAIN_MIGRATIONS],
     toolchain_migration_count: usize,
     toolchain_migration_reported: usize,
+    application_migration_records: [ComputeMigration; MAX_APPLICATION_MIGRATIONS],
+    application_migration_count: usize,
     spawned_roots: [u64; MAX_PROCESSES],
     reaped_processes: u64,
     reclaimed_frames: usize,
@@ -242,9 +251,12 @@ impl SchedulerState {
             timer_dispatches: [0; MAX_PROCESSES],
             cpu_dispatches: [0; 4],
             compute_placement_cursor: 1,
+            application_placement_cursor: 1,
             toolchain_migration_records: [ComputeMigration::EMPTY; MAX_TOOLCHAIN_MIGRATIONS],
             toolchain_migration_count: 0,
             toolchain_migration_reported: 0,
+            application_migration_records: [ComputeMigration::EMPTY; MAX_APPLICATION_MIGRATIONS],
+            application_migration_count: 0,
             spawned_roots: [0; MAX_PROCESSES],
             reaped_processes: 0,
             reclaimed_frames: 0,
@@ -274,7 +286,13 @@ impl SchedulerState {
             } else if slot.is_some_and(|slot| slot.role == ProcessRole::SmpLoad) {
                 cpu != 0 && cpu < SMP_PROBE_AFFINITY.len()
             } else {
-                slot.is_some_and(|slot| slot.affinity_mask & (1u8 << cpu) != 0)
+                slot.is_some_and(|slot| {
+                    slot.affinity_mask & (1u8 << cpu) != 0
+                        && (!production_ap_worker(slot)
+                            || slot.affinity_user_set
+                            || slot.automatic_cpu == 0
+                            || usize::from(slot.automatic_cpu) == cpu)
+                })
             }
         });
         if selected.is_some() && cpu < self.cpu_dispatches.len() {
@@ -358,6 +376,51 @@ impl SchedulerState {
         }
     }
 
+    fn least_reserved_application_ap(&mut self) -> ComputePlacement {
+        let start = usize::from(self.application_placement_cursor.clamp(1, 3));
+        let mut reservations = [0usize; 3];
+        for slot in &self.contexts {
+            if production_ap_worker(slot)
+                && !slot.affinity_user_set
+                && (1..=3).contains(&slot.automatic_cpu)
+            {
+                reservations[usize::from(slot.automatic_cpu) - 1] += 1;
+            }
+        }
+        let loads = [
+            self.cpu_dispatches[1],
+            self.cpu_dispatches[2],
+            self.cpu_dispatches[3],
+        ];
+        let mut idle_mask = 0u8;
+        for cpu in 1..4 {
+            if self.table.current_pid_on(cpu).is_none() {
+                idle_mask |= 1u8 << cpu;
+            }
+        }
+        let mut selected_cpu = start;
+        let mut selected_reservations = usize::MAX;
+        let mut selected_load = u64::MAX;
+        for offset in 0..3 {
+            let cpu = 1 + (start - 1 + offset) % 3;
+            let reserved = reservations[cpu - 1];
+            let load = self.cpu_dispatches[cpu];
+            if reserved < selected_reservations
+                || (reserved == selected_reservations && load < selected_load)
+            {
+                selected_cpu = cpu;
+                selected_reservations = reserved;
+                selected_load = load;
+            }
+        }
+        self.application_placement_cursor = (1 + selected_cpu % 3) as u8;
+        ComputePlacement {
+            cpu: selected_cpu,
+            loads,
+            idle_mask,
+        }
+    }
+
     fn rebalance_toolchain_on_timer(
         &mut self,
         cpu: usize,
@@ -386,6 +449,8 @@ impl SchedulerState {
         self.contexts[index].affinity_mask = 1u8 << placement.cpu;
         let migration = ComputeMigration {
             pid,
+            group_pid: pid,
+            application_role: 0,
             source_cpu: cpu,
             target_cpu: placement.cpu,
             loads: placement.loads,
@@ -402,6 +467,59 @@ impl SchedulerState {
         TOOLCHAIN_MIGRATION_TARGET_MASK.fetch_or(1u64 << placement.cpu, Ordering::AcqRel);
         Some(migration)
     }
+
+    fn rebalance_application_on_timer(
+        &mut self,
+        cpu: usize,
+        pid: u64,
+    ) -> Option<ComputeMigration> {
+        if cpu == 0 || cpu >= self.cpu_dispatches.len() {
+            return None;
+        }
+        let index = self.contexts.iter().position(|slot| slot.pid == pid)?;
+        let slot = self.contexts[index];
+        if !production_ap_worker(&slot)
+            || slot.affinity_user_set
+            || slot.automatic_migrated
+            || slot.automatic_cpu != cpu as u8
+            || slot.affinity_mask != 0xe
+        {
+            return None;
+        }
+        let placement = self.least_loaded_compute_ap();
+        let source_load = placement.loads[cpu - 1];
+        let target_load = placement.loads[placement.cpu - 1];
+        if placement.cpu == cpu
+            || source_load
+                < target_load.saturating_add(APPLICATION_REBALANCE_DISPATCH_DELTA)
+        {
+            return None;
+        }
+        self.contexts[index].automatic_cpu = placement.cpu as u8;
+        self.contexts[index].automatic_migrated = true;
+        let migration = ComputeMigration {
+            pid,
+            group_pid: slot.group_pid,
+            application_role: production_role_code(slot.role),
+            source_cpu: cpu,
+            target_cpu: placement.cpu,
+            loads: placement.loads,
+            idle_mask: placement.idle_mask,
+        };
+        if tracked_production_worker(slot.role, slot.group_pid) {
+            if self.application_migration_count < MAX_APPLICATION_MIGRATIONS {
+                self.application_migration_records[self.application_migration_count] = migration;
+                self.application_migration_count += 1;
+            } else {
+                APPLICATION_MIGRATION_EVIDENCE_DROPS.fetch_add(1, Ordering::AcqRel);
+            }
+            APPLICATION_MIGRATIONS.fetch_add(1, Ordering::AcqRel);
+            APPLICATION_MIGRATION_SOURCE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+            APPLICATION_MIGRATION_TARGET_MASK
+                .fetch_or(1u64 << placement.cpu, Ordering::AcqRel);
+        }
+        Some(migration)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -414,6 +532,8 @@ struct ComputePlacement {
 #[derive(Clone, Copy)]
 struct ComputeMigration {
     pid: u64,
+    group_pid: u64,
+    application_role: u8,
     source_cpu: usize,
     target_cpu: usize,
     loads: [u64; 3],
@@ -423,6 +543,8 @@ struct ComputeMigration {
 impl ComputeMigration {
     const EMPTY: Self = Self {
         pid: 0,
+        group_pid: 0,
+        application_role: 0,
         source_cpu: 0,
         target_cpu: 0,
         loads: [0; 3],
@@ -529,6 +651,14 @@ static PRODUCTION_WORKER_OVERLAP_CPU_MASK: AtomicU64 = AtomicU64::new(0);
 static PRODUCTION_WORKER_OVERLAP_TIDS: [AtomicU64; 4] =
     [const { AtomicU64::new(0) }; 4];
 static PRODUCTION_WORKER_OVERLAP_REPORTED: AtomicBool = AtomicBool::new(false);
+static PRODUCTION_AUTOBALANCE_REQUIRED: AtomicBool = AtomicBool::new(false);
+static APPLICATION_PLACEMENT_CPU_MASK: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_PLACEMENTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static APPLICATION_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_MIGRATION_SOURCE_MASK: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_MIGRATION_EVIDENCE_DROPS: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_LIVE_MIGRATION_REPORTED: AtomicBool = AtomicBool::new(false);
 static TOOLCHAIN_CPU_MASK: AtomicU64 = AtomicU64::new(0);
 static TOOLCHAIN_REPORTED_MASK: AtomicU64 = AtomicU64::new(0);
 static TOOLCHAIN_DISPATCH_EMITTED_MASK: AtomicU64 = AtomicU64::new(0);
@@ -541,6 +671,8 @@ static TOOLCHAIN_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
 static TOOLCHAIN_MIGRATION_EVIDENCE_DROPS: AtomicU64 = AtomicU64::new(0);
 const TOOLCHAIN_REBALANCE_DISPATCH_DELTA: u64 = 8;
 const MAX_TOOLCHAIN_MIGRATIONS: usize = 128;
+const APPLICATION_REBALANCE_DISPATCH_DELTA: u64 = 64;
+const MAX_APPLICATION_MIGRATIONS: usize = 32;
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -2596,6 +2728,11 @@ pub fn set_task_affinity(tid: u64, mask: u64) -> Result<bool, i64> {
         }
         let prior = slot.affinity_mask;
         slot.affinity_mask = mask as u8;
+        // A userspace affinity request is authoritative. Automatic placement
+        // and load migration only operate while the application retains its
+        // default 0xe AP pool.
+        slot.affinity_user_set = true;
+        slot.automatic_cpu = 0;
         let migrate_caller = target == current_tid && mask & (1u64 << cpu) == 0;
         Ok((target, prior, migrate_caller))
     });
@@ -3324,6 +3461,9 @@ pub fn clone_thread(
             .table
             .spawn(parent.group_pid, parent.context.ttbr0)
             .ok()?;
+        let application_placement =
+            matches!(parent.role, ProcessRole::Firefox | ProcessRole::Native)
+                .then(|| state.least_reserved_application_ap());
         let slot = state.contexts.iter_mut().find(|slot| slot.pid == 0)?;
         *slot = ContextSlot {
             pid: tid,
@@ -3334,6 +3474,9 @@ pub fn clone_thread(
             } else {
                 parent.affinity_mask
             },
+            automatic_cpu: application_placement.map_or(0, |placement| placement.cpu as u8),
+            automatic_migrated: false,
+            affinity_user_set: false,
             context: child_context,
             clear_child_tid: child_tid_address,
             robust_list_head: 0,
@@ -3348,9 +3491,29 @@ pub fn clone_thread(
             name: parent.name,
         };
         state.session_active = true;
-        Some((tid, parent_tid, parent.group_pid))
+        Some((tid, parent_tid, parent.group_pid, parent.role, application_placement))
     })?;
-    let (tid, parent_tid, group_pid) = tid;
+    let (tid, parent_tid, group_pid, role, application_placement) = tid;
+    if let Some(placement) = application_placement {
+        if tracked_production_worker(role, group_pid) {
+            APPLICATION_PLACEMENTS[placement.cpu].fetch_add(1, Ordering::AcqRel);
+            let cpu_bit = 1u64 << placement.cpu;
+            let prior_mask = APPLICATION_PLACEMENT_CPU_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+            if prior_mask & cpu_bit == 0 {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_APPLICATION_PLACEMENT_OK role={} group_pid={} tid={} cpu={} allowed_affinity=0xe loads={},{},{} idle_mask={:#x} policy=least-reserved-ap caller_selected=0",
+                    if role == ProcessRole::Firefox { "firefox" } else { "native" },
+                    group_pid,
+                    tid,
+                    placement.cpu,
+                    placement.loads[0],
+                    placement.loads[1],
+                    placement.loads[2],
+                    placement.idle_mask,
+                );
+            }
+        }
+    }
     if !crate::aarch64_tty::register_thread(tid, group_pid, parent_tid) {
         crate::fatal("AArch64 TTY thread table full");
     }
@@ -3399,6 +3562,9 @@ pub fn fork_process(frame: &crate::arch::ExceptionFrame) -> Option<u64> {
             group_pid: child_pid,
             role: parent.role,
             affinity_mask: 1,
+            automatic_cpu: 0,
+            automatic_migrated: false,
+            affinity_user_set: false,
             context: child_context,
             clear_child_tid: 0,
             robust_list_head: 0,
@@ -3978,6 +4144,16 @@ fn reset_production_worker_evidence() {
     PRODUCTION_WORKER_ACTIVE_CPU_MASK.store(0, Ordering::Release);
     PRODUCTION_WORKER_OVERLAP_CPU_MASK.store(0, Ordering::Release);
     PRODUCTION_WORKER_OVERLAP_REPORTED.store(false, Ordering::Release);
+    PRODUCTION_AUTOBALANCE_REQUIRED.store(false, Ordering::Release);
+    APPLICATION_PLACEMENT_CPU_MASK.store(0, Ordering::Release);
+    APPLICATION_MIGRATIONS.store(0, Ordering::Release);
+    APPLICATION_MIGRATION_SOURCE_MASK.store(0, Ordering::Release);
+    APPLICATION_MIGRATION_TARGET_MASK.store(0, Ordering::Release);
+    APPLICATION_MIGRATION_EVIDENCE_DROPS.store(0, Ordering::Release);
+    APPLICATION_LIVE_MIGRATION_REPORTED.store(false, Ordering::Release);
+    for placements in &APPLICATION_PLACEMENTS {
+        placements.store(0, Ordering::Release);
+    }
     for dispatches in &PRODUCTION_WORKER_DISPATCHES {
         dispatches.store(0, Ordering::Release);
     }
@@ -3987,6 +4163,9 @@ fn reset_production_worker_evidence() {
     for tid in &PRODUCTION_WORKER_OVERLAP_TIDS {
         tid.store(0, Ordering::Release);
     }
+    with_state(|state| {
+        state.application_migration_count = 0;
+    });
 }
 
 fn reset_toolchain_smp_evidence() {
@@ -4027,6 +4206,34 @@ fn take_unreported_toolchain_migrations(
         state.toolchain_migration_reported = 0;
         (output, count)
     })
+}
+
+fn take_application_migrations() -> ([ComputeMigration; MAX_APPLICATION_MIGRATIONS], usize) {
+    with_state(|state| {
+        let count = state.application_migration_count;
+        if count > MAX_APPLICATION_MIGRATIONS {
+            crate::fatal("AArch64 application migration evidence index invalid");
+        }
+        let mut output = [ComputeMigration::EMPTY; MAX_APPLICATION_MIGRATIONS];
+        output[..count].copy_from_slice(&state.application_migration_records[..count]);
+        state.application_migration_count = 0;
+        (output, count)
+    })
+}
+
+fn application_balance_evidence() -> ([u64; 3], u64, u64, u64, u64, u64) {
+    (
+        [
+            APPLICATION_PLACEMENTS[1].load(Ordering::Acquire),
+            APPLICATION_PLACEMENTS[2].load(Ordering::Acquire),
+            APPLICATION_PLACEMENTS[3].load(Ordering::Acquire),
+        ],
+        APPLICATION_PLACEMENT_CPU_MASK.load(Ordering::Acquire),
+        APPLICATION_MIGRATIONS.load(Ordering::Acquire),
+        APPLICATION_MIGRATION_SOURCE_MASK.load(Ordering::Acquire),
+        APPLICATION_MIGRATION_TARGET_MASK.load(Ordering::Acquire),
+        APPLICATION_MIGRATION_EVIDENCE_DROPS.load(Ordering::Acquire),
+    )
 }
 
 fn toolchain_smp_evidence() -> (u64, [u64; 3], [u64; 3], u64, u64, u64, u64) {
@@ -4343,6 +4550,9 @@ fn install_loaded_process(
             group_pid: pid,
             role,
             affinity_mask: compute_placement.map_or(1, |placement| 1u8 << placement.cpu),
+            automatic_cpu: 0,
+            automatic_migrated: false,
+            affinity_user_set: false,
             context,
             clear_child_tid: 0,
             robust_list_head: 0,
@@ -4990,6 +5200,7 @@ pub fn spawn_firefox_smp_probe() -> Option<u64> {
     }
     PRODUCTION_WORKER_GROUP_PID.store(pid, Ordering::Release);
     PRODUCTION_WORKER_ROLE.store(production_role_code(ProcessRole::Firefox), Ordering::Release);
+    PRODUCTION_AUTOBALANCE_REQUIRED.store(true, Ordering::Release);
     crate::serial_println!(
         "MAKOS_AARCH64_FIREFOX_SMP_PROCESS_OK pid={} parent={} fixture=upstream-musl-pthread role=firefox leader_cpu=0 workers=shared-ap entry={:#x} ttbr0={:#x}",
         pid,
@@ -5027,6 +5238,7 @@ pub fn spawn_native_smp_probe() -> Option<u64> {
     }
     PRODUCTION_WORKER_GROUP_PID.store(pid, Ordering::Release);
     PRODUCTION_WORKER_ROLE.store(production_role_code(ProcessRole::Native), Ordering::Release);
+    PRODUCTION_AUTOBALANCE_REQUIRED.store(true, Ordering::Release);
     crate::serial_println!(
         "MAKOS_AARCH64_NATIVE_SMP_PROCESS_OK pid={} parent={} fixture=upstream-musl-pthread role=native leader_cpu=0 workers=shared-ap entry={:#x} ttbr0={:#x}",
         pid,
@@ -5605,9 +5817,39 @@ pub fn wait(pid: u64) -> Option<u64> {
     }
     if pid == group_pid && tracked_production_worker(role, group_pid) {
         let (cpu_mask, dispatches, overlap_mask, overlap_tids) = production_worker_evidence();
+        let (migration_records, migration_record_count) = take_application_migrations();
+        for migration in &migration_records[..migration_record_count] {
+            crate::serial_println!(
+                "MAKOS_AARCH64_APPLICATION_MIGRATION_OK role={} group_pid={} tid={} source_cpu={} target_cpu={} allowed_affinity=0xe loads={},{},{} idle_mask={:#x} policy=timer-safe-dispatch-imbalance delta={} context=gpr,sp,tls,simd ownership=ready-unowned evidence_emitter=cpu0 caller_selected=0 explicit_affinity=authoritative",
+                if role == ProcessRole::Firefox { "firefox" } else { "native" },
+                migration.group_pid,
+                migration.pid,
+                migration.source_cpu,
+                migration.target_cpu,
+                migration.loads[0],
+                migration.loads[1],
+                migration.loads[2],
+                migration.idle_mask,
+                APPLICATION_REBALANCE_DISPATCH_DELTA,
+            );
+        }
+        let (placements, placement_mask, migrations, source_mask, target_mask, evidence_drops) =
+            application_balance_evidence();
+        if PRODUCTION_AUTOBALANCE_REQUIRED.load(Ordering::Acquire)
+            && (placements.iter().sum::<u64>() < 3
+                || placement_mask & 0xe != 0xe
+                || placement_mask & 1 != 0
+                || migrations == 0
+                || migration_record_count == 0
+                || source_mask & 1 != 0
+                || target_mask & 1 != 0
+                || evidence_drops != 0)
+        {
+            crate::fatal("AArch64 production application automatic balancing evidence invalid");
+        }
         if role == ProcessRole::Firefox {
             crate::serial_println!(
-                "MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=firefox leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle status={}",
+                "MAKOS_AARCH64_PRODUCTION_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=firefox leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle automatic_placements={},{},{} automatic_placement_mask={:#x} automatic_migrations={} automatic_source_mask={:#x} automatic_target_mask={:#x} automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance automatic_delta={} migration_evidence_drops={} caller_selected=0 explicit_affinity=authoritative status={}",
                 cpu_mask,
                 dispatches[1],
                 dispatches[2],
@@ -5616,11 +5858,20 @@ pub fn wait(pid: u64) -> Option<u64> {
                 overlap_tids[1],
                 overlap_tids[2],
                 overlap_tids[3],
+                placements[0],
+                placements[1],
+                placements[2],
+                placement_mask,
+                migrations,
+                source_mask,
+                target_mask,
+                APPLICATION_REBALANCE_DISPATCH_DELTA,
+                evidence_drops,
                 status,
             );
         } else {
             crate::serial_println!(
-                "MAKOS_AARCH64_NATIVE_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=native leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle status={}",
+                "MAKOS_AARCH64_NATIVE_SMP_OK cpu_mask={:#x} dispatches={},{},{} overlap_mask={:#x} overlap_tids={},{},{} worker_role=native leader_cpu=0 run_queue=shared-ready ownership=exclusive block=ap-idle automatic_placements={},{},{} automatic_placement_mask={:#x} automatic_migrations={} automatic_source_mask={:#x} automatic_target_mask={:#x} automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance automatic_delta={} migration_evidence_drops={} caller_selected=0 explicit_affinity=authoritative status={}",
                 cpu_mask,
                 dispatches[1],
                 dispatches[2],
@@ -5629,6 +5880,15 @@ pub fn wait(pid: u64) -> Option<u64> {
                 overlap_tids[1],
                 overlap_tids[2],
                 overlap_tids[3],
+                placements[0],
+                placements[1],
+                placements[2],
+                placement_mask,
+                migrations,
+                source_mask,
+                target_mask,
+                APPLICATION_REBALANCE_DISPATCH_DELTA,
+                evidence_drops,
                 status,
             );
         }
@@ -6665,14 +6925,16 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             return (prior_pid, None, true, None);
         }
         let migration = if timer {
-            state.rebalance_toolchain_on_timer(cpu, prior_pid)
+            state
+                .rebalance_toolchain_on_timer(cpu, prior_pid)
+                .or_else(|| state.rebalance_application_on_timer(cpu, prior_pid))
         } else {
             None
         };
         let priority = select_surface_priority(state, prior_pid, cpu);
         let next = priority.or_else(|| state.schedule_next_for_cpu(cpu));
         if migration.is_some() && state.table.running_cpu(prior_pid).is_some() {
-            crate::fatal("AArch64 Toolchain migration retained source ownership");
+            crate::fatal("AArch64 timer migration retained source ownership");
         }
         let Some(next) = next else {
             if cpu == 0 {
@@ -6707,7 +6969,28 @@ fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool)
             migration,
         )
     });
-    if migration.is_some() {
+    if let Some(migration) = migration {
+        if migration.application_role != 0
+            && !APPLICATION_LIVE_MIGRATION_REPORTED.swap(true, Ordering::AcqRel)
+        {
+            crate::serial_println!(
+                "MAKOS_AARCH64_APPLICATION_MIGRATION_OK role={} group_pid={} tid={} source_cpu={} target_cpu={} allowed_affinity=0xe loads={},{},{} idle_mask={:#x} policy=timer-safe-dispatch-imbalance delta={} context=gpr,sp,tls,simd ownership=ready-unowned evidence_emitter=source-ap caller_selected=0 explicit_affinity=authoritative",
+                if migration.application_role == production_role_code(ProcessRole::Firefox) {
+                    "firefox"
+                } else {
+                    "native"
+                },
+                migration.group_pid,
+                migration.pid,
+                migration.source_cpu,
+                migration.target_cpu,
+                migration.loads[0],
+                migration.loads[1],
+                migration.loads[2],
+                migration.idle_mask,
+                APPLICATION_REBALANCE_DISPATCH_DELTA,
+            );
+        }
         notify_idle_cpus();
     }
     if remote_stopped {

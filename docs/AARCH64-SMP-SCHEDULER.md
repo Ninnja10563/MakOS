@@ -33,7 +33,10 @@ recovery. The gate closes between the qualification fixtures. After driver and
 login-UI initialization, the desktop opens a bounded production gate:
 Firefox and ordinary Native process leaders, the shell, and UI/service roles
 remain on CPU0, while non-leader Firefox and ordinary native-application
-threads are AP-eligible on the shared Ready queue. Single-threaded guest
+threads retain affinity `0xe` but receive kernel-owned least-reserved AP
+preferences. A timer may move each default worker once when its AP exceeds the
+least-loaded AP by 64 cumulative dispatches; an explicit affinity request
+clears the preference and remains authoritative. Single-threaded guest
 compiler, assembler, and linker leaders have a separate `Toolchain` role: the
 kernel places each new process on one least-dispatched AP, preferring idle APs
 and rotating equal-load ties, then gives it a singleton affinity. Timer
@@ -62,7 +65,10 @@ the final repeat emits intact records.
 A separate `native-smp` gate runs the same upstream-musl pthread workload as
 an ordinary `Native` process rather than using the Firefox scheduler role.
 Its leader remains fixed to CPU0, three cloned workers default to affinity
-`0xe`, each forces and verifies cross-AP migrations through syscall 148, and
+`0xe`, are kernel-placed across AP1-3, and create a natural load imbalance
+before any affinity syscall. The timer migrates a default worker through
+Ready/unowned with full context and no caller-selected CPU. Each worker then
+forces and verifies cross-AP migrations through syscall 148, and
 the kernel records exclusive ownership plus a simultaneous distinct-TID AP
 interval. This proves the production policy is no longer Firefox-only; the
 Firefox evidence counters and markers remain scoped to the launched Firefox
@@ -83,8 +89,9 @@ proof requires positive owner compositions and AP deferrals, zero pending
 handoff, zero dropped migration records, and status 42. APs record bounded
 evidence while CPU0 emits it only after child exit, so telemetry cannot split
 guest stdout. This policy is kernel-owned and caller-selected affinity is
-absent. It qualifies dynamic balancing for the single-threaded Toolchain role,
-not Firefox/Native workers or built-in/service processes.
+absent. Firefox/Native workers now use a related preferred-AP policy and
+qualify it in their exact-role fixtures. Dynamic balancing remains unqualified
+for genuine Firefox on idle macOS/HVF and for built-in/service processes.
 
 Surface-key priority follows the same affinity split. A Firefox thread blocked
 in `surface_wait_event` publishes its TID; AP1-3 may select that non-leader
@@ -116,9 +123,11 @@ adapter-reported constant. Native syscall 148 gets or replaces the mask of the
 caller or a same-thread-group TID. Masks must be nonempty subsets of the four
 online CPUs. Firefox and native non-leader threads may choose those CPUs;
 process leaders retain mask `0x1` because desktop and device service remains
-CPU0-owned. Clone gives Firefox and native workers the production default `0xe`, while
-forked/new process leaders begin at `0x1`. Every normal scheduler selection,
-including surface priority, consults the stored mask. If a caller removes its
+CPU0-owned. Clone gives Firefox and native workers the production default
+`0xe` plus a least-reserved AP preference, while forked/new process leaders
+begin at `0x1`. Normal scheduler selection consults both the stored mask and
+automatic preference; surface priority may bypass the preference but never
+the allowed mask. If a caller removes its
 current CPU, the exception path captures its complete context, publishes it
 Ready/unowned, returns an AP with no eligible successor to its dispatcher, and
 sends the scheduler SGI only after publication so an idle target AP rechecks
@@ -312,18 +321,22 @@ Firefox.
   remain on CPU0. Eligible application threads may select kernel-owned masks
   through syscall 148. Toolchain spawn now performs least-dispatched,
   idle-first AP placement with rotating ties, and timer-safe Toolchain work now
-  migrates automatically at a measured eight-dispatch imbalance. Dynamic
-  balancing of Firefox/Native workers and additional built-in/service roles
-  remains gated until their ownership paths are qualified.
+  migrates automatically at a measured eight-dispatch imbalance. Default
+  Firefox/Native workers use least-reserved preferred APs and one timer-safe
+  migration at a 64-dispatch imbalance. Genuine Firefox on idle macOS/HVF and
+  additional built-in/service roles remain gated.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
   ownership through a Ready/unowned publication. Six load tasks also contend
   through 288 yields on the shared Ready queue and receive 99 dispatches on
   each AP with exclusive ownership. The musl production fixture also forces
   three caller-selected cross-AP migrations and restores its AP-pool masks.
+  The Firefox-role and Native fixtures each add multiple kernel-selected
+  default-worker migrations with zero evidence drops before those affinity
+  calls.
   The real Toolchain workload now adds 42 kernel-selected migrations across
   all AP source/destination masks. Broader production policy/priorities,
-  automatic load-driven migration for other roles, and Firefox/desktop
-  contention remain open.
+  built-in/service balancing, and repeated Firefox/desktop contention remain
+  open.
 - `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
   loop and have timer- or cross-CPU-event-wake/resume proof. Thread-only exit

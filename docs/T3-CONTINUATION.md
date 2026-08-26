@@ -649,11 +649,18 @@ Preserve existing files and changes.
   nested headers/eight dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 786423 in
-  `build/makos-pi-visible-toolchain-dynamic-balance-final2-R6RvFZp2` is the sole
-  QEMU and no runtime-test harness is active. Check process state before every
-  runtime gate and stop this guest through its recorded QMP socket; never start
-  concurrent QEMU. Prior PID 784352 in
+- At this handoff PID 817189 in
+  `build/makos-pi-visible-firefox-autobalance-final-Yr6Vpg0A` is the sole QEMU
+  and no runtime-test harness is active. It uses private `boot.img`, `data.img`,
+  and `vars.fd` clones; VNC is `127.0.0.1:5901`, QMP is `qmp.sock`, serial is
+  `serial.log`, and the QMP login capture is `login.ppm`. The guest reached
+  `MAKOS_LOGIN_UI_OK framebuffer=800x600` and `MAKOS_AARCH64_BOOT_OK ...
+  desktop=login`. Boot image SHA-256 is
+  `737605a4478d87161f68254c36fb5083d98065fef07a8eff968869db003c8da0`.
+  Check process state before every runtime gate and stop this guest through its
+  recorded QMP socket; never start concurrent QEMU. Prior PID 786423 in
+  `build/makos-pi-visible-toolchain-dynamic-balance-final2-R6RvFZp2` was
+  stopped cleanly through QMP before this increment. Prior PID 784352 in
   `build/makos-pi-visible-toolchain-dynamic-balance-final-WPqYbYfK` was stopped
   cleanly through QMP before the final runtime. Prior PID 780052 in
   `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd` was stopped
@@ -818,6 +825,23 @@ Preserve existing files and changes.
   Process exit closes routes/handles before reap. Fresh evidence: 12/12 IPC unit
   tests, `test_aarch64_typed_ipc.py`, full `make unit && make check`, and isolated
   full HVF boot marker `MAKOS_AARCH64_TYPED_IPC_RUNTIME_OK service=same-domain fifo=1 transfer=attenuated cleanup=process-exit-before-reap`.
+- Default Firefox/Native AArch64 workers now keep public affinity `0xe` while
+  the kernel assigns least-reserved AP preferences and performs one timer-safe
+  migration per default worker at a 64-dispatch imbalance. The automatic path
+  captures GPR/SP/TLS/SIMD, publishes Ready/unowned, sends the scheduler SGI,
+  and records bounded evidence for CPU0 emission after reap. Any explicit
+  affinity request disables automatic preference and remains authoritative.
+  The real upstream-musl fixture creates the imbalance without choosing a CPU.
+  Fresh Pi/QEMU 10.0.11 TCG Firefox-role runtime passed with placements
+  `4,2,14`, dispatches `10376,13208,9671`, three automatic migrations, zero
+  drops, AP1/AP2 overlap, input watcher TID 8 on AP2, direct keyboard INTID 78,
+  and status 42. Native passed with placements `13,2,3`, dispatches
+  `10067,13298,9605`, two migrations, zero drops, and status 42. Full `make
+  unit && make check`, release image/artifact validation, and both focused
+  gates pass. The unchanged self-host gate also passes with 15 Toolchain
+  processes, 40 migrations and zero drops; the cursor gate retains seven
+  positions and zero changed scanout pixels. This remains Pi functional evidence; strict Firefox latency and
+  genuine-process balancing still require the unchanged idle macOS/HVF gate.
 
 ## Important files
 
@@ -836,12 +860,13 @@ Preserve existing files and changes.
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
 2. The strict target now requires overlapping distinct Firefox TIDs on multiple
-   guest CPUs; inspect that evidence in the next genuine macOS/HVF run. The
-   Toolchain role now has automatic idle-first least-dispatched initial AP
-   placement plus timer-safe dynamic migration. Continue that policy into
-   Firefox/Native workers only with exact interaction/ownership proof, and add
-   repeated contention while retaining CPU0-exclusive device ownership.
-   Stop the visible QEMU through QMP before any focused runtime.
+   guest CPUs; inspect that plus the new kernel-owned placement/migration
+   evidence in the next genuine macOS/HVF run. Firefox/Native role fixtures now
+   prove least-reserved placement and timer-safe default-worker migration while
+   explicit affinity stays authoritative. Add repeated genuine Firefox/desktop
+   contention and extend safe balancing into additional built-in/service roles
+   while retaining CPU0-exclusive device ownership. Stop any visible QEMU
+   through QMP before a focused runtime.
 3. Expand the bounded guest C compiler beyond its current six-function and
    six-parameter per-translation-unit limits. The primary runtime graph now
    spans four objects (with one same-object call, two cross-object calls, and

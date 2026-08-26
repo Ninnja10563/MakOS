@@ -60,6 +60,12 @@ for fragment in (
     'rb"MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK "',
     '"Firefox did not overlap distinct worker TIDs on multiple guest CPUs"',
     '"MAKOS_FIREFOX_SMP_OVERLAP_OK "',
+    'rb"MAKOS_AARCH64_APPLICATION_PLACEMENT_OK role=firefox "',
+    'placed_cpus != {1, 2, 3}',
+    'rb"MAKOS_AARCH64_APPLICATION_MIGRATION_OK role=firefox "',
+    'loads[source_cpu - 1]\n                                >= loads[target_cpu - 1] + 64',
+    '"Firefox did not provide a live kernel-owned load migration"',
+    '"MAKOS_FIREFOX_SMP_AUTOBALANCE_OK "',
 ):
     assert fragment in BOOT, fragment
 

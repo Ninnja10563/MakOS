@@ -96,10 +96,15 @@ Branch: main
    report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero
    dispatch counts on AP1/AP2/AP3, a live/final overlap match containing at
-   least two distinct nonzero TIDs, kernel-owned affinity get/set/migration and
-   restoration, `device_mmio_owner=cpu0`, and status 42. The Firefox production
-   gate must retain its exact-role, exact-group, surface-wake, IRQ, and CPU0
-   device-ownership assertions. Both production gates must observe
+   least two distinct nonzero TIDs, automatic placements covering AP1/AP2/AP3,
+   at least one `MAKOS_AARCH64_APPLICATION_MIGRATION_OK role=native` with a
+   64-dispatch imbalance, Ready/unowned full-context migration, no caller CPU
+   selection, zero evidence drops, kernel-owned affinity get/set/migration and
+   restoration, explicit-affinity authority, `device_mmio_owner=cpu0`, and
+   status 42. The Firefox production gate must retain its exact-role,
+   exact-group, surface-wake, IRQ, and CPU0 device-ownership assertions and add
+   the equivalent `role=firefox` automatic-placement/migration proof before its
+   explicit affinity phase. Both production gates must observe
    `MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle`.
    The cursor gate must retain seven positions,
    zero changed scanout pixels, the virtio-GPU cursor plane, and hidden host
@@ -115,7 +120,8 @@ Branch: main
 
    Do not weaken the 10,000 ms Ctrl-A limit or any paint, first-input,
    navigation, clipboard, selection, scrolling, form, CPU, RSS, resident-page,
-   survival, exact-URI, TLS/HTTP, or multi-TID overlap assertion. If preflight
+   survival, exact-URI, TLS/HTTP, multi-TID overlap, automatic-placement, or
+   load-migration assertion. If preflight
    reports that the required image/package is absent, record that as not run,
    not as a failure or pass. If the unchanged idle-host run fails, preserve the
    serial log, harness output, QMP/session paths, screenshots, timing evidence,

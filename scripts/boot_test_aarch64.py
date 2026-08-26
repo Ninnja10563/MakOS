@@ -2397,12 +2397,70 @@ def main() -> int:
                             raise AssertionError(
                                 "Firefox did not overlap distinct worker TIDs on multiple guest CPUs"
                             )
+                        placement_matches = re.findall(
+                            rb"MAKOS_AARCH64_APPLICATION_PLACEMENT_OK role=firefox "
+                            rb"group_pid=([0-9]+) tid=([0-9]+) cpu=([1-3]) "
+                            rb"allowed_affinity=0xe .*?policy=least-reserved-ap "
+                            rb"caller_selected=0",
+                            firefox_output,
+                        )
+                        placed_cpus = {
+                            int(cpu)
+                            for group_pid, _tid, cpu in placement_matches
+                            if group_pid == firefox_pid
+                        }
+                        if placed_cpus != {1, 2, 3}:
+                            raise AssertionError(
+                                "Firefox default workers were not kernel-placed across every AP: "
+                                f"cpus={sorted(placed_cpus)}"
+                            )
+                        migration_matches = re.findall(
+                            rb"MAKOS_AARCH64_APPLICATION_MIGRATION_OK role=firefox "
+                            rb"group_pid=([0-9]+) tid=([0-9]+) source_cpu=([1-3]) "
+                            rb"target_cpu=([1-3]) allowed_affinity=0xe "
+                            rb"loads=([0-9]+),([0-9]+),([0-9]+) .*?"
+                            rb"policy=timer-safe-dispatch-imbalance delta=64 "
+                            rb"context=gpr,sp,tls,simd ownership=ready-unowned "
+                            rb"evidence_emitter=source-ap caller_selected=0 "
+                            rb"explicit_affinity=authoritative",
+                            firefox_output,
+                        )
+                        valid_migration = None
+                        for (
+                            group_pid, tid, source, target, load1, load2, load3
+                        ) in migration_matches:
+                            source_cpu = int(source)
+                            target_cpu = int(target)
+                            loads = (int(load1), int(load2), int(load3))
+                            if (
+                                group_pid == firefox_pid
+                                and source_cpu != target_cpu
+                                and loads[source_cpu - 1]
+                                >= loads[target_cpu - 1] + 64
+                            ):
+                                valid_migration = (
+                                    int(tid), source_cpu, target_cpu, loads
+                                )
+                                break
+                        if valid_migration is None:
+                            raise AssertionError(
+                                "Firefox did not provide a live kernel-owned load migration"
+                            )
                         print(
                             "MAKOS_FIREFOX_SMP_OVERLAP_OK "
                             f"group_pid={firefox_pid.decode()} "
                             f"cpu_mask={valid_overlap[0]:#x} "
                             f"worker_cpus={valid_overlap[0].bit_count()} "
                             "tids=distinct concurrent=1 ownership=exclusive"
+                        )
+                        print(
+                            "MAKOS_FIREFOX_SMP_AUTOBALANCE_OK "
+                            f"group_pid={firefox_pid.decode()} placement_mask=0xe "
+                            f"migration_tid={valid_migration[0]} "
+                            f"source_cpu={valid_migration[1]} "
+                            f"target_cpu={valid_migration[2]} delta=64 "
+                            "context=gpr,sp,tls,simd ownership=ready-unowned "
+                            "caller_selected=0 explicit_affinity=authoritative"
                         )
                     if (
                         b"process-exit arch=aarch64 pid=" + firefox_pid + b" "

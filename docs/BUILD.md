@@ -413,9 +413,14 @@ under the exact Firefox scheduler role. A production-only three-pthread
 rendezvous holds distinct workers Ready while the shared queue dispatches them.
 The kernel's target syscall 148 owns each task's CPU mask. Official-musl patch
 65 maps Linux AArch64 `sched_getaffinity` and `sched_setaffinity` onto that ABI.
-The leader verifies its fixed CPU0 mask; each worker selects and reads back two
-different singleton AP masks, forcing at least one migration, then restores and
-verifies the production AP-pool mask `0xe` before the rendezvous and joins.
+Before any affinity syscall, the kernel assigns each default worker a
+least-reserved AP preference while leaving its reported mask at `0xe`. The
+fixture creates a real load imbalance by repeatedly yielding one default
+worker while two peers sleep; at a 64-dispatch difference, timer preemption
+moves it through Ready/unowned without caller selection. The leader verifies
+its fixed CPU0 mask; each worker then selects and reads back two different
+singleton AP masks, restores the production AP-pool mask `0xe`, and joins. An
+explicit affinity request disables automatic preference and stays authoritative.
 It then creates two real process-owned overflow surfaces and blocks target and
 decoy pthreads in `surface_wait_event`. Input waits retain their exact handle;
 QMP Ctrl-A must select handle 7, wake exactly that watcher on AP1-3, leave the
@@ -425,12 +430,13 @@ syscall fails closed and the join completes. Priority is one-shot after a
 successful dispatch; the deadline only expires stale hints. The gate also requires an AP CPU mask, nonzero dispatch counters, a
 simultaneous multi-AP interval with distinct TIDs, exclusive ownership, the
 complete upstream-musl pthread/IPC workload, and status-42 reap. The final
-Raspberry Pi/QEMU 10.0.11 TCG pass records all APs (`cpu_mask=0xe`), live/final
-matching overlap on AP1/AP2 (`overlap_mask=0x6`, TIDs 5/6), watcher TID 8 on
-AP2, dispatch counts `9954,9924,11186`, one targeted wake, and three skipped
-unrelated surface waiters. The runtime also requires at least
-three kernel-recorded affinity changes that exclude the source PE and confirms
-all three workers restore mask `0xe`. AArch64 serial output is protected by an
+Raspberry Pi/QEMU 10.0.11 TCG pass records all APs (`cpu_mask=0xe`), automatic
+placements `4,2,14`, three natural load migrations with zero evidence drops,
+live/final overlap on AP1/AP2 (`overlap_mask=0x6`, TIDs 5/6), watcher TID 8 on
+AP2, dispatch counts `10376,13208,9671`, one targeted wake, and three skipped
+unrelated surface waiters. The runtime also requires at least three explicit
+affinity changes that exclude the source PE and confirms all three workers
+restore mask `0xe`. AArch64 serial output is protected by an
 IRQ-masked cross-PE lock so these records cannot interleave by byte. This is a
 scheduler-role fixture, not real Firefox or
 macOS/HVF performance evidence. Real Firefox must still pass the unchanged
@@ -444,12 +450,15 @@ make test-aarch64-native-smp-runtime
 
 The shell's `native-smp` command executes the same freshly built upstream-musl
 pthread workload under `ProcessRole::Native`. Its leader must retain mask
-`0x1` on CPU0; three non-leader workers default to the shared AP pool, force
-and read back singleton migrations across AP1-3, restore mask `0xe`, and run
+`0x1` on CPU0; three non-leader workers are automatically placed across the
+shared AP pool, create and prove a natural load migration, then force and read
+back singleton migrations across AP1-3, restore mask `0xe`, and run
 the remaining pthread/IPC workload to status 42. The host gate requires every
 AP to have a nonzero dispatch count, a live/final matching overlap interval
 with at least two distinct TIDs, exclusive ownership, CPU0-only device MMIO,
-and shell wait/reap. This is production-policy evidence for normal native
+and shell wait/reap. The current Pi/TCG pass records placements `3,2,13`, two
+automatic migrations, dispatches `10067,13298,9605`, and zero evidence drops.
+This is production-policy evidence for normal native
 applications, not Firefox or macOS/HVF performance evidence.
 
 The ordinary image also contains a bounded forced-migration proof, with a

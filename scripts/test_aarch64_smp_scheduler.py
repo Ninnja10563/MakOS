@@ -268,7 +268,22 @@ for token in (
     "console_gpu_handoff=ap-defer,cpu0-compose",
     "crate::graphics::service_deferred_actions()",
     "AArch64 toolchain escaped kernel-selected AP affinity",
-    "AArch64 Toolchain migration retained source ownership",
+    "AArch64 timer migration retained source ownership",
+    "automatic_cpu: u8",
+    "affinity_user_set: bool",
+    "fn least_reserved_application_ap(",
+    "fn rebalance_application_on_timer(",
+    "APPLICATION_REBALANCE_DISPATCH_DELTA",
+    "APPLICATION_PLACEMENTS",
+    "APPLICATION_MIGRATIONS",
+    "APPLICATION_MIGRATION_SOURCE_MASK",
+    "APPLICATION_MIGRATION_TARGET_MASK",
+    "APPLICATION_MIGRATION_EVIDENCE_DROPS",
+    "APPLICATION_LIVE_MIGRATION_REPORTED",
+    "MAKOS_AARCH64_APPLICATION_PLACEMENT_OK",
+    "MAKOS_AARCH64_APPLICATION_MIGRATION_OK",
+    "automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance",
+    "explicit_affinity=authoritative",
     "fn production_worker_enter(",
     "fn production_worker_leave(",
     "fn production_ap_worker(slot: &ContextSlot)",
@@ -564,6 +579,9 @@ for token in (
     'strcmp(argv[1], "native-smp")',
     "MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK workers=3",
     "__atomic_fetch_or(&production_smp_ready",
+    "production_auto_waiting",
+    "production_auto_release",
+    "caller_selected_automatic=0",
 ):
     assert token in MUSL_PTHREAD_PROBE, token
 
@@ -581,6 +599,10 @@ for token in (
     "ownership=exclusive",
     "concurrent=1",
     "block=ap-idle",
+    "automatic_placements=",
+    "automatic_migrations=",
+    "AUTOMATIC_MIGRATION_MARKER",
+    "explicit_affinity=authoritative",
     "status=42",
 ):
     assert token in PRODUCTION_RUNTIME, token
@@ -595,6 +617,10 @@ for token in (
     "overlap_mask.bit_count() < 2",
     "role=native",
     "leader_cpu=0",
+    "automatic_placements=",
+    "automatic_migrations=",
+    "AUTOMATIC_MIGRATION_MARKER",
+    "explicit_affinity=authoritative",
     "device_mmio_owner=cpu0",
     "status=42",
 ):
@@ -607,6 +633,6 @@ print(
     "exception_paths=per-cpu kernel_return=per-cpu ttbr_cache=per-cpu "
     "tlbi=inner-shareable "
     "runtime=boot-probe,production-firefox-native-workers,toolchain-leaders,4cpus "
-    "policy=interactive-leaders-cpu0,application-workers-ap-eligible,"
+    "policy=interactive-leaders-cpu0,application-workers-kernel-balanced,"
     "toolchain-least-loaded-ap device_mmio_owner=cpu0"
 )

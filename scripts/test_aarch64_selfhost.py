@@ -327,7 +327,7 @@ for fragment in (
     "ProcessRole::Toolchain",
     "reset_toolchain_smp_evidence()",
     "state.least_loaded_compute_ap()",
-    "state.rebalance_toolchain_on_timer(cpu, prior_pid)",
+    ".rebalance_toolchain_on_timer(cpu, prior_pid)",
     "TOOLCHAIN_REBALANCE_DISPATCH_DELTA",
     "MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK",
     "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK",

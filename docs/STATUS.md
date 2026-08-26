@@ -4,6 +4,27 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 default AArch64 Firefox and Native non-leader workers now receive
+  kernel-owned least-reserved AP preferences while preserving their public
+  `0xe` affinity. Normal scheduler selection honors that preference; timer
+  preemption moves a default worker once when its AP is at least 64 cumulative
+  dispatches above the least-loaded AP, after capturing GPR/SP/TLS/SIMD and
+  publishing Ready/unowned under the scheduler lock. A real
+  `sched_setaffinity` request clears the automatic preference and remains
+  authoritative. The upstream-musl pthread fixture creates an imbalance by
+  yielding one default worker while two peers sleep, without selecting a CPU.
+  Fresh Raspberry Pi/QEMU 10.0.11 TCG Firefox-role runtime passed with AP mask
+  `0xe`, placements `4,2,14`, dispatches `10376,13208,9671`, three automatic
+  migrations, zero evidence drops, distinct-TID overlap on AP1/AP2, direct
+  keyboard INTID 78, watcher TID 8 on AP2, and status 42. The Native twin
+  passed with placements `3,2,13`, dispatches `10067,13298,9605`, two
+  automatic migrations, zero drops, and status 42. Full `make unit && make
+  check`, release image/artifact validation, both focused runtimes, the full
+  self-host regression (15 Toolchain processes, 40 migrations, zero drops),
+  and the seven-position/zero-scanout-pixel cursor runtime pass.
+  This is functional Pi/TCG evidence, not strict real-Firefox latency evidence;
+  the scheduler row remains Partial until unchanged idle-macOS/HVF Firefox and
+  broader built-in/service contention qualify.
 - 2026-08-26 AArch64 `Toolchain` leaders now migrate automatically after
   initial placement instead of remaining on one AP for life. At each timer
   preemption the kernel captures the complete user context under the scheduler

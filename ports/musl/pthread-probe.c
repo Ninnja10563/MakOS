@@ -50,6 +50,8 @@ static unsigned requeue_completed;
 static volatile unsigned production_smp_ready;
 static volatile unsigned production_smp_release;
 static volatile unsigned production_affinity_failed;
+static volatile unsigned production_auto_waiting;
+static volatile unsigned production_auto_release;
 static volatile unsigned production_input_ready;
 static long production_input_surface;
 static long production_input_decoy_surface;
@@ -100,6 +102,24 @@ static void *production_smp_worker(void *argument)
 	unsigned second_cpu = (index + 1) % 3 + 1;
 	cpu_set_t requested;
 	cpu_set_t observed;
+	/*
+	 * Keep the default 0xe affinity while creating a genuine dispatch-load
+	 * imbalance. Workers 1 and 2 sleep in the kernel; worker 0 repeatedly
+	 * yields without choosing a CPU. The kernel must place all three workers
+	 * and move worker 0 based on scheduler load before any affinity syscall.
+	 */
+	if (index == 0) {
+		while (__atomic_load_n(&production_auto_waiting, __ATOMIC_ACQUIRE) != 0x6)
+			makos_call(1, 0, 0);
+		for (unsigned iteration = 0; iteration < 4096; iteration++)
+			makos_call(1, 0, 0);
+		__atomic_store_n(&production_auto_release, 1, __ATOMIC_RELEASE);
+	} else {
+		const struct timespec pause = { .tv_sec = 0, .tv_nsec = 1000000 };
+		__atomic_fetch_or(&production_auto_waiting, 1U << index, __ATOMIC_RELEASE);
+		while (!__atomic_load_n(&production_auto_release, __ATOMIC_ACQUIRE))
+			nanosleep(&pause, 0);
+	}
 	CPU_ZERO(&requested);
 	CPU_SET(first_cpu, &requested);
 	if (sched_setaffinity(0, sizeof requested, &requested) ||
@@ -153,6 +173,8 @@ static int production_smp_worker_probe(void)
 	production_smp_ready = 0;
 	production_smp_release = 0;
 	production_affinity_failed = 0;
+	production_auto_waiting = 0;
+	production_auto_release = 0;
 	cpu_set_t leader_affinity;
 	if (sched_getaffinity(0, sizeof leader_affinity, &leader_affinity) ||
 	    !CPU_ISSET(0, &leader_affinity) || CPU_COUNT(&leader_affinity) != 1)
@@ -210,7 +232,7 @@ static int production_smp_overlap_probe(void)
 		return 12;
 	if (makos_call4(123, production_input_surface, 0, 0, 0) != 1) return 8;
 	static const char marker[] =
-		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded affinity=explicit singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned migrations=forced:3\n"
+		"MAKOS_FIREFOX_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready release=bounded affinity=default:0xe,explicit singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned placement=least-reserved-ap migrations=automatic:load,forced:3 caller_selected_automatic=0\n"
 		"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK key=132 watcher=nonleader dispatch=ap leader=cpu0 wait=surface-event routing=exact-handle decoy=blocked-until-destroy\n";
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;
@@ -222,8 +244,9 @@ static int native_smp_overlap_probe(void)
 	if (worker_result) return worker_result;
 	static const char marker[] =
 		"MAKOS_NATIVE_SMP_PTHREAD_OVERLAP_OK workers=3 rendezvous=ready "
-		"release=bounded affinity=explicit singleton=0x2,0x4,0x8 "
-		"restored=0xe get=kernel-owned migrations=forced:3\n";
+		"release=bounded affinity=default:0xe,explicit singleton=0x2,0x4,0x8 "
+		"restored=0xe get=kernel-owned placement=least-reserved-ap "
+		"migrations=automatic:load,forced:3 caller_selected_automatic=0\n";
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1) return 9;
 	return 0;
 }

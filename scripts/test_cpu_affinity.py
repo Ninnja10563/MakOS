@@ -22,6 +22,8 @@ def require(source: str, fragment: str) -> None:
 
 for fragment in (
     "affinity_mask: u8",
+    "automatic_cpu: u8",
+    "affinity_user_set: bool",
     "pub fn task_affinity(tid: u64)",
     "pub fn set_task_affinity(tid: u64, mask: u64)",
     "mask & !ONLINE_CPU_MASK",
@@ -43,15 +45,19 @@ require(PROBE, "sched_setaffinity(0, sizeof requested, &requested)")
 require(PROBE, "sched_getaffinity(0, sizeof observed, &observed)")
 require(
     PROBE,
-    "singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned migrations=forced:3",
+    "singleton=0x2,0x4,0x8 restored=0xe get=kernel-owned placement=least-reserved-ap",
 )
+require(PROBE, "migrations=automatic:load,forced:3 caller_selected_automatic=0")
 require(RUNTIME, "expected_affinity_gets = {(0x1, 0), (0x2, 1), (0x4, 2), (0x8, 3)}")
 require(RUNTIME, "if len(forced_migrations) < 3")
+require(RUNTIME, "AUTOMATIC_MIGRATION_MARKER")
+require(RUNTIME, "automatic_migrations < 1")
 require(SDK, "MAKOS_FEATURE_CPU_AFFINITY")
 require(SDK, "makos_thread_set_affinity")
 require(DOC, "`thread_affinity`")
 
 print(
     "MAKOS_CPU_AFFINITY_TEST_OK abi=148 masks=kernel-owned "
-    "validation=online,same-process migration=forced runtime=firefox-musl"
+    "validation=online,same-process migration=automatic-load,forced "
+    "placement=least-reserved-ap runtime=firefox-musl"
 )

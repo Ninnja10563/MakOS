@@ -45,9 +45,11 @@ LEADER_DISPATCH_MARKER = b"MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK"
 INPUT_PRIORITY_MARKER = b"MAKOS_FIREFOX_SMP_INPUT_PRIORITY_OK"
 INPUT_IRQ_MARKER = b"MAKOS_AARCH64_INPUT_IRQ_OK"
 AFFINITY_MARKER = (
-    b"affinity=explicit singleton=0x2,0x4,0x8 restored=0xe "
-    b"get=kernel-owned migrations=forced:3"
+    b"affinity=default:0xe,explicit singleton=0x2,0x4,0x8 restored=0xe "
+    b"get=kernel-owned placement=least-reserved-ap "
+    b"migrations=automatic:load,forced:3 caller_selected_automatic=0"
 )
+AUTOMATIC_MIGRATION_MARKER = b"MAKOS_AARCH64_APPLICATION_MIGRATION_OK role=firefox"
 REAP_MARKER = (
     b"MAKOS_AARCH64_FIREFOX_SMP_REAP_OK fixture=upstream-musl-pthread "
     b"role=firefox status=42"
@@ -88,6 +90,8 @@ def main() -> int:
     dispatches = (0, 0, 0)
     overlap_mask = 0
     overlap_tids = (0, 0, 0)
+    automatic_placements = (0, 0, 0)
+    automatic_migrations = 0
     watcher_tid = 0
     watcher_cpu = 0
     surface_woken = 0
@@ -204,6 +208,9 @@ def main() -> int:
                     selector, process, output, INPUT_PRIORITY_MARKER, 30
                 )
                 common.wait_for_output(selector, process, output, AFFINITY_MARKER, 20)
+                common.wait_for_output(
+                    selector, process, output, AUTOMATIC_MIGRATION_MARKER, 30
+                )
                 common.wait_for_output(selector, process, output, RESULT_MARKER, 60)
                 common.wait_for_output(selector, process, output, REAP_MARKER, 20)
 
@@ -316,16 +323,31 @@ def main() -> int:
                     r"dispatches=(\d+),(\d+),(\d+) overlap_mask=(0x[0-9a-f]+) "
                     r"overlap_tids=(\d+),(\d+),(\d+) worker_role=firefox "
                     r"leader_cpu=0 run_queue=shared-ready ownership=exclusive "
-                    r"block=ap-idle status=42",
+                    r"block=ap-idle automatic_placements=(\d+),(\d+),(\d+) "
+                    r"automatic_placement_mask=(0x[0-9a-f]+) automatic_migrations=(\d+) "
+                    r"automatic_source_mask=(0x[0-9a-f]+) "
+                    r"automatic_target_mask=(0x[0-9a-f]+) "
+                    r"automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance "
+                    r"automatic_delta=(\d+) migration_evidence_drops=(\d+) "
+                    r"caller_selected=0 explicit_affinity=authoritative status=42",
                     decoded,
                 )
                 if not matches:
                     raise AssertionError("production SMP result fields were malformed")
-                mask_text, d1, d2, d3, overlap_text, t1, t2, t3 = matches[-1]
+                (
+                    mask_text, d1, d2, d3, overlap_text, t1, t2, t3,
+                    p1, p2, p3, placement_text, migration_text,
+                    source_text, target_text, delta_text, drops_text,
+                ) = matches[-1]
                 cpu_mask = int(mask_text, 16)
                 dispatches = (int(d1), int(d2), int(d3))
                 overlap_mask = int(overlap_text, 16) & 0xE
                 overlap_tids = (int(t1), int(t2), int(t3))
+                automatic_placements = (int(p1), int(p2), int(p3))
+                automatic_migrations = int(migration_text)
+                placement_mask = int(placement_text, 16)
+                source_mask = int(source_text, 16)
+                target_mask = int(target_text, 16)
                 marker_overlap_mask = int(marker_mask, 16) & 0xE
                 marker_overlap_tids = (int(mt1), int(mt2), int(mt3))
                 if marker_overlap_mask != overlap_mask or marker_overlap_tids != overlap_tids:
@@ -336,6 +358,21 @@ def main() -> int:
                     )
                 if sum(dispatches) == 0:
                     raise AssertionError("production AP dispatch counter stayed at zero")
+                if (
+                    placement_mask != 0xE
+                    or any(value == 0 for value in automatic_placements)
+                    or automatic_migrations < 1
+                    or source_mask & 0xE == 0
+                    or target_mask & 0xE == 0
+                    or int(delta_text) != 64
+                    or int(drops_text) != 0
+                ):
+                    raise AssertionError(
+                        "kernel-owned Firefox worker balancing evidence was incomplete: "
+                        f"placements={automatic_placements} mask={placement_mask:#x} "
+                        f"migrations={automatic_migrations} source={source_mask:#x} "
+                        f"target={target_mask:#x} delta={delta_text} drops={drops_text}"
+                    )
                 active_tids = [
                     overlap_tids[cpu - 1]
                     for cpu in range(1, 4)
@@ -365,12 +402,16 @@ def main() -> int:
         f"accel={accel} cpu_mask={cpu_mask:#x} worker_cpus={worker_cpus} "
         f"dispatches={dispatches[0]},{dispatches[1]},{dispatches[2]} "
         f"overlap_mask={overlap_mask:#x} overlap_tids={overlap_tids[0]},{overlap_tids[1]},{overlap_tids[2]} "
+        f"automatic_placements={automatic_placements[0]},{automatic_placements[1]},{automatic_placements[2]} "
+        f"automatic_migrations={automatic_migrations} "
         f"input_watcher_tid={watcher_tid} input_watcher_cpu={watcher_cpu} "
         "fixture=upstream-musl-pthread role=firefox leader_cpu=0 "
         "input_priority=watcher-ap,leader-cpu0 key=ctrl-a routing=exact-handle "
         f"input_irq_intid={input_irq_intid} delivery=gicv2-spi "
         f"surface_woken={surface_woken} surface_skipped={surface_skipped} "
         "decoy=blocked-until-destroy "
+        "automatic_policy=least-reserved-ap,timer-safe-dispatch-imbalance "
+        "caller_selected_automatic=0 explicit_affinity=authoritative "
         "device_mmio_owner=cpu0 ownership=exclusive concurrent=1 block=ap-idle status=42"
     )
     return 0
