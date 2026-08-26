@@ -64,7 +64,7 @@ for fragment in (
     "MAX_BUILD_PATH_BYTES = 96",
     "BUILD_SOURCE_CAPACITY = 768",
     "BUILD_EXPANDED_SOURCE_CAPACITY = 1536",
-    "BUILD_HEADER_CAPACITY = 1024",
+    "BUILD_HEADER_CAPACITY = 1280",
     "MAX_BUILD_HEADER_DEPTH = 4",
     "MAX_BUILD_HEADER_DEPENDENCIES = 8",
     "MAX_BUILD_MACROS = 8",
@@ -91,16 +91,18 @@ for fragment in (
     "static int preprocessor_expression_bitwise_and(",
     "static int preprocessor_expression_bitwise_xor(",
     "static int preprocessor_expression_bitwise_or(",
+    "static int preprocessor_expression_conditional(",
     "static int preprocessor_checked_value(",
     '"#if 1 == 2 < 3\\n"',
     "if_expression=defined,numeric,arithmetic,shift,",
-    "comparison,bitwise,not,and,or,short-circuit ",
+    "comparison,bitwise,not,and,or,short-circuit,conditional ",
     "elif=selected",
     "include_guard=deduplicated",
     "cycle=denied overdepth=denied ",
     "malformed=define,endif,unterminated,",
     "duplicate-else,expression,elif-after-else,zero-divisor,",
-    "shift-range,overflow-denied ",
+    "shift-range,overflow,conditional-syntax,",
+    "conditional-selected-trap-denied ",
     '"/home/user/generated-header.build"',
     '"/home/user/generated-inline.h"',
     '"/home/user/generated-leaf.h"',
@@ -530,8 +532,8 @@ require(FOCUSED_RUNTIME, "ap_deferrals == 0")
 require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2")
 require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled guest_execution=42")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
-require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit elif=selected include_guard=deduplicated fingerprint=expanded-source")
-require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow-denied transitive_header_execution=42")
+require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source")
+require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap-denied transitive_header_execution=42")
 require(FOCUSED_RUNTIME, "malformed_c_denied=18")
 require(FOCUSED_RUNTIME, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(FOCUSED_RUNTIME, "malformed_relocation_denied=1 unresolved_symbol_denied=1")

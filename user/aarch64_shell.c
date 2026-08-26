@@ -496,7 +496,7 @@ static void run_selfhost_probe(void) {
             "toolchain_startup=sysv manifest_arg=1 "
             "preprocessor=object-macro-if-expressions "
             "if_expression=defined,numeric,arithmetic,shift,comparison,"
-            "bitwise,not,and,or,short-circuit "
+            "bitwise,not,and,or,short-circuit,conditional "
             "elif=selected "
             "c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c "
             "translation_unit_functions=2,1,1 c_abi=aapcs64-int32-pointer64 "

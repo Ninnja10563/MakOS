@@ -127,7 +127,7 @@ HEADER_DEP_MARKER = (
     b"headers=2 max_depth=2 resolver=quoted-absolute-recursive depth_limit=4 "
     b"preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 "
     b"if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,"
-    b"and,or,short-circuit elif=selected "
+    b"and,or,short-circuit,conditional elif=selected "
     b"include_guard=deduplicated fingerprint=expanded-source"
 )
 HEADER_GUARD_MARKER = (
@@ -135,9 +135,10 @@ HEADER_GUARD_MARKER = (
     b"conditional_depth=2 include_guard=deduplicated missing=denied "
     b"relative=denied cycle=denied overdepth=denied "
     b"if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,"
-    b"and,or,short-circuit elif=selected "
+    b"and,or,short-circuit,conditional elif=selected "
     b"malformed=define,endif,unterminated,duplicate-else,expression,"
-    b"elif-after-else,zero-divisor,shift-range,overflow-denied depth_limit=4"
+    b"elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,"
+    b"conditional-selected-trap-denied depth_limit=4"
 )
 HEADER_CLI_REAP_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=/home/user/generated-header.build "
@@ -192,7 +193,7 @@ EXECUTION_MARKER = (
     b"toolchain_startup=sysv manifest_arg=1 "
     b"preprocessor=object-macro-if-expressions "
     b"if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,"
-    b"and,or,short-circuit elif=selected "
+    b"and,or,short-circuit,conditional elif=selected "
     b"c_sources=/home/user/generated-program.c,/home/user/generated-library.c,/home/user/generated-helper.c "
     b"translation_unit_functions=2,1,1 c_abi=aapcs64-int32-pointer64 "
     b"c_features=multi-function,multi-parameter,six-argument,signed-arithmetic,parameter,pointer-parameter,local,array,array-decay,index,assignment,pointer,pointer-add,pointer-variable-add,pointer-difference,address-of,address-expression,dereference,if,equality,inequality,relational,while,call,return "
@@ -703,7 +704,7 @@ def main() -> int:
         "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2 invalidations=object,source,state,header "
         "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0 "
         f"repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes={len(REPOSITORY_C_SOURCE)} asm_bytes={len(REPOSITORY_ASM_SOURCE)} c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} identity=build-generated-exact host_reference=compiled guest_execution=42 "
-        "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit elif=selected include_guard=deduplicated fingerprint=expanded-source malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow-denied transitive_header_execution=42 "
+        "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=object-macro-if-expressions macros=4 conditional_depth=2 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap-denied transitive_header_execution=42 "
         "translation_unit_functions=2,1,1 "
         "max_functions_per_unit=6 six_function_calls=5 six_function_result=42 "
         "c_abi=aapcs64-int32-pointer64 "

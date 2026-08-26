@@ -159,15 +159,17 @@ empty or signed-integer object macros, and permits four conditional levels.
 Its condition subset covers `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and
 `#endif`; expressions have checked signed 32-bit semantics and support
 `defined`, signed numeric literals/object macros, unknown-name zero, unary
-`+ - ! ~`, `* / %`, `+ -`, `<< >>`, comparisons, `& ^ |`, and short-circuit
-`&& ||` with C precedence and left associativity. Active zero divisors,
+`+ - ! ~`, `* / %`, `+ -`, `<< >>`, comparisons, `& ^ |`, short-circuit
+`&& ||`, and right-associative conditional `?:` with C precedence. Only the
+selected conditional arm is evaluated, while both are syntax-checked. Active
+zero divisors,
 out-of-range shifts, invalid/overflowing left shifts, and signed overflow fail
 closed, while unevaluated logical operands are parsed without evaluating those
 errors. Literal/macro magnitude is capped at 65,535 and expanded headers at
-1,024 bytes. Malformed expressions/directives, unsafe include paths, cycles,
+1,280 bytes. Malformed expressions/directives, unsafe include paths, cycles,
 limit overflow, and `#elif` after `#else` fail closed. This does not provide
-function-like/text macro replacement, ternary expressions, token operations,
-or system include search.
+function-like/text macro replacement, token operations, or system include
+search.
 
 Build mode derives `<manifest>.state` and therefore accepts manifest paths up
 to 90 bytes. The exact 120-byte `MAKSTATE2` record contains its nine-byte

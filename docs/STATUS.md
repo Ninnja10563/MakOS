@@ -4,6 +4,34 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the bounded AArch64 guest preprocessor now implements the C
+  conditional `?:` operator as its lowest-precedence, right-associative
+  expression tier. Both arms remain syntax-checked, but only the selected arm
+  is evaluated, so unselected divide-by-zero and invalid-shift expressions do
+  not spuriously fail while the same trap in the selected arm fails closed.
+  The real two-header guest graph proves true/false selection,
+  logical-before-conditional precedence, nested right associativity, and
+  selected-arm-only evaluation before rebuilding, loading, and reaping status
+  42. Missing-colon and selected-trap fixtures are denied. The leaf is 1,117
+  bytes within a new explicit 1,280-byte header cap. Final focused Pi/QEMU
+  10.0.11 TCG evidence ran all 15 toolchain processes with placements `7,4,4`,
+  dispatches `183,188,180`, 39 migrations, zero evidence drops, 243 CPU0
+  compositions for 247 AP deferrals, and no pending handoff. Full `make unit
+  check`, Firefox-role production SMP (`10309,13409,9760`, exact Ctrl-A,
+  status 42), Native SMP (`13930,13807,10929`, status 42), and the
+  seven-position/zero-scanout-pixel cursor runtime pass. Initial self-host and
+  Native attempts failed only in the unchanged early Pi/TCG boot-probe balance
+  check and passed unchanged on rerun; thresholds were not modified. General
+  function-like/text macros, token operations, system headers, and substantial
+  in-guest MakOS builds remain absent, so SDK/self-hosting remain Partial. A
+  fresh visible login from this exact image is active as the sole QEMU, PID
+  858943, under `makos-visible-selfhost-if-conditional-final.service`, with
+  private session
+  `build/makos-pi-visible-selfhost-if-conditional-final-kkHEMGc1`. Its
+  read-only boot clone SHA-256 is
+  `76e143fd998feaa1f1836efedcd886f0d2b37347e84fc4960bfd905bfe6f3191`;
+  the QMP 800x600 login capture SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
 - 2026-08-26 the bounded AArch64 guest preprocessor now evaluates the next
   genuine C expression tiers with checked signed 32-bit semantics: unary
   `+ - ! ~`, `* / %`, `+ -`, `<< >>`, equality/relations, `& ^ |`, and
@@ -12,7 +40,8 @@ Last updated: 2026-08-26.
   and signed overflow fail closed; unevaluated logical operands are still
   parsed without triggering those semantic traps. Literal/object-macro
   magnitude remains capped at 65,535, intermediate results at `int32_t`, and
-  each expanded header at 1,024 bytes. The real two-header guest build covers
+  each expanded header at 1,024 bytes in that increment. The real two-header
+  guest build covers
   every new tier, short-circuit behavior, and separate active zero-divisor,
   shift-range, and overflow denials before building, loading, and reaping
   status 42. Focused Pi/QEMU 10.0.11 TCG evidence ran all 15 toolchain
@@ -21,17 +50,18 @@ Last updated: 2026-08-26.
   pending handoff. Full `make unit check`, Firefox-role production SMP
   (`9695,13737,10228`, exact Ctrl-A, status 42), Native SMP
   (`10154,13198,9708`, status 42), and the seven-position/zero-scanout-pixel
-  cursor runtime pass on the Pi. This remains a bounded seed: ternary
-  expressions, general function-like/text macros, token operations, system
+  cursor runtime pass on the Pi. This remains a bounded seed: general
+  function-like/text macros, token operations, system
   headers, and substantial in-guest MakOS builds remain absent, so the SDK and
   self-hosting audit rows remain Partial. A fresh visible login from this exact
-  image is active as the sole QEMU, PID 850875, under
+  image was active as the sole QEMU, PID 850875, under
   `makos-visible-selfhost-if-arithmetic-final3.service`, with private session
   `build/makos-pi-visible-selfhost-if-arithmetic-final3-IgEL0cQl`. Its
   read-only boot clone SHA-256 is
   `7c7be2f22ef732de8e898f960df0ea1108ef023e642cd854decc2840eadb9e05`;
   the QMP 800x600 login capture SHA-256 is
-  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`;
+  it was stopped cleanly through QMP before the conditional-expression gates.
 - 2026-08-26 the bounded AArch64 guest preprocessor now evaluates active
   `#if` and `#elif` expressions instead of supporting only name-defined
   conditionals. Its fail-closed recursive parser implements `defined(NAME)`

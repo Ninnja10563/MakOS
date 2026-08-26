@@ -201,7 +201,7 @@ enum {
     MAX_BUILD_PATH_BYTES = 96,
     BUILD_SOURCE_CAPACITY = 768,
     BUILD_EXPANDED_SOURCE_CAPACITY = 1536,
-    BUILD_HEADER_CAPACITY = 1024,
+    BUILD_HEADER_CAPACITY = 1280,
     MAX_BUILD_HEADER_DEPTH = 4,
     MAX_BUILD_HEADER_DEPENDENCIES = 8,
     MAX_BUILD_MACROS = 8,
@@ -1788,14 +1788,14 @@ static int32_t preprocessor_bit_value(uint32_t bits) {
     return -1 - (int32_t)(UINT32_MAX - bits);
 }
 
-static int preprocessor_expression_or(
+static int preprocessor_expression_conditional(
     struct preprocessor_expression *expression, int32_t *value);
 
 static int preprocessor_expression_primary(
     struct preprocessor_expression *expression, int32_t *value) {
     preprocessor_expression_space(expression);
     if (preprocessor_expression_punct(expression, '(')) {
-        if (!preprocessor_expression_or(expression, value) ||
+        if (!preprocessor_expression_conditional(expression, value) ||
             !preprocessor_expression_punct(expression, ')'))
             return 0;
         return 1;
@@ -2058,6 +2058,29 @@ static int preprocessor_expression_or(
     }
 }
 
+static int preprocessor_expression_conditional(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_or(expression, value)) return 0;
+    if (!preprocessor_expression_punct(expression, '?')) return 1;
+    int evaluate = expression->evaluate;
+    int condition = *value != 0;
+    int32_t true_value = 0;
+    expression->evaluate = evaluate && condition;
+    int true_parsed =
+        preprocessor_expression_conditional(expression, &true_value);
+    expression->evaluate = evaluate;
+    if (!true_parsed || !preprocessor_expression_punct(expression, ':'))
+        return 0;
+    int32_t false_value = 0;
+    expression->evaluate = evaluate && !condition;
+    int false_parsed =
+        preprocessor_expression_conditional(expression, &false_value);
+    expression->evaluate = evaluate;
+    if (!false_parsed) return 0;
+    if (evaluate) *value = condition ? true_value : false_value;
+    return 1;
+}
+
 static int evaluate_preprocessor_expression(
     const struct include_context *context, const uint8_t *source,
     size_t line_end, size_t cursor, int *condition) {
@@ -2069,7 +2092,7 @@ static int evaluate_preprocessor_expression(
         .evaluate = 1,
     };
     int32_t value = 0;
-    if (!preprocessor_expression_or(&expression, &value)) return 0;
+    if (!preprocessor_expression_conditional(&expression, &value)) return 0;
     preprocessor_expression_space(&expression);
     if (expression.cursor != expression.end) return 0;
     *condition = value != 0;
@@ -3016,7 +3039,7 @@ static void write_header_marker(const struct build_manifest *build,
     write_text(" conditional_depth=");
     write_bytes(&conditional_depth, 1);
     write_text(" if_expression=defined,numeric,arithmetic,shift,comparison,"
-               "bitwise,not,and,or,short-circuit "
+               "bitwise,not,and,or,short-circuit,conditional "
                "elif=selected include_guard=deduplicated "
                "fingerprint=expanded-source\n");
 }
@@ -3250,6 +3273,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#else\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#endif\n"
+        "#if (1 ? 7 : 1 / 0) == 7 && (0 ? 1 << 32 : 9) == 9 && (0 || 1 ? 42 : 0) == 42 && (0 ? 1 : 1 ? 42 : 0) == 42 && (1 ? 0 ? 1 : 42 : 0) == 42\n"
+        "#else\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
         "#else\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#endif\n";
@@ -3302,6 +3329,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#endif\n";
     static const char malformed_overflow_expression_source[] =
         "#if 65535 * 65535\n"
+        "#endif\n";
+    static const char malformed_conditional_expression_source[] =
+        "#if 1 ? 1\n"
+        "#endif\n";
+    static const char malformed_conditional_trap_source[] =
+        "#if 1 ? (1 / 0) : 1\n"
         "#endif\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value | 2; }\n";
@@ -3646,6 +3679,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                 (const uint8_t *)malformed_overflow_expression_source,
                 sizeof(malformed_overflow_expression_source) - 1,
                 include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1,
+                (const uint8_t *)malformed_conditional_expression_source,
+                sizeof(malformed_conditional_expression_source) - 1,
+                include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1,
+                (const uint8_t *)malformed_conditional_trap_source,
+                sizeof(malformed_conditional_trap_source) - 1,
+                include_output,
                 sizeof(include_output), &include_dependencies) != 0)
             fail(90);
         write_text("MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK "
@@ -3653,10 +3698,11 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                    "include_guard=deduplicated missing=denied "
                    "relative=denied cycle=denied overdepth=denied "
                    "if_expression=defined,numeric,arithmetic,shift,"
-                   "comparison,bitwise,not,and,or,short-circuit "
+                   "comparison,bitwise,not,and,or,short-circuit,conditional "
                    "elif=selected malformed=define,endif,unterminated,"
                    "duplicate-else,expression,elif-after-else,zero-divisor,"
-                   "shift-range,overflow-denied "
+                   "shift-range,overflow,conditional-syntax,"
+                   "conditional-selected-trap-denied "
                    "depth_limit=4\n");
     }
     if (build_mode) {
