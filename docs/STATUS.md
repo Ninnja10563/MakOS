@@ -4,6 +4,43 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 the bounded AArch64 guest preprocessor now evaluates active
+  `#if` and `#elif` expressions instead of supporting only name-defined
+  conditionals. Its fail-closed recursive parser implements `defined(NAME)`
+  and `defined NAME`, signed numeric literals and object macros, unknown-name
+  zero, unary `!`, comparison/equality, `&&`, and `||` with C-like precedence.
+  Branch state records whether an earlier arm was selected, so exactly one
+  `#if`/`#elif`/`#else` arm expands and inactive missing includes remain
+  untouched. The two-header fixture selects a genuine `#elif`, expands four
+  macros, proves relational-before-equality precedence with `1 == 2 < 3`,
+  preserves include-guard deduplication and expanded-source cache identity,
+  and executes the resulting ELF with status 42. Malformed
+  expressions and `#elif` after `#else` fail closed; the per-header expansion
+  buffer is still explicitly bounded at 768 bytes. The first
+  precedence-correct runtime exposed a real AP-exit race: CPU0 could observe
+  and reap a Toolchain zombie before the source AP retired its active TTBR0,
+  causing fail-fast address-space destruction. The exit path now switches to
+  the kernel root while still holding the scheduler lock, before parent wake
+  can lead to cleanup; a structural ordering guard and the complete 15-process
+  guest sequence cover the fix. Structural validation,
+  release image/artifact checks, full `make unit && make check`, focused
+  Pi/QEMU 10.0.11 TCG self-host runtime, unchanged Firefox-role production
+  SMP, and the seven-position cursor runtime pass. This is not a general C
+  preprocessor: function-like/text macros, arithmetic/bitwise/ternary
+  expressions, token operations, system includes, and unbounded include
+  graphs remain absent, so SDK/self-hosting remain Partial. Final focused
+  self-host evidence reports placements `4,8,3`, dispatches `182,175,178`, 42
+  migrations, zero evidence drops, and all 15 processes reaped with status 42.
+  The unchanged Firefox-role regression reports dispatches
+  `10683,13709,9922`, two automatic migrations, exact Ctrl-A delivery, and
+  status 42; Native reports `10224,13213,9569` and status 42. A fresh visible
+  login is active as PID 841525 under
+  `makos-visible-selfhost-if-lifecycle-precedence-final.service`, using private
+  session
+  `build/makos-pi-visible-selfhost-if-lifecycle-precedence-final-SIcwrHk7`;
+  its boot
+  clone SHA-256 is
+  `02a6520d560c5ba595386b57dce7ab6e8a9ca2a71ee81dfeb87b41b7301b6818`.
 - 2026-08-26 default AArch64 Firefox and Native non-leader workers now receive
   kernel-owned least-reserved AP preferences while preserving their public
   `0xe` affinity. Normal scheduler selection honors that preference; timer
@@ -102,10 +139,10 @@ Last updated: 2026-08-26.
   dispatches `9906,10296,10964`, overlap TIDs 5/6 on AP1/AP3, watcher TID 8
   on AP3, input INTID 78, and status 42; Native reports
   `9636,9543,10685`, overlap TIDs 5/6 on AP1/AP3, and status 42. This is
-  genuine bounded transitive dependency discovery and preprocessing, but not a
-  general C preprocessor: function-like/text macros, `#if` expressions,
-  `#elif`, system include search, token/string operations, and graphs beyond
-  the explicit bounds remain absent.
+  genuine bounded transitive dependency discovery and preprocessing. The
+  subsequent expression increment adds bounded `#if`/`#elif`; this entry's
+  earlier runtime remains evidence for the recursive-include foundation, not
+  for a general preprocessor.
 - 2026-08-26 the sandboxed AArch64 guest-native C compiler now accepts six
   typed parameters and six call arguments through AAPCS64 `x0`-`x5`. Values
   are retained in callee-saved `x23`-`x28`; four- through six-parameter
@@ -534,13 +571,14 @@ Last updated: 2026-08-26.
   focused runtime, structural guard, full `make unit check`, unchanged
   Firefox-role and Native SMP regressions, cursor runtime, and a fresh visible
   Pi/TCG login pass. That preprocessing guest (PID 766987) was stopped cleanly
-  through QMP before the repository-source runtime. The active visible
-  self-hosting milestone is PID 775104 under the user service
+  through QMP before the repository-source runtime. The repository-source
+  milestone was PID 775104 under the user service
   `makos-visible-selfhost-repository-final.service`, with
   private boot/data/variables and QMP in
   `build/makos-pi-visible-selfhost-repository-final-JJyWajUO`; its boot clone
   exactly matches the current release image SHA-256
-  `3b03a276d5c6f6ab1c0654860088f1054087c82b9b5698a3b7fb9d2aa9d9e4b6`.
+  `3b03a276d5c6f6ab1c0654860088f1054087c82b9b5698a3b7fb9d2aa9d9e4b6`;
+  it was later stopped cleanly through QMP.
   QMP capture `login.ppm` has SHA-256
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   This is a real but deliberately bounded seed, not a

@@ -346,20 +346,28 @@ missing, oversized, relative, malformed, cyclic, or over-depth includes fail
 closed. The same pass accepts up to eight 16-byte object macro names with
 either an empty replacement (for guards) or a signed decimal replacement of
 magnitude at most 65,535. It substitutes identifier tokens on active C lines
-and processes `#ifdef`, `#ifndef`, `#else`, and `#endif`, bounded to
-four conditional levels within each source/header. Redefinition, function-like
-defines, malformed/unbalanced conditionals, and limit overflow fail closed.
-This is not a general preprocessor: it has no `#if` expression evaluation,
-`#elif`, function-like/text replacement, token pasting/stringification,
-system include search, or unbounded include graphs.
+and processes `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and `#endif`,
+bounded to four conditional levels within each source/header. `#if`/`#elif`
+use a bounded recursive evaluator for `defined(NAME)` or `defined NAME`,
+signed numeric literals and numeric object macros, unknown identifiers as
+zero, unary `!`, equality/relational operators, `&&`, and `||`, with C-like
+precedence. Exactly one branch may be selected. Redefinition, function-like
+defines, malformed/unbalanced expressions or conditionals, `#elif` after
+`#else`, and limit overflow fail closed. Each expanded header is capped at 768
+bytes. This is not a general preprocessor: it has no arithmetic, bitwise, or
+ternary expression operators, general function-like/text replacement, token
+pasting/stringification, system include search, or unbounded include graphs.
 
 The fixture seeds `/home/user/generated-header.build`, a small assembly
 startup, `/home/user/generated-header.c`,
 `/home/user/generated-inline.h`, and `/home/user/generated-leaf.h`. The C unit
 defines a function before including the guarded root twice. The root's
-defined/undefined branches include a guarded leaf, and the leaf defines
-`INCLUDED_DELTA=2` for the emitted function. The repeated root is
-deduplicated; inactive missing-header branches are skipped. The focused gate
+defined/undefined branches include a guarded leaf. That leaf sets
+`INCLUDED_DELTA=1`; a false `#if` is followed by a selected `#elif`, which
+defines `ACTIVE_DELTA=2` for the emitted function. A separate false compound
+expression remains inactive, and `1 == 2 < 3` selects the true arm only when
+relational precedence is applied before equality. The repeated root is
+deduplicated and inactive missing-header branches are skipped. The focused gate
 builds this two-object graph cold (`0/2`) and warm
 (`2/0`), edits only the leaf header from the authenticated
 guest shell, proves selective dependent-object rebuild (`1/1`) and rewarm
@@ -370,10 +378,11 @@ The focused runtime proves four-input cold `0/4`, warm `4/0`, corrupt-object
 `3/1`, warm `4/0`, changed-source `3/1`, warm `4/0`, and corrupt-state `0/4`
 hit/miss sequences, then separate three-input cold `0/3` and warm `3/0`, plus
 header-graph cold `0/2`, warm `2/0`, edited-header `1/1`, and rewarm `2/0`
-results. All twelve authenticated CLI builds link and reap with status
+results. All fourteen authenticated CLI builds link and reap with status
 42; the state-invalidated build re-establishes a valid cache. This is bounded
 incremental reuse with bounded recursive quoted-header discovery, integer
-object macros, and include-guard conditionals—not a general preprocessor,
+object macros, include guards, and the documented expression subset—not a
+general preprocessor,
 parallel builds, an
 arbitrary graph beyond six inputs, a general dependency engine, or a trust
 mechanism. The linker also retains its 512-byte aggregate code bound and fails

@@ -27,6 +27,30 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- The AArch64 guest-native preprocessor now has a bounded, fail-closed
+  `#if`/`#elif` expression evaluator. It supports `defined(NAME)` and
+  `defined NAME`, signed numeric literals and object macros, unknown-name
+  zero, unary `!`, equality/relations, `&&`, and `||` with C-like precedence.
+  Branch tracking selects exactly one arm and rejects `#elif` after `#else`.
+  The real two-header graph expands four macros, selects an `#elif`, proves
+  relational-before-equality precedence with `1 == 2 < 3`, skips inactive
+  missing includes, and preserves include-guard deduplication and
+  expanded-source cache identity, and executes/reaps status 42. Malformed
+  expressions fail closed. Final Raspberry Pi/QEMU 10.0.11 TCG self-host
+  evidence ran all 15 Toolchain processes, reported placements `4,8,3`,
+  dispatches `182,175,178`, 42 migrations with zero evidence drops, 234 CPU0
+  compositions for 247 AP deferrals, and no pending GPU handoff. The first
+  precedence-correct run exposed a genuine reap race: CPU0 could destroy a
+  Toolchain zombie's root before the source AP retired its active TTBR0. The
+  exiting AP now switches to the kernel root while still holding the scheduler
+  lock, before parent wake can expose the zombie; an ordering guard and the
+  complete 15-process rerun cover the fix. Structural
+  guard, release image/artifact validation, full `make unit && make check`,
+  unchanged Firefox-role production SMP (`10683,13709,9922`, exact Ctrl-A,
+  status 42), Native SMP (`10224,13213,9569`, status 42), and cursor runtime
+  (`positions=7`, zero changed scanout pixels) pass. This is bounded
+  preprocessing, not a general C preprocessor or a
+  substantial in-guest MakOS build; SDK/self-hosting remain Partial.
 - AArch64 Toolchain leaders now dynamically rebalance after their kernel-owned
   initial placement. At timer preemption an eight-dispatch imbalance causes a
   full context capture, singleton-affinity move to an idle lower-load AP,
@@ -123,7 +147,33 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG Toolchain dynamic-balancing milestone:
+- Active visible Pi/QEMU 10.0.11 TCG preprocessor/lifecycle milestone: PID
+  841525, user service
+  `makos-visible-selfhost-if-lifecycle-precedence-final.service`, session
+  `build/makos-pi-visible-selfhost-if-lifecycle-precedence-final-SIcwrHk7`,
+  private
+  read-only `boot.img`, sparse `data.img`, private `vars.fd`, `qmp.sock`,
+  `serial.log`, `qemu.pid`, and `login.ppm`. The guest reports
+  `MAKOS_LOGIN_UI_OK framebuffer=800x600` and `MAKOS_AARCH64_BOOT_OK ...
+  desktop=login`. Boot clone SHA-256 is
+  `02a6520d560c5ba595386b57dce7ab6e8a9ca2a71ee81dfeb87b41b7301b6818`;
+  QMP login capture SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
+  The Pi-local QEMU build has no VNC backend, so the rendered login is exposed
+  through QMP capture/input rather than a live VNC listener. This is the sole
+  QEMU process; stop it through the recorded QMP socket before any runtime
+  gate.
+- Prior preprocessor-expression capture PID 830138, service
+  `makos-visible-selfhost-if-expression-final.service`, session
+  `build/makos-pi-visible-selfhost-if-expression-final-cknA5ric`, was stopped
+  cleanly through QMP before the lifecycle reproducer; its private files
+  remain.
+- Prior lifecycle capture PID 837185, service
+  `makos-visible-selfhost-if-lifecycle-final.service`, session
+  `build/makos-pi-visible-selfhost-if-lifecycle-final-eqUyVeKz`, was stopped
+  cleanly through QMP before the precedence-specific guest gate; its private
+  files remain.
+- Prior visible Pi/QEMU 10.0.11 TCG Toolchain dynamic-balancing milestone:
   PID 786423, user service
   `makos-visible-toolchain-dynamic-balance-final2.service`, session
   `build/makos-pi-visible-toolchain-dynamic-balance-final2-R6RvFZp2`, private
@@ -136,9 +186,10 @@ Preserve existing files and changes.
   It reports `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, four online PEs,
   and post-desktop `userspace_scheduler_cpus=4` with Firefox, Native, and
   least-loaded Toolchain roles. The user-local Debian QEMU
-  build lacks the optional VNC module, so live display is disabled while the
-  guest remains fully inspectable and controllable through QMP captures/input.
-  It is the sole QEMU process. Stop it with QMP `quit` before any runtime gate.
+  build lacks the optional VNC module, so live display was disabled while the
+  guest remained fully inspectable and controllable through QMP captures/input.
+  It was stopped cleanly through QMP before later runtime work; its private
+  files remain.
 - Prior dynamic-balancing capture PID 784352, service
   `makos-visible-toolchain-dynamic-balance-final.service`, session
   `build/makos-pi-visible-toolchain-dynamic-balance-final-WPqYbYfK`, was
@@ -649,16 +700,31 @@ Preserve existing files and changes.
   nested headers/eight dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 817189 in
-  `build/makos-pi-visible-firefox-autobalance-final-Yr6Vpg0A` is the sole QEMU
-  and no runtime-test harness is active. It uses private `boot.img`, `data.img`,
-  and `vars.fd` clones; VNC is `127.0.0.1:5901`, QMP is `qmp.sock`, serial is
-  `serial.log`, and the QMP login capture is `login.ppm`. The guest reached
+- At this handoff PID 841525 in
+  `build/makos-pi-visible-selfhost-if-lifecycle-precedence-final-SIcwrHk7` is
+  the sole
+  QEMU and no runtime-test harness is active. It runs under
+  `makos-visible-selfhost-if-lifecycle-precedence-final.service` with private
+  read-only
+  `boot.img`, sparse `data.img`, private `vars.fd`, QMP `qmp.sock`, serial
+  `serial.log`, PID file `qemu.pid`, and QMP login capture `login.ppm`. The
+  Pi-local QEMU build has no VNC backend. The guest reached
   `MAKOS_LOGIN_UI_OK framebuffer=800x600` and `MAKOS_AARCH64_BOOT_OK ...
-  desktop=login`. Boot image SHA-256 is
-  `737605a4478d87161f68254c36fb5083d98065fef07a8eff968869db003c8da0`.
+  desktop=login`. Boot clone SHA-256 is
+  `02a6520d560c5ba595386b57dce7ab6e8a9ca2a71ee81dfeb87b41b7301b6818`;
+  login capture SHA-256 is
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   Check process state before every runtime gate and stop this guest through its
-  recorded QMP socket; never start concurrent QEMU. Prior PID 786423 in
+  recorded QMP socket; never start concurrent QEMU. Prior PID 837185 in
+  `build/makos-pi-visible-selfhost-if-lifecycle-final-eqUyVeKz` was stopped
+  cleanly through QMP before the precedence-specific guest gate; its private
+  files remain. Prior PID 830138 in
+  `build/makos-pi-visible-selfhost-if-expression-final-cknA5ric` was stopped
+  cleanly through QMP before the lifecycle reproducer; its private files
+  remain. Prior PID 817189 in
+  `build/makos-pi-visible-firefox-autobalance-final-Yr6Vpg0A` was stopped
+  cleanly through QMP before the preprocessor-expression runtime; its private
+  files remain. Prior PID 786423 in
   `build/makos-pi-visible-toolchain-dynamic-balance-final2-R6RvFZp2` was
   stopped cleanly through QMP before this increment. Prior PID 784352 in
   `build/makos-pi-visible-toolchain-dynamic-balance-final-WPqYbYfK` was stopped

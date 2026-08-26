@@ -152,6 +152,18 @@ six-definition `stage1`..`stage6` chain produces five genuine same-object
 linking, transitions the code from writable/NX to RX, and executes
 `stage6(36)=42`. A seventh definition fails closed.
 
+Build inputs pass through a bounded guest-native preprocessing stage before
+compilation and cache fingerprinting. It resolves absolute quoted includes
+through MakFS to four nested headers/eight unique dependencies, supports eight
+empty or signed-integer object macros, and permits four conditional levels.
+Its condition subset covers `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, and
+`#endif`; expressions support `defined`, signed numeric literals/object
+macros, unknown-name zero, unary `!`, comparisons, `&&`, and `||` with C-like
+precedence. Malformed expressions/directives, unsafe include paths, cycles,
+limit overflow, and `#elif` after `#else` fail closed. This does not provide
+function-like/text macro replacement, arithmetic/bitwise/ternary expression
+operators, token operations, or system include search.
+
 Build mode derives `<manifest>.state` and therefore accepts manifest paths up
 to 90 bytes. The exact 120-byte `MAKSTATE2` record contains its nine-byte
 version magic, actual input count, six reserved zero bytes, one manifest
@@ -183,8 +195,9 @@ or broader pointer/lvalue expressions, variable-length/global/multidimensional
 arrays, structs,
 nested/general blocks, more than six functions or parameters per translation unit,
 more than six objects, aggregate linked code beyond 512 bytes, general
-relocations, preprocessing, optimization,
-archives, dynamic linking, transitive dependency/header discovery, variable
+relocations or preprocessing beyond the documented bounded subset,
+optimization, archives, dynamic linking, dependency/header discovery beyond
+the documented limits, variable
 input graphs beyond the documented bound, parallel builds,
 general CLI options, or debug information. It must not be presented as a general C compiler or a
 self-hosted MakOS build.

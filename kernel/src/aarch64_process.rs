@@ -6155,6 +6155,12 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
             .table
             .exit_current_on(scheduler_cpu(), status)
             .unwrap_or_else(|| crate::fatal("AArch64 exit without running process"));
+        // Retire the exiting hardware TTBR0 before releasing the scheduler
+        // lock that publishes the Zombie state. Otherwise CPU0 can wake,
+        // reap, and destroy this root while the source AP still advertises it
+        // in ACTIVE_USER_ROOTS. A successor below installs its own root after
+        // the state transition is complete.
+        crate::arch::switch_address_space(crate::arch::kernel_root());
         // PID1 polls child completion from its input loop. If child was last
         // runnable task, wake blocked parent before selecting successor so
         // session does not incorrectly look finished.
@@ -6209,7 +6215,6 @@ pub(crate) fn exit_from_exception(status: u64, frame: &mut crate::arch::Exceptio
         context.restore(frame);
         crate::arch::switch_address_space(context.ttbr0);
     } else {
-        crate::arch::switch_address_space(crate::arch::kernel_root());
         crate::arch::return_to_kernel(frame, status);
     }
 }

@@ -377,6 +377,17 @@ for token in (
 ):
     assert token in PROCESS, token
 
+exit_path = PROCESS.split("pub(crate) fn exit_from_exception(", 1)[1].split(
+    "/// Linux/POSIX exit_group", 1
+)[0]
+exit_transition = exit_path.index(".exit_current_on(scheduler_cpu(), status)")
+exit_root_retire = exit_path.index(
+    "crate::arch::switch_address_space(crate::arch::kernel_root());"
+)
+exit_parent_wake = exit_path.index("// PID1 polls child completion")
+assert exit_transition < exit_root_retire < exit_parent_wake
+assert "while the source AP still advertises it" in exit_path
+
 for token in (
     "aarch64_smp_network_rx_probe.S",
     "aarch64-smp-network-rx-probe.elf",

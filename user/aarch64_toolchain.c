@@ -201,7 +201,7 @@ enum {
     MAX_BUILD_PATH_BYTES = 96,
     BUILD_SOURCE_CAPACITY = 768,
     BUILD_EXPANDED_SOURCE_CAPACITY = 1536,
-    BUILD_HEADER_CAPACITY = 384,
+    BUILD_HEADER_CAPACITY = 768,
     MAX_BUILD_HEADER_DEPTH = 4,
     MAX_BUILD_HEADER_DEPENDENCIES = 8,
     MAX_BUILD_MACROS = 8,
@@ -1525,7 +1525,7 @@ struct include_context {
 
 struct conditional_state {
     int parent_active;
-    int condition;
+    int branch_taken;
     int seen_else;
 };
 
@@ -1715,6 +1715,223 @@ static int directive_tail_empty(const uint8_t *source, size_t line_end,
     return cursor == line_end;
 }
 
+struct preprocessor_expression {
+    const struct include_context *context;
+    const uint8_t *source;
+    size_t cursor;
+    size_t end;
+};
+
+static void preprocessor_expression_space(
+    struct preprocessor_expression *expression) {
+    while (expression->cursor < expression->end &&
+           (expression->source[expression->cursor] == ' ' ||
+            expression->source[expression->cursor] == '\t'))
+        ++expression->cursor;
+}
+
+static int preprocessor_expression_punct(
+    struct preprocessor_expression *expression, char punctuation) {
+    preprocessor_expression_space(expression);
+    if (expression->cursor == expression->end ||
+        expression->source[expression->cursor] != (uint8_t)punctuation)
+        return 0;
+    ++expression->cursor;
+    return 1;
+}
+
+static int preprocessor_expression_operator(
+    struct preprocessor_expression *expression, const char *operation) {
+    preprocessor_expression_space(expression);
+    size_t operation_length = length(operation);
+    if (operation_length > expression->end - expression->cursor) return 0;
+    for (size_t index = 0; index < operation_length; ++index)
+        if (expression->source[expression->cursor + index] !=
+            (uint8_t)operation[index])
+            return 0;
+    expression->cursor += operation_length;
+    return 1;
+}
+
+static int preprocessor_macro_integer(
+    const struct build_macro *macro, int32_t *value) {
+    if (!macro || !value || !macro->value_length) return 0;
+    size_t cursor = 0;
+    int negative = 0;
+    if (macro->value[cursor] == '-') {
+        negative = 1;
+        if (++cursor == macro->value_length) return 0;
+    }
+    uint32_t magnitude = 0;
+    size_t digits = 0;
+    while (cursor < macro->value_length &&
+           macro->value[cursor] >= '0' && macro->value[cursor] <= '9') {
+        magnitude = magnitude * 10 +
+                    (uint32_t)(macro->value[cursor++] - '0');
+        if (magnitude > 65535) return 0;
+        ++digits;
+    }
+    if (!digits || cursor != macro->value_length) return 0;
+    *value = negative ? -(int32_t)magnitude : (int32_t)magnitude;
+    return 1;
+}
+
+static int preprocessor_expression_or(
+    struct preprocessor_expression *expression, int32_t *value);
+
+static int preprocessor_expression_primary(
+    struct preprocessor_expression *expression, int32_t *value) {
+    preprocessor_expression_space(expression);
+    if (preprocessor_expression_punct(expression, '(')) {
+        if (!preprocessor_expression_or(expression, value) ||
+            !preprocessor_expression_punct(expression, ')'))
+            return 0;
+        return 1;
+    }
+    size_t saved = expression->cursor;
+    int negative = 0;
+    if (expression->cursor < expression->end &&
+        expression->source[expression->cursor] == '-') {
+        negative = 1;
+        ++expression->cursor;
+    }
+    uint32_t magnitude = 0;
+    size_t digits = 0;
+    while (expression->cursor < expression->end &&
+           expression->source[expression->cursor] >= '0' &&
+           expression->source[expression->cursor] <= '9') {
+        magnitude = magnitude * 10 +
+                    (uint32_t)(expression->source[expression->cursor++] - '0');
+        if (magnitude > 65535) return 0;
+        ++digits;
+    }
+    if (digits) {
+        *value = negative ? -(int32_t)magnitude : (int32_t)magnitude;
+        return 1;
+    }
+    expression->cursor = saved;
+    char name[MAX_LABEL_BYTES] = {0};
+    size_t name_length = 0;
+    if (!parse_macro_name(expression->source, expression->end,
+                          &expression->cursor, name, &name_length))
+        return 0;
+    if (same_name(name, name_length, "defined", 7)) {
+        int parenthesized = preprocessor_expression_punct(expression, '(');
+        char target[MAX_LABEL_BYTES] = {0};
+        size_t target_length = 0;
+        if (!parse_macro_name(expression->source, expression->end,
+                              &expression->cursor, target, &target_length) ||
+            (parenthesized &&
+             !preprocessor_expression_punct(expression, ')')))
+            return 0;
+        *value = macro_lookup(expression->context, target, target_length) != 0;
+        return 1;
+    }
+    size_t macro = macro_lookup(expression->context, name, name_length);
+    if (!macro) {
+        *value = 0;
+        return 1;
+    }
+    return preprocessor_macro_integer(&expression->context->macros[macro - 1],
+                                      value);
+}
+
+static int preprocessor_expression_unary(
+    struct preprocessor_expression *expression, int32_t *value) {
+    preprocessor_expression_space(expression);
+    if (expression->cursor < expression->end &&
+        expression->source[expression->cursor] == '!' &&
+        (expression->cursor + 1 == expression->end ||
+         expression->source[expression->cursor + 1] != '=')) {
+        ++expression->cursor;
+        if (!preprocessor_expression_unary(expression, value)) return 0;
+        *value = !*value;
+        return 1;
+    }
+    return preprocessor_expression_primary(expression, value);
+}
+
+static int preprocessor_expression_relation(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_unary(expression, value)) return 0;
+    for (;;) {
+        size_t operation = 4;
+        if (preprocessor_expression_operator(expression, "<=")) operation = 0;
+        else if (preprocessor_expression_operator(expression, ">=")) operation = 1;
+        else if (preprocessor_expression_operator(expression, "<")) operation = 2;
+        else if (preprocessor_expression_operator(expression, ">")) operation = 3;
+        else return 1;
+        int32_t right = 0;
+        if (!preprocessor_expression_unary(expression, &right)) return 0;
+        if (operation == 0) *value = *value <= right;
+        else if (operation == 1) *value = *value >= right;
+        else if (operation == 2) *value = *value < right;
+        else *value = *value > right;
+    }
+}
+
+static int preprocessor_expression_equality(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_relation(expression, value)) return 0;
+    for (;;) {
+        int operation = 0;
+        if (preprocessor_expression_operator(expression, "==")) operation = 1;
+        else if (preprocessor_expression_operator(expression, "!="))
+            operation = 2;
+        else return 1;
+        int32_t right = 0;
+        if (!preprocessor_expression_relation(expression, &right)) return 0;
+        *value = operation == 1 ? *value == right : *value != right;
+    }
+}
+
+static int preprocessor_expression_and(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_equality(expression, value)) return 0;
+    for (;;) {
+        size_t saved = expression->cursor;
+        if (!preprocessor_expression_operator(expression, "&&")) {
+            expression->cursor = saved;
+            return 1;
+        }
+        int32_t right = 0;
+        if (!preprocessor_expression_equality(expression, &right)) return 0;
+        *value = *value && right;
+    }
+}
+
+static int preprocessor_expression_or(
+    struct preprocessor_expression *expression, int32_t *value) {
+    if (!preprocessor_expression_and(expression, value)) return 0;
+    for (;;) {
+        size_t saved = expression->cursor;
+        if (!preprocessor_expression_operator(expression, "||")) {
+            expression->cursor = saved;
+            return 1;
+        }
+        int32_t right = 0;
+        if (!preprocessor_expression_and(expression, &right)) return 0;
+        *value = *value || right;
+    }
+}
+
+static int evaluate_preprocessor_expression(
+    const struct include_context *context, const uint8_t *source,
+    size_t line_end, size_t cursor, int *condition) {
+    struct preprocessor_expression expression = {
+        .context = context,
+        .source = source,
+        .cursor = cursor,
+        .end = line_end,
+    };
+    int32_t value = 0;
+    if (!preprocessor_expression_or(&expression, &value)) return 0;
+    preprocessor_expression_space(&expression);
+    if (expression.cursor != expression.end) return 0;
+    *condition = value != 0;
+    return 1;
+}
+
 static int expand_source_recursive(struct include_context *context,
                                    const uint8_t *source,
                                    size_t source_length, size_t depth) {
@@ -1754,22 +1971,52 @@ static int expand_source_recursive(struct include_context *context,
             if (negate) condition = !condition;
             conditionals[conditional_depth++] = (struct conditional_state) {
                 .parent_active = active,
-                .condition = condition,
+                .branch_taken = condition,
             };
             active = active && condition;
             if (conditional_depth >
                 context->dependencies->max_conditional_depth)
                 context->dependencies->max_conditional_depth =
                     conditional_depth;
+        } else if (directive_token(source, line_end, directive, "if",
+                                   &argument)) {
+            int condition = 0;
+            if (conditional_depth == MAX_BUILD_CONDITIONAL_DEPTH ||
+                !evaluate_preprocessor_expression(context, source, line_end,
+                                                  argument, &condition))
+                return 0;
+            conditionals[conditional_depth++] = (struct conditional_state) {
+                .parent_active = active,
+                .branch_taken = condition,
+            };
+            active = active && condition;
+            if (conditional_depth >
+                context->dependencies->max_conditional_depth)
+                context->dependencies->max_conditional_depth =
+                    conditional_depth;
+        } else if (directive_token(source, line_end, directive, "elif",
+                                   &argument)) {
+            int condition = 0;
+            if (!conditional_depth ||
+                conditionals[conditional_depth - 1].seen_else ||
+                !evaluate_preprocessor_expression(context, source, line_end,
+                                                  argument, &condition))
+                return 0;
+            struct conditional_state *state =
+                &conditionals[conditional_depth - 1];
+            active = state->parent_active && !state->branch_taken && condition;
+            if (condition) state->branch_taken = 1;
         } else if (directive_token(source, line_end, directive, "else",
                                    &argument)) {
             if (!conditional_depth ||
                 !directive_tail_empty(source, line_end, argument) ||
                 conditionals[conditional_depth - 1].seen_else)
                 return 0;
-            conditionals[conditional_depth - 1].seen_else = 1;
-            active = conditionals[conditional_depth - 1].parent_active &&
-                     !conditionals[conditional_depth - 1].condition;
+            struct conditional_state *state =
+                &conditionals[conditional_depth - 1];
+            state->seen_else = 1;
+            active = state->parent_active && !state->branch_taken;
+            state->branch_taken = 1;
         } else if (directive_token(source, line_end, directive, "endif",
                                    &argument)) {
             if (!conditional_depth ||
@@ -2620,11 +2867,13 @@ static void write_header_marker(const struct build_manifest *build,
     write_text(" max_depth=");
     write_bytes(&depth, 1);
     write_text(" resolver=quoted-absolute-recursive depth_limit=4 "
-               "preprocessor=object-macro-conditionals macros=");
+               "preprocessor=object-macro-if-expressions macros=");
     write_bytes(&macros, 1);
     write_text(" conditional_depth=");
     write_bytes(&conditional_depth, 1);
-    write_text(" include_guard=deduplicated fingerprint=expanded-source\n");
+    write_text(" if_expression=defined,numeric,comparison,not,and,or "
+               "elif=selected include_guard=deduplicated "
+               "fingerprint=expanded-source\n");
 }
 
 static void write_repository_source_marker(void) {
@@ -2830,8 +3079,22 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char leaf_header_source[] =
         "#ifndef GEN_LEAF_H\n"
         "#define GEN_LEAF_H\n"
-        "#define INCLUDED_DELTA 2\n"
-        "int included_answer(int value) { return value + INCLUDED_DELTA; }\n"
+        "#define INCLUDED_DELTA 1\n"
+        "#if defined(GEN_LEAF_H) && INCLUDED_DELTA == 2\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#elif defined(GEN_INLINE_H) && INCLUDED_DELTA == 1\n"
+        "#define ACTIVE_DELTA 2\n"
+        "int included_answer(int value) { return value + ACTIVE_DELTA; }\n"
+        "#else\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
+        "#if !defined(GEN_INLINE_H) || INCLUDED_DELTA != 1\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
+        "#if 1 == 2 < 3\n"
+        "#else\n"
+        "#include \"/home/user/generated-missing.h\"\n"
+        "#endif\n"
         "#else\n"
         "#include \"/home/user/generated-missing.h\"\n"
         "#endif\n";
@@ -2866,6 +3129,15 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "#ifdef NEVER_DEFINED\n"
         "#else\n"
         "#else\n"
+        "#endif\n";
+    static const char malformed_if_expression_source[] =
+        "#if defined(GEN_INLINE_H) &&\n"
+        "int answer(int value) { return value; }\n"
+        "#endif\n";
+    static const char malformed_elif_after_else_source[] =
+        "#if 0\n"
+        "#else\n"
+        "#elif 1\n"
         "#endif\n";
     static const char malformed_c_source[] =
         "int answer(int value) { return value | 2; }\n";
@@ -3125,10 +3397,22 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             &build, 1, (const uint8_t *)header_c_source,
             sizeof(header_c_source) - 1, include_output,
             sizeof(include_output), &include_dependencies);
-        if (included_length != sizeof(header_expected_source) - 1) fail(82);
+        if (included_length != sizeof(header_expected_source) - 1) {
+            write_text("MAKOS_AARCH64_C_PREPROCESSOR_ERROR stage=expanded-length actual=");
+            write_size_decimal(included_length);
+            write_text(" expected=");
+            write_size_decimal(sizeof(header_expected_source) - 1);
+            write_text(" expanded_fnv1a=");
+            write_hex64(build_hash(include_output, included_length));
+            write_text(" expected_fnv1a=");
+            write_hex64(build_hash((const uint8_t *)header_expected_source,
+                                   sizeof(header_expected_source) - 1));
+            write_text("\n");
+            fail(82);
+        }
         if (include_dependencies.count != 2) fail(83);
         if (include_dependencies.max_depth != 2) fail(84);
-        if (include_dependencies.macro_count != 3) fail(85);
+        if (include_dependencies.macro_count != 4) fail(85);
         if (include_dependencies.max_conditional_depth != 2) fail(86);
         if (!same_name(include_dependencies.paths[0],
                        include_dependencies.path_lengths[0],
@@ -3174,13 +3458,23 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             expand_build_source(
                 &build, 1, (const uint8_t *)duplicate_else_source,
                 sizeof(duplicate_else_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)malformed_if_expression_source,
+                sizeof(malformed_if_expression_source) - 1, include_output,
+                sizeof(include_output), &include_dependencies) != 0 ||
+            expand_build_source(
+                &build, 1, (const uint8_t *)malformed_elif_after_else_source,
+                sizeof(malformed_elif_after_else_source) - 1, include_output,
                 sizeof(include_output), &include_dependencies) != 0)
             fail(90);
         write_text("MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK "
-                   "headers=2 max_depth=2 macros=3 conditional_depth=2 "
+                   "headers=2 max_depth=2 macros=4 conditional_depth=2 "
                    "include_guard=deduplicated missing=denied "
                    "relative=denied cycle=denied overdepth=denied "
-                   "malformed=define,endif,unterminated,duplicate-else-denied "
+                   "if_expression=defined,numeric,comparison,not,and,or "
+                   "elif=selected malformed=define,endif,unterminated,"
+                   "duplicate-else,expression,elif-after-else-denied "
                    "depth_limit=4\n");
     }
     if (build_mode) {

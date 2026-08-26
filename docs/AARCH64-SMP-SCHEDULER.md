@@ -77,9 +77,9 @@ group and cannot be satisfied by the native fixture.
 The self-host gate covers automatic leader placement and migration with real
 guest work.
 Fifteen authenticated toolchain processes compile, assemble, and link the
-fixture and tracked repository probe. The final Pi/TCG run initially placed
-them `4,4,7`, then made 42 natural timer-boundary migrations with source and
-target masks `0xe` and converged to dispatch totals `180,184,180`. Each initial
+fixture and tracked repository probe. The current Pi/TCG run initially placed
+them `4,8,3`, then made 42 natural timer-boundary migrations with source and
+target masks `0xe` and converged to dispatch totals `182,175,178`. Each initial
 decision selects a minimum-load AP and an idle AP whenever one exists; each
 migration proves an eight-dispatch imbalance, singleton affinity transition,
 full GPR/SP/TLS/SIMD context, and Ready/unowned source release. AP
@@ -92,6 +92,16 @@ guest stdout. This policy is kernel-owned and caller-selected affinity is
 absent. Firefox/Native workers now use a related preferred-AP policy and
 qualify it in their exact-role fixtures. Dynamic balancing remains unqualified
 for genuine Firefox on idle macOS/HVF and for built-in/service processes.
+
+That workload also exposed an AP exit/reap ordering race. The process table
+could publish a Toolchain leader as Zombie and wake CPU0 while the exiting AP
+still advertised the process TTBR0; CPU0's fail-closed teardown correctly
+rejected destruction of the active root. Ordinary single-thread exit now
+switches the source PE to the kernel root under the scheduler lock immediately
+after `exit_current_on`, before parent wake or lock release. A selected
+successor installs its own root afterward. The structural gate asserts this
+ordering, and the complete 15-process runtime proves every migrated leader is
+reaped without active-root destruction.
 
 Surface-key priority follows the same affinity split. A Firefox thread blocked
 in `surface_wait_event` publishes its TID; AP1-3 may select that non-leader
@@ -426,6 +436,10 @@ issue a GICv2 SGI after their Release stores.
    - Address-space destruction is forbidden while any per-CPU active-root slot
      references it. Exit-group first evicts/stops every sibling and waits for
      an acknowledgement mask before teardown.
+   - Single-thread process exit retires the source PE's TTBR0 under the
+     scheduler lock before the Zombie can become observable to a reaping CPU.
+     This closes the AP-exit/CPU0-reap window without weakening active-root
+     teardown checks.
 
 5. Blocking, futexes, signals, exit
    - Blocking transitions only the calling CPU's current task. No-successor on
