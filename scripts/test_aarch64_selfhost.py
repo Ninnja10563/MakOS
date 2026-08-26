@@ -119,6 +119,8 @@ for fragment in (
     "conditional-selected-trap,macro-parameters,macro-arity,",
     "macro-recursion,macro-token-op-denied ",
     '"/home/user/generated-header.build"',
+    '"/home/user/generated-nested.build"',
+    '"/home/user/generated-nested-control.c"',
     '"/home/user/generated-inline.h"',
     '"/home/user/generated-leaf.h"',
     "malformed_build_header",
@@ -179,6 +181,9 @@ for fragment in (
     "static int c_while(",
     "MAX_C_LOCALS = 4",
     "OBJECT_CAPACITY = 2048",
+    "LINKED_CODE_CAPACITY = 1024",
+    "DATA_OFFSET = 1536",
+    "IMAGE_CAPACITY = 2048",
     "MAX_C_FUNCTIONS = 6",
     "MAX_C_PARAMETERS = 6",
     "MAX_C_BLOCK_DEPTH = 4",
@@ -259,6 +264,9 @@ for fragment in (
     "compiled_stage6(36) != 42",
     "MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5",
     "branch_assignment_source",
+    "nested_manifest_source",
+    "nested_asm_source",
+    "nested_c_source",
     '"int choose(int value) { int result = 0; if (value > 5) { result = value + 2; } else { result = value - 2; } return result; }\\n"',
     '"int bump(int value) { int result = value; if (value < 5) { result = result + 1; } return result; }\\n"',
     '"int nested(int value) { int result = 0; if (value > 0) { if (value > 5)',
@@ -339,7 +347,7 @@ for fragment in (
     "compiled_divide(20) != 6",
     "compiled_remainder(20) != 2",
     "compiled_negate(UINT32_MAX - 41) != 42",
-    "image_length != 815",
+    "image_length != 1583",
     "format=elf64-et-rel",
     "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21",
     "malformed_relocation_denied=1 unresolved_symbol_denied=1",
@@ -491,7 +499,7 @@ require(SHELL, "signed_pointer_offset=-1:42 signed_pointer_difference=3:-3")
 require(SHELL, "relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44")
 require(SHELL, "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608")
 require(SHELL, "intra_object_calls=1 cross_object_calls=2 linked_bytes=500")
-require(SHELL, "output_bytes=815 helper_result=42 persisted_reopened=1")
+require(SHELL, "output_bytes=1583 helper_result=42 persisted_reopened=1")
 require(SHELL, "malformed_c_denied=21")
 require(SHELL, "manifest_input_bounds=2..6 malformed_build_denied=6")
 require(SHELL, "malformed_relocation_denied=1")
@@ -536,7 +544,7 @@ require(FOCUSED_RUNTIME, "REPOSITORY_WARM_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_RUN_MARKER")
 require(FOCUSED_RUNTIME, "TOOLCHAIN_SMP_MARKER")
-require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 15")
+require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 17")
 require(FOCUSED_RUNTIME, "def validate_toolchain_smp(")
 require(FOCUSED_RUNTIME, "expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements")
 require(FOCUSED_RUNTIME, "toolchain placement was not least-loaded")
@@ -559,14 +567,23 @@ require(FOCUSED_RUNTIME, "makbuild /home/user/generated-three.build")
 require(FOCUSED_RUNTIME, "makbuild /home/user/generated-header.build")
 require(FOCUSED_RUNTIME, "write generated-leaf.h")
 require(FOCUSED_RUNTIME, "run generated-header.elf")
+require(FOCUSED_RUNTIME, "makbuild /home/user/generated-nested.build")
+require(FOCUSED_RUNTIME, "run generated-nested.elf")
 require(FOCUSED_RUNTIME, "makbuild /home/user/makos-repo-probe.build")
 require(FOCUSED_RUNTIME, "run makos-repo-probe.elf")
-require(FOCUSED_RUNTIME, "cli_builds=14")
+require(FOCUSED_RUNTIME, "cli_builds=16")
 require(FOCUSED_RUNTIME, "toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe")
 require(FOCUSED_RUNTIME, "console_gpu_handoff=ap-defer,cpu0-compose")
 require(FOCUSED_RUNTIME, "owner_composes == 0")
 require(FOCUSED_RUNTIME, "ap_deferrals == 0")
-require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2")
+require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2,3")
+require(FOCUSED_RUNTIME, "nested-cold:0/3,nested-warm:3/0")
+require(FOCUSED_RUNTIME, "validate_nested_build_output")
+require(FOCUSED_RUNTIME, "linked_bytes <= 512")
+require(FOCUSED_RUNTIME, "nested_build=authenticated-makfs")
+require(FOCUSED_RUNTIME, "linked_capacity=1024 output_bytes=1583 image_capacity=2048 data_offset=1536 control=while-to-if-else execution=42")
+require(FOCUSED_RUNTIME, "validate_gpu_recovery")
+require(FOCUSED_RUNTIME, "gpu_completion=fast-plus-bounded-recovery")
 require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled guest_execution=42")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
 require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=bounded-macro-if-expressions macros=6 conditional_depth=2 macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source")

@@ -23,8 +23,9 @@ enum {
     SYMBOL_SIZE = 24,
     RELA_SIZE = 24,
     CODE_OFFSET = 256,
-    DATA_OFFSET = 768,
-    IMAGE_CAPACITY = 1024,
+    DATA_OFFSET = 1536,
+    IMAGE_CAPACITY = 2048,
+    LINKED_CODE_CAPACITY = 1024,
     OBJECT_CAPACITY = 2048,
     R_AARCH64_CALL26 = 283,
 };
@@ -3170,10 +3171,10 @@ static int incremental_build(
     size_t manifest_path_length, const uint8_t *manifest,
     size_t manifest_length, const uint8_t *const sources[MAX_BUILD_INPUTS],
     const size_t source_lengths[MAX_BUILD_INPUTS], size_t *cache_hits,
-    size_t *cache_misses) {
+    size_t *cache_misses, size_t *linked_bytes, size_t *image_bytes) {
     char state_path[MAX_BUILD_PATH_BYTES + BUILD_STATE_SUFFIX_BYTES] = {0};
     size_t state_path_length = 0;
-    if (!cache_hits || !cache_misses ||
+    if (!cache_hits || !cache_misses || !linked_bytes || !image_bytes ||
         !build_state_path(manifest_path, manifest_path_length, state_path,
                           &state_path_length) ||
         !build_state_path_safe(build, state_path, state_path_length))
@@ -3222,7 +3223,7 @@ static int incremental_build(
         ++*cache_misses;
     }
 
-    uint8_t linked_code[512] = {0};
+    uint8_t linked_code[LINKED_CODE_CAPACITY] = {0};
     size_t entry_offset = 0;
     size_t linked_length = link_objects(
         objects, object_lengths, build->input_count, linked_code,
@@ -3237,6 +3238,8 @@ static int incremental_build(
                            build->input_count, sources, source_lengths,
                            objects, object_lengths))
         return 0;
+    *linked_bytes = linked_length;
+    *image_bytes = image_length;
     return 1;
 }
 
@@ -3260,6 +3263,19 @@ static void write_build_marker(const char *mode, const char *manifest_path,
     write_text(" cache_misses=");
     write_bytes(&miss, 1);
     write_text(" state_committed=1 status=42\n");
+}
+
+static void write_build_output_marker(const char *manifest_path,
+                                      size_t manifest_path_length,
+                                      size_t linked_bytes,
+                                      size_t image_bytes) {
+    write_text("MAKOS_AARCH64_MAKBUILD_OUTPUT_OK manifest=");
+    write_bytes(manifest_path, manifest_path_length);
+    write_text(" linked_bytes=");
+    write_size_decimal(linked_bytes);
+    write_text(" output_bytes=");
+    write_size_decimal(image_bytes);
+    write_text(" linked_capacity=1024 image_capacity=2048 data_offset=1536\n");
 }
 
 static void write_header_marker(const struct build_manifest *build,
@@ -3323,6 +3339,8 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "/home/user/generated-header.build";
     static const char repository_manifest_path[] =
         "/home/user/makos-repo-probe.build";
+    static const char nested_manifest_path[] =
+        "/home/user/generated-nested.build";
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
     static const char library_source_path[] = "/home/user/generated-library.c";
@@ -3344,6 +3362,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "/home/user/makos-repo-probe.s";
     static const char repository_c_path[] =
         "/home/user/makos-repo-probe.c";
+    static const char nested_asm_path[] = "/home/user/generated-nested.s";
+    static const char nested_c_path[] = "/home/user/generated-nested.c";
+    static const char nested_control_path[] =
+        "/home/user/generated-nested-control.c";
     static const char build_manifest_source[] =
         "MAKBUILD1\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -3367,6 +3389,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "asm /home/user/makos-repo-probe.s /home/user/makos-repo-probe-main.o\n"
         "c /home/user/makos-repo-probe.c /home/user/makos-repo-probe-c.o\n"
         "link /home/user/makos-repo-probe.elf _start\n";
+    static const char nested_manifest_source[] =
+        "MAKBUILD1\n"
+        "asm /home/user/generated-nested.s /home/user/generated-nested-main.o\n"
+        "c /home/user/generated-nested.c /home/user/generated-nested-c.o\n"
+        "c /home/user/generated-nested-control.c /home/user/generated-nested-control.o\n"
+        "link /home/user/generated-nested.elf _start\n";
     static const char malformed_build_header[] =
         "MAKBUILD0\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -3473,6 +3501,25 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "int helper(int value) {\n"
         "    return value + 2;\n"
         "}\n";
+    static const char nested_asm_source[] =
+        "_start:\n"
+        "mov x0, #4\n"
+        "bl accumulate\n"
+        "cmp x0, #6\n"
+        "b.ne nested_fail\n"
+        "mov x0, #42\n"
+        "mov x8, #5\n"
+        "svc #0\n"
+        "nested_fail:\n"
+        "mov x0, #86\n"
+        "mov x8, #5\n"
+        "svc #0\n";
+    static const char nested_c_source[] =
+        "int choose(int value) { int result = 0; if (value > 5) { result = value + 2; } else { result = value - 2; } return result; }\n"
+        "int bump(int value) { int result = value; if (value < 5) { result = result + 1; } return result; }\n";
+    static const char nested_control_source[] =
+        "int nested(int value) { int result = 0; if (value > 0) { if (value > 5) { result = value + 2; } else { result = value - 2; } } else { result = 1; } return result; }\n"
+        "int accumulate(int value) { int result = 0; while (value > 0) { if (value > 2) { result = result + 2; } else { result = result + 1; } value = value - 1; } return result; }\n";
     static const char header_main_source[] =
         "_start:\n"
         "mov x0, #40\n"
@@ -3694,7 +3741,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "max_parameters=6 max_call_arguments=6 nonleaf_frame=96,112 three_argument_result=42 three_argument_link=et-rel,same-object six_argument_result=42 six_argument_link=et-rel,same-object c_operators=mul,sdiv,srem,neg,sub,add signed_division_results=20:6,-20:-6 signed_remainder_results=20:2,-20:-2 unary_negation_results=42:-42,-42:42 arithmetic_object=elf64-et-rel:784 c_relations=eq,ne,lt,le,gt,ge branch_results=42,86 "
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
-        "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 linked_bytes=500 output_bytes=815 helper_result=42 "
+        "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 linked_bytes=500 output_bytes=1583 helper_result=42 "
         "persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 segments=2 "
@@ -3737,6 +3784,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                      sizeof(repository_manifest_path) - 1,
                      (const uint8_t *)repository_manifest_source,
                      sizeof(repository_manifest_source) - 1) ||
+         !write_file(nested_manifest_path,
+                     sizeof(nested_manifest_path) - 1,
+                     (const uint8_t *)nested_manifest_source,
+                     sizeof(nested_manifest_source) - 1) ||
          !write_file(repository_asm_path,
                      sizeof(repository_asm_path) - 1,
                      REPOSITORY_SELFHOST_ASM_SOURCE,
@@ -3744,6 +3795,15 @@ __attribute__((section(".text._start"), noreturn)) void _start(
          !write_file(repository_c_path, sizeof(repository_c_path) - 1,
                      REPOSITORY_SELFHOST_C_SOURCE,
                      REPOSITORY_SELFHOST_C_SOURCE_LENGTH) ||
+         !write_file(nested_asm_path, sizeof(nested_asm_path) - 1,
+                     (const uint8_t *)nested_asm_source,
+                     sizeof(nested_asm_source) - 1) ||
+         !write_file(nested_c_path, sizeof(nested_c_path) - 1,
+                     (const uint8_t *)nested_c_source,
+                     sizeof(nested_c_source) - 1) ||
+         !write_file(nested_control_path, sizeof(nested_control_path) - 1,
+                     (const uint8_t *)nested_control_source,
+                     sizeof(nested_control_source) - 1) ||
          !write_file(main_source_path, sizeof(main_source_path) - 1,
                      (const uint8_t *)main_source, sizeof(main_source) - 1) ||
          !write_file(program_source_path, sizeof(program_source_path) - 1,
@@ -4006,16 +4066,23 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     }
     if (build_mode) {
         size_t cache_hits = 0, cache_misses = 0;
+        size_t linked_bytes = 0, image_bytes = 0;
         if (!incremental_build(&build, build_manifest_path,
                                build_manifest_path_length, manifest_input,
                                manifest_length, build_sources,
                                build_source_lengths, &cache_hits,
-                               &cache_misses) ||
+                               &cache_misses, &linked_bytes, &image_bytes) ||
             cache_hits + cache_misses != build.input_count)
             fail(91);
         write_build_marker("build", build_manifest_path,
                            build_manifest_path_length, 0, build.input_count,
                            cache_hits, cache_misses);
+        if (same_name(build_manifest_path, build_manifest_path_length,
+                      nested_manifest_path,
+                      sizeof(nested_manifest_path) - 1))
+            write_build_output_marker(build_manifest_path,
+                                      build_manifest_path_length,
+                                      linked_bytes, image_bytes);
         for (size_t input = 0; input < build.input_count; ++input)
             if (dependencies[input].count)
                 write_header_marker(&build, input, &dependencies[input]);
@@ -4874,7 +4941,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     volatile uint8_t image[IMAGE_CAPACITY];
     size_t image_length = emit_elf(image, linked_code, linked_length,
                                    entry_offset);
-    if (image_length != 815 ||
+    if (image_length != 1583 ||
         !write_file(build.output_path, build.output_path_length,
                     (const uint8_t *)image, image_length))
         fail(90);

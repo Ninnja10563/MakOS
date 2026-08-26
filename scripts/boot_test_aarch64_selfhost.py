@@ -55,7 +55,7 @@ LINKER_MARKER = (
     b"loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
     b"pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
     b"code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
-    b"linked_bytes=500 output_bytes=815 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
+    b"linked_bytes=500 output_bytes=1583 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
     b"malformed_relocation_denied=1 unresolved_symbol_denied=1 "
     b"duplicate_definition_denied=1"
 )
@@ -172,8 +172,33 @@ REPOSITORY_RUN_MARKER = (
     b"MAKOS_AARCH64_RUN_OK path=/home/user/makos-repo-probe.elf status=42 "
     b"lifecycle=spawn,run,exit,wait,reap"
 )
+NESTED_COLD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-nested.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=3 cache_hits=0 cache_misses=3 "
+    b"state_committed=1 status=42"
+)
+NESTED_WARM_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/generated-nested.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=3 cache_hits=3 cache_misses=0 "
+    b"state_committed=1 status=42"
+)
+NESTED_OUTPUT_PREFIX = (
+    b"MAKOS_AARCH64_MAKBUILD_OUTPUT_OK "
+    b"manifest=/home/user/generated-nested.build linked_bytes="
+)
+NESTED_CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK "
+    b"manifest=/home/user/generated-nested.build source=existing-makfs "
+    b"seeded=0 startup=sysv status=42"
+)
+NESTED_RUN_MARKER = (
+    b"MAKOS_AARCH64_RUN_OK path=/home/user/generated-nested.elf status=42 "
+    b"lifecycle=spawn,run,exit,wait,reap"
+)
 TOOLCHAIN_SMP_MARKER = b"MAKOS_AARCH64_TOOLCHAIN_SMP_OK "
-TOOLCHAIN_PROCESS_COUNT = 15
+TOOLCHAIN_PROCESS_COUNT = 17
 SIX_FUNCTION_MARKER = (
     b"MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5 "
     b"relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
@@ -212,7 +237,7 @@ EXECUTION_MARKER = (
     b"loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
     b"pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
     b"code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
-    b"linked_bytes=500 output_bytes=815 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
+    b"linked_bytes=500 output_bytes=1583 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
     b"malformed_relocation_denied=1 unresolved_symbol_denied=1 "
     b"duplicate_definition_denied=1 "
     b"output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 "
@@ -355,6 +380,56 @@ def validate_toolchain_smp(
         owner_composes,
         ap_deferrals,
     )
+
+
+def validate_nested_build_output(output: bytes) -> int:
+    records = re.findall(
+        rb"MAKOS_AARCH64_MAKBUILD_OUTPUT_OK "
+        rb"manifest=/home/user/generated-nested\.build linked_bytes=(\d+) "
+        rb"output_bytes=(\d+) linked_capacity=(\d+) image_capacity=(\d+) "
+        rb"data_offset=(\d+)",
+        output,
+    )
+    if len(records) != 2:
+        raise AssertionError(
+            f"expected two nested-build output records, observed {len(records)}"
+        )
+    values = [tuple(int(field) for field in record) for record in records]
+    if values[0] != values[1]:
+        raise AssertionError(f"cold/warm nested-build output changed: {values}")
+    linked_bytes, output_bytes, linked_capacity, image_capacity, data_offset = (
+        values[0]
+    )
+    if (
+        linked_bytes <= 512
+        or linked_bytes > linked_capacity
+        or linked_capacity != 1024
+        or output_bytes != 1583
+        or image_capacity != 2048
+        or data_offset != 1536
+    ):
+        raise AssertionError(f"invalid nested-build output bounds: {values[0]}")
+    return linked_bytes
+
+
+def validate_gpu_recovery(output: bytes) -> int:
+    if b"MAKOS_AARCH64_GPU_TIMEOUT" in output:
+        raise AssertionError("virtio-GPU completion timed out")
+    if b"MAKOS_AARCH64_GPU_ERROR" in output:
+        raise AssertionError("virtio-GPU returned an invalid descriptor")
+    delayed = re.findall(
+        rb"MAKOS_AARCH64_GPU_DELAYED queue=(control|cursor) command=0x([0-9a-f]+)",
+        output,
+    )
+    recovered = re.findall(
+        rb"MAKOS_AARCH64_GPU_RECOVERED queue=(control|cursor) command=0x([0-9a-f]+)",
+        output,
+    )
+    if sorted(delayed) != sorted(recovered):
+        raise AssertionError(
+            f"unpaired delayed GPU completions: delayed={delayed} recovered={recovered}"
+        )
+    return len(recovered)
 
 
 def main() -> int:
@@ -681,6 +756,34 @@ def main() -> int:
                 common.wait_for_output(
                     selector, process, output, REPOSITORY_RUN_MARKER, 60
                 )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-nested.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, NESTED_COLD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, NESTED_OUTPUT_PREFIX, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, NESTED_CLI_REAP_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/generated-nested.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, NESTED_WARM_MARKER, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, NESTED_OUTPUT_PREFIX, 2, 60
+                )
+                common.wait_for_output_count(
+                    selector, process, output, NESTED_CLI_REAP_MARKER, 2, 60
+                )
+                common.send_command(stream, "run generated-nested.elf")
+                common.wait_for_output(
+                    selector, process, output, NESTED_RUN_MARKER, 60
+                )
                 common.wait_for_output_count(
                     selector,
                     process,
@@ -698,6 +801,8 @@ def main() -> int:
                     toolchain_owner_composes,
                     toolchain_ap_deferrals,
                 ) = validate_toolchain_smp(bytes(output))
+                nested_linked_bytes = validate_nested_build_output(bytes(output))
+                gpu_delayed_recoveries = validate_gpu_recovery(bytes(output))
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
         finally:
@@ -713,10 +818,12 @@ def main() -> int:
         "compiler=guest-native assembler=guest-native objects=4 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
-        "toolchain_startup=sysv manifest_arg=1 cli_builds=14 seeded_modes=fixture,existing "
+        "toolchain_startup=sysv manifest_arg=1 cli_builds=16 seeded_modes=fixture,existing "
         f"toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe placements={toolchain_placements[0]},{toolchain_placements[1]},{toolchain_placements[2]} dispatches={toolchain_dispatches[0]},{toolchain_dispatches[1]},{toolchain_dispatches[2]} processes={TOOLCHAIN_PROCESS_COUNT} migrations={toolchain_migrations} migration_source_mask={toolchain_migration_source_mask:#x} migration_target_mask={toolchain_migration_target_mask:#x} migration_policy=timer-safe-dispatch-imbalance migration_delta=8 migration_evidence_drops=0 caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={toolchain_owner_composes} ap_deferrals={toolchain_ap_deferrals} pending=0 "
-        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2 invalidations=object,source,state,header "
-        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0 "
+        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2,3 invalidations=object,source,state,header "
+        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0,nested-cold:0/3,nested-warm:3/0 "
+        f"nested_build=authenticated-makfs linked_bytes={nested_linked_bytes} linked_capacity=1024 output_bytes=1583 image_capacity=2048 data_offset=1536 control=while-to-if-else execution=42 "
+        f"gpu_completion=fast-plus-bounded-recovery delayed_recoveries={gpu_delayed_recoveries} timeouts=0 errors=0 "
         f"repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes={len(REPOSITORY_C_SOURCE)} asm_bytes={len(REPOSITORY_ASM_SOURCE)} c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} identity=build-generated-exact host_reference=compiled guest_execution=42 "
         "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=bounded-macro-if-expressions macros=6 conditional_depth=2 macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap,macro-parameters,macro-arity,macro-recursion,macro-token-op-denied transitive_header_execution=42 "
         "translation_unit_functions=2,1,1 "
@@ -730,7 +837,7 @@ def main() -> int:
         "loop_results=42,2 memory_results=42,2 pointer_call=answer-to-adjust "
         "pointee_results=42,44,2 delta_results=1:42,2:44,1:2 array_results=41:42:0,42:0:44,1:2:0 pointer_offset_call=1 pointer_variable_offset=delta dynamic_pointer_adds=2 signed_pointer_offset=-1:42 signed_pointer_difference=3:-3 relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
         "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 intra_object_calls=1 cross_object_calls=2 "
-        "linked_bytes=500 output_bytes=815 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
+        "linked_bytes=500 output_bytes=1583 helper_result=42 persisted_reopened=1 manifest_input_bounds=2..6 malformed_build_denied=6 malformed_c_denied=21 "
         "malformed_relocation_denied=1 unresolved_symbol_denied=1 "
         "duplicate_definition_denied=1 executed=2 status=42"
     )

@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import selectors
 import shutil
 import socket
@@ -164,6 +165,23 @@ def main() -> int:
                             f"cursor screendump failed at {position}: {response}"
                         )
                 verify_cursor_plane_scene_stable(baseline, snapshots)
+                if b"MAKOS_AARCH64_GPU_TIMEOUT" in output:
+                    raise AssertionError("virtio-GPU completion timed out")
+                if b"MAKOS_AARCH64_GPU_ERROR" in output:
+                    raise AssertionError("virtio-GPU returned an invalid descriptor")
+                delayed = re.findall(
+                    rb"MAKOS_AARCH64_GPU_DELAYED queue=(control|cursor) command=0x([0-9a-f]+)",
+                    output,
+                )
+                recovered = re.findall(
+                    rb"MAKOS_AARCH64_GPU_RECOVERED queue=(control|cursor) command=0x([0-9a-f]+)",
+                    output,
+                )
+                if sorted(delayed) != sorted(recovered):
+                    raise AssertionError(
+                        "unpaired delayed GPU completions: "
+                        f"delayed={delayed} recovered={recovered}"
+                    )
                 qmp_command(stream, "quit")
             process.wait(timeout=5)
         finally:
@@ -176,7 +194,8 @@ def main() -> int:
     print(
         "MAKOS_AARCH64_CURSOR_RUNTIME_OK "
         f"accel={accel} positions={len(POSITIONS)} changed_scanout_pixels=0 "
-        "backend=virtio-gpu-plane host_cursor=hidden"
+        "backend=virtio-gpu-plane host_cursor=hidden "
+        f"completion=fast-plus-bounded-recovery delayed_recoveries={len(recovered)} timeouts=0 errors=0"
     )
     return 0
 

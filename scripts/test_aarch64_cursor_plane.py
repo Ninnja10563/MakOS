@@ -16,6 +16,14 @@ def require(source: str, fragment: str) -> None:
 
 require(GPU, 'const CMD_UPDATE_CURSOR: u32 = 0x0300;')
 require(GPU, 'const CMD_MOVE_CURSOR: u32 = 0x0301;')
+require(GPU, 'const FAST_COMPLETION_SPINS: u32 = 10_000_000;')
+require(GPU, 'const MAX_COMPLETION_SPINS: u32 = 200_000_000;')
+require(GPU, 'MAKOS_AARCH64_GPU_DELAYED queue=control')
+require(GPU, 'MAKOS_AARCH64_GPU_RECOVERED queue=control')
+require(GPU, 'MAKOS_AARCH64_GPU_TIMEOUT queue=control')
+require(GPU, 'MAKOS_AARCH64_GPU_DELAYED queue=cursor')
+require(GPU, 'MAKOS_AARCH64_GPU_RECOVERED queue=cursor')
+require(GPU, 'MAKOS_AARCH64_GPU_TIMEOUT queue=cursor')
 require(GPU, 'create_cursor(\n        &mut state,')
 require(GPU, 'cursor=virtio-gpu-plane move=cursorq scanout_damage=none')
 if GPU.index('create_cursor(\n        &mut state,') > GPU.index(
@@ -39,4 +47,4 @@ def scanout_flush(outline_active: bool, buttons_changed: bool) -> bool:
 assert not scanout_flush(False, False)
 assert scanout_flush(True, False)
 assert scanout_flush(False, True)
-print("MAKOS_AARCH64_CURSOR_PLANE_TEST_OK move=cursorq pure_motion_scanout_writes=0")
+print("MAKOS_AARCH64_CURSOR_PLANE_TEST_OK move=cursorq pure_motion_scanout_writes=0 completion=fast-plus-bounded-recovery")

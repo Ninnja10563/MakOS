@@ -521,7 +521,7 @@ static void run_selfhost_probe(void) {
             "relational_results=gt:42:0,le:42:0,ge:42:86,lt:42:44 "
             "code_bytes=76,140,168,60,56 object_bytes=688,976,616,608 "
             "intra_object_calls=1 cross_object_calls=2 linked_bytes=500 "
-            "output_bytes=815 helper_result=42 persisted_reopened=1 "
+            "output_bytes=1583 helper_result=42 persisted_reopened=1 "
             "manifest_input_bounds=2..6 malformed_build_denied=6 "
             "malformed_c_denied=21 malformed_relocation_denied=1 "
             "unresolved_symbol_denied=1 duplicate_definition_denied=1 "

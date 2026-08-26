@@ -64,6 +64,8 @@ const CURSOR_SIZE: u32 = 64;
 const CURSOR_BYTES: usize = CURSOR_SIZE as usize * CURSOR_SIZE as usize * 4;
 const CURSOR_GLYPH_WIDTH: usize = 12;
 const CURSOR_GLYPH_HEIGHT: usize = 16;
+const FAST_COMPLETION_SPINS: u32 = 10_000_000;
+const MAX_COMPLETION_SPINS: u32 = 200_000_000;
 
 pub const MAX_WIDTH: u32 = 1280;
 pub const MAX_HEIGHT: u32 = 800;
@@ -579,19 +581,44 @@ fn submit(state: &mut State, request_length: u32, response_length: u32) -> Optio
 
     let expected = state.last_used.wrapping_add(1);
     let mut complete = false;
-    for _ in 0..10_000_000 {
+    let mut delayed = false;
+    let command = read32_memory(state.queue_frame + REQUEST_OFFSET);
+    for spin in 0..MAX_COMPLETION_SPINS {
         memory_barrier();
         if read16_memory(state.queue_frame + USED_OFFSET + 2) == expected {
             complete = true;
             break;
         }
+        if spin == FAST_COMPLETION_SPINS {
+            delayed = true;
+            crate::serial_println!(
+                "MAKOS_AARCH64_GPU_DELAYED queue=control command={:#x} expected_used={} observed_used={} avail={}",
+                command,
+                expected,
+                read16_memory(state.queue_frame + USED_OFFSET + 2),
+                state.avail_index,
+            );
+        }
         core::hint::spin_loop();
     }
     if !complete {
+        crate::serial_println!(
+            "MAKOS_AARCH64_GPU_TIMEOUT queue=control command={:#x} expected_used={} observed_used={} avail={}",
+            command,
+            expected,
+            read16_memory(state.queue_frame + USED_OFFSET + 2),
+            state.avail_index,
+        );
         return None;
     }
     let used_slot = u64::from(state.last_used % QUEUE_SIZE);
-    if read32_memory(state.queue_frame + USED_OFFSET + 4 + used_slot * 8) != 0 {
+    let descriptor = read32_memory(state.queue_frame + USED_OFFSET + 4 + used_slot * 8);
+    if descriptor != 0 {
+        crate::serial_println!(
+            "MAKOS_AARCH64_GPU_ERROR queue=control command={:#x} descriptor={}",
+            command,
+            descriptor,
+        );
         return None;
     }
     state.last_used = expected;
@@ -601,7 +628,16 @@ fn submit(state: &mut State, request_length: u32, response_length: u32) -> Optio
     }
     memory_barrier();
     OWNER_SUBMISSIONS.fetch_add(1, Ordering::AcqRel);
-    Some(read32_memory(state.queue_frame + RESPONSE_OFFSET))
+    let response = read32_memory(state.queue_frame + RESPONSE_OFFSET);
+    if delayed {
+        crate::serial_println!(
+            "MAKOS_AARCH64_GPU_RECOVERED queue=control command={:#x} used={} response={:#x}",
+            command,
+            expected,
+            response,
+        );
+    }
+    Some(response)
 }
 
 fn cursor_submit(state: &mut State, request_length: u32) -> bool {
@@ -623,11 +659,19 @@ fn cursor_submit(state: &mut State, request_length: u32) -> bool {
     write32(state.base + REG_QUEUE_NOTIFY, 1);
 
     let expected = state.cursor_last_used.wrapping_add(1);
-    for _ in 0..10_000_000 {
+    let mut delayed = false;
+    let command = read32_memory(frame + REQUEST_OFFSET);
+    for spin in 0..MAX_COMPLETION_SPINS {
         memory_barrier();
         if read16_memory(frame + USED_OFFSET + 2) == expected {
             let used_slot = u64::from(state.cursor_last_used % QUEUE_SIZE);
-            if read32_memory(frame + USED_OFFSET + 4 + used_slot * 8) != 0 {
+            let descriptor = read32_memory(frame + USED_OFFSET + 4 + used_slot * 8);
+            if descriptor != 0 {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_GPU_ERROR queue=cursor command={:#x} descriptor={}",
+                    command,
+                    descriptor,
+                );
                 return false;
             }
             state.cursor_last_used = expected;
@@ -636,10 +680,34 @@ fn cursor_submit(state: &mut State, request_length: u32) -> bool {
                 write32(state.base + REG_INTERRUPT_ACK, interrupt);
             }
             memory_barrier();
+            if delayed {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_GPU_RECOVERED queue=cursor command={:#x} used={} response=none",
+                    command,
+                    expected,
+                );
+            }
             return true;
+        }
+        if spin == FAST_COMPLETION_SPINS {
+            delayed = true;
+            crate::serial_println!(
+                "MAKOS_AARCH64_GPU_DELAYED queue=cursor command={:#x} expected_used={} observed_used={} avail={}",
+                command,
+                expected,
+                read16_memory(frame + USED_OFFSET + 2),
+                state.cursor_avail_index,
+            );
         }
         core::hint::spin_loop();
     }
+    crate::serial_println!(
+        "MAKOS_AARCH64_GPU_TIMEOUT queue=cursor command={:#x} expected_used={} observed_used={} avail={}",
+        command,
+        expected,
+        read16_memory(frame + USED_OFFSET + 2),
+        state.cursor_avail_index,
+    );
     false
 }
 
