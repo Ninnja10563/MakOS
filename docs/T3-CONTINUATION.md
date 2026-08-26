@@ -46,6 +46,18 @@ Preserve existing files and changes.
   its 60-second final marker under Pi pressure. No threshold changed. This is
   Pi functional evidence only. The fresh patch-0057 package and unchanged
   strict idle-macOS/HVF Firefox gate remain first priority.
+  A fresh sole visible-login QEMU remains active as PID 987728 under user
+  service `makos-visible-selfhost-large-output-final.service`, using private
+  session `build/makos-pi-visible-selfhost-large-output-final-swOyc3aZ` with
+  read-only `boot.img`, fresh sparse `data.img`, private `vars.fd`, `qmp.sock`,
+  `serial.log`, `qemu.pid`, and captured `login.ppm`/`login.png`. QMP reports
+  `running`; the guest reached `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
+  `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
+  `7575e9b6982600d6bae739ec5aa6b5309ec3909111b340e0fdfaf5043ec619a1`;
+  inspected PPM/PNG hashes are
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`
+  and `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
+  Stop it through QMP before any focused runtime; never run concurrent QEMU.
 - The guest-native AArch64 C seed now supports nested assignment/control bodies
   to an explicit maximum depth of four. Branches and loops may recursively
   contain assignments, `if`/`else`, and `while`; a fifth level and branch-local

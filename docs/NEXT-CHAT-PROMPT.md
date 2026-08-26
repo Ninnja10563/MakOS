@@ -11,8 +11,13 @@ and cursor queues now have a 10,000,000-spin fast path plus bounded
 200,000,000-spin recovery with explicit delayed/recovered/timeout/error
 evidence. Final self-host, Native/Python SMP, cursor, full unit/check, and image
 gates pass on Pi; production Firefox-role was inconclusive under Pi pressure.
-No QEMU was running after those gates. A fresh patch-0057 Firefox package and
-the unchanged strict idle-macOS/HVF gate remain first priority.
+A sole visible-login QEMU is now active as PID 987728 under
+`makos-visible-selfhost-large-output-final.service`, session
+`build/makos-pi-visible-selfhost-large-output-final-swOyc3aZ`, with private
+read-only boot clone, sparse data, vars, QMP socket, serial log, and captured
+login images. Stop it through QMP before any runtime. A fresh patch-0057
+Firefox package and the unchanged strict idle-macOS/HVF gate remain first
+priority.
 
 Continue MakOS from `/Users/marcushuang/Documents/Codex/2026-08-12/mak` and
 `docs/T3-CONTINUATION.md`. First read `docs/ORIGINAL-SPEC-AUDIT.md`,

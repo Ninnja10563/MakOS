@@ -29,6 +29,20 @@ Last updated: 2026-08-26.
   1.2 GiB swap used). No threshold changed. This remains Pi functional
   evidence only; a fresh patch-0057 Firefox package and unchanged strict
   idle-macOS/HVF qualification remain the Firefox priority.
+  A fresh sole visible-login QEMU from this implementation remains active as
+  PID 987728 under `makos-visible-selfhost-large-output-final.service`, with
+  private session
+  `build/makos-pi-visible-selfhost-large-output-final-swOyc3aZ`, read-only
+  `boot.img`, fresh sparse `data.img`, private `vars.fd`, `qmp.sock`,
+  `serial.log`, and `qemu.pid`. QMP reports `running`; serial contains
+  `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
+  `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
+  `7575e9b6982600d6bae739ec5aa6b5309ec3909111b340e0fdfaf5043ec619a1`;
+  inspected login PPM/PNG hashes are
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`
+  and `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
+  Stop this guest through its QMP socket before any runtime gate; never run a
+  concurrent QEMU.
 - 2026-08-26 the guest-native AArch64 C seed now generates bounded nested
   control flow to depth four. Branch and loop bodies may contain assignments,
   nested `if`/`else`, and nested `while`; declarations inside those bodies
