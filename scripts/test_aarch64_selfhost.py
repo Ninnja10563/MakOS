@@ -324,6 +324,16 @@ for fragment in (
     'b"MODE=fixture"',
     'b"MODE=build"',
     'b"/system/aarch64-toolchain", manifest_path',
+    "ProcessRole::Toolchain",
+    "reset_toolchain_smp_evidence()",
+    "state.least_loaded_compute_ap()",
+    "MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK",
+    "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK",
+    "MAKOS_AARCH64_TOOLCHAIN_SMP_OK",
+    "kernel_placement=least-dispatched-idle",
+    "console_gpu_handoff=ap-defer,cpu0-compose",
+    "crate::graphics::service_deferred_actions()",
+    "crate::graphics::gpu_service_affinity_evidence()",
 ):
     require(PROCESS, fragment)
 
@@ -465,6 +475,13 @@ require(FOCUSED_RUNTIME, "REPOSITORY_COLD_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_WARM_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_RUN_MARKER")
+require(FOCUSED_RUNTIME, "TOOLCHAIN_SMP_MARKER")
+require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 15")
+require(FOCUSED_RUNTIME, "def validate_toolchain_smp(")
+require(FOCUSED_RUNTIME, "expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements")
+require(FOCUSED_RUNTIME, "toolchain placement was not least-loaded")
+require(FOCUSED_RUNTIME, "cpu_mask != 0xE")
+require(FOCUSED_RUNTIME, "dispatched_cpus != {1, 2, 3}")
 require(FOCUSED_RUNTIME, "CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "THREE_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "cache_hits=4 cache_misses=0")
@@ -480,6 +497,10 @@ require(FOCUSED_RUNTIME, "run generated-header.elf")
 require(FOCUSED_RUNTIME, "makbuild /home/user/makos-repo-probe.build")
 require(FOCUSED_RUNTIME, "run makos-repo-probe.elf")
 require(FOCUSED_RUNTIME, "cli_builds=14")
+require(FOCUSED_RUNTIME, "toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe")
+require(FOCUSED_RUNTIME, "console_gpu_handoff=ap-defer,cpu0-compose")
+require(FOCUSED_RUNTIME, "owner_composes == 0")
+require(FOCUSED_RUNTIME, "ap_deferrals == 0")
 require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2")
 require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled guest_execution=42")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")

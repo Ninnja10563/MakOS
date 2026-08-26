@@ -129,7 +129,13 @@ fn current_pid() -> u64 {
 
 fn flush_scanout() {
     #[cfg(target_arch = "aarch64")]
-    crate::aarch64_virtio_gpu::flush();
+    {
+        if crate::arch::cpu_index() != 0 {
+            DEFERRED_COMPOSE_PENDING.store(true, Ordering::Release);
+            return;
+        }
+        crate::aarch64_virtio_gpu::flush();
+    }
 }
 
 fn flush_scanout_rect(x: u32, y: u32, width: u32, height: u32) {
@@ -665,6 +671,11 @@ fn terminal_write_locked(state: &mut State, bytes: &[u8]) {
     let mut parser = core::mem::take(&mut state.terminal_parser);
     parser.advance(bytes, &mut GraphicsTerminal { state });
     state.terminal_parser = parser;
+    #[cfg(target_arch = "aarch64")]
+    if crate::arch::cpu_index() != 0 {
+        compose(state);
+        return;
+    }
     redraw_terminal_direct(state, true);
 }
 

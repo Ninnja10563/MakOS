@@ -4,6 +4,23 @@ Last updated: 2026-08-26.
 
 ## Implemented
 
+- 2026-08-26 AArch64 guest-native compiler, assembler, and linker process
+  leaders now use a distinct `Toolchain` scheduler role and kernel-owned
+  automatic placement instead of inheriting CPU0-only `Native` leader policy.
+  At each spawn the scheduler snapshots AP1-3 dispatch load, prefers an idle
+  AP, selects the least-dispatched candidate, rotates equal-load ties, and
+  assigns a singleton affinity without caller selection. The Pi/QEMU 10.0.11
+  TCG self-host gate ran all 15 real toolchain processes on AP1-3 with
+  `cpu_mask=0xe`, placements `4,6,5`, dispatches `188,171,182`, and every
+  process reaped status 42. This uncovered a real ownership fault when AP
+  compiler output reached the graphics console; retained console updates now
+  defer composition to CPU0. The same run proves 247 AP deferrals, 241 CPU0
+  owner compositions, no pending handoff, and no off-owner GPU MMIO. Full
+  `make unit` and `make check`, focused self-host, Firefox-role production SMP,
+  ordinary Native SMP, and cursor runtime pass. This is automatic load-aware
+  placement for bounded single-threaded toolchain leaders, not general dynamic
+  balancing of every process/service role; the scheduler audit row remains
+  Partial and real Firefox still requires the unchanged idle macOS/HVF gate.
 - 2026-08-26 MakOS now guest-builds the first exact tracked repository-native
   component instead of only synthetic inline fixtures. Canonical
   `user/aarch64_selfhost_probe.c` (440 bytes) and

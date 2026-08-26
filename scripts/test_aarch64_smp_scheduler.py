@@ -201,6 +201,9 @@ for token in (
     "GPU_NONOWNER_COMPOSE_DEFERRALS",
     "GPU_OWNER_DEFERRED_COMPOSES",
     "if crate::arch::cpu_index() != 0",
+    "fn flush_scanout()",
+    "DEFERRED_COMPOSE_PENDING.store(true, Ordering::Release)",
+    "if crate::arch::cpu_index() != 0 {\n        compose(state);\n        return;",
     "with_lock(compose_owner);",
     "pub fn reset_gpu_service_affinity_evidence()",
     "pub fn gpu_service_affinity_evidence()",
@@ -240,6 +243,21 @@ for token in (
     "PRODUCTION_WORKER_ACTIVE_TIDS",
     "PRODUCTION_WORKER_OVERLAP_CPU_MASK",
     "PRODUCTION_WORKER_OVERLAP_TIDS",
+    "ProcessRole::Toolchain",
+    "cpu_dispatches: [u64; 4]",
+    "compute_placement_cursor: u8",
+    "fn least_loaded_compute_ap(&mut self) -> ComputePlacement",
+    "TOOLCHAIN_CPU_MASK",
+    "TOOLCHAIN_PLACEMENTS",
+    "TOOLCHAIN_DISPATCHES",
+    "reset_toolchain_smp_evidence",
+    "toolchain_smp_evidence",
+    "MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK",
+    "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK",
+    "MAKOS_AARCH64_TOOLCHAIN_SMP_OK",
+    "console_gpu_handoff=ap-defer,cpu0-compose",
+    "crate::graphics::service_deferred_actions()",
+    "AArch64 toolchain escaped kernel-selected AP affinity",
     "fn production_worker_enter(",
     "fn production_worker_leave(",
     "fn production_ap_worker(slot: &ContextSlot)",
@@ -247,6 +265,8 @@ for token in (
     "tracked_production_worker(worker.role, worker.group_pid)",
     "AArch64 production worker acquired duplicate CPU ownership",
     "MAKOS_AARCH64_PRODUCTION_SMP_READY",
+    "toolchain-leaders-least-loaded-ap",
+    "roles=firefox,native,toolchain",
     "MAKOS_AARCH64_PRODUCTION_SMP_DISPATCH_OK",
     "MAKOS_AARCH64_FIREFOX_SMP_OVERLAP_OK",
     "MAKOS_AARCH64_PRODUCTION_SMP_OK",
@@ -575,6 +595,7 @@ print(
     "MAKOS_AARCH64_SMP_SCHED_FOUNDATION_OK process_table=per-cpu-current "
     "exception_paths=per-cpu kernel_return=per-cpu ttbr_cache=per-cpu "
     "tlbi=inner-shareable "
-    "runtime=boot-probe,production-firefox-native-workers,4cpus "
-    "policy=leader-cpu0,application-workers-ap-eligible device_mmio_owner=cpu0"
+    "runtime=boot-probe,production-firefox-native-workers,toolchain-leaders,4cpus "
+    "policy=interactive-leaders-cpu0,application-workers-ap-eligible,"
+    "toolchain-least-loaded-ap device_mmio_owner=cpu0"
 )

@@ -120,6 +120,7 @@ pub enum ProcessRole {
     Python,
     Nano,
     Native,
+    Toolchain,
     SmpProbe,
     SmpLoad,
     Firefox,
@@ -217,6 +218,8 @@ struct SchedulerState {
     self_test_session: bool,
     timer_switches: u64,
     timer_dispatches: [u64; MAX_PROCESSES],
+    cpu_dispatches: [u64; 4],
+    compute_placement_cursor: u8,
     spawned_roots: [u64; MAX_PROCESSES],
     reaped_processes: u64,
     reclaimed_frames: usize,
@@ -234,6 +237,8 @@ impl SchedulerState {
             self_test_session: false,
             timer_switches: 0,
             timer_dispatches: [0; MAX_PROCESSES],
+            cpu_dispatches: [0; 4],
+            compute_placement_cursor: 1,
             spawned_roots: [0; MAX_PROCESSES],
             reaped_processes: 0,
             reclaimed_frames: 0,
@@ -266,6 +271,24 @@ impl SchedulerState {
                 slot.is_some_and(|slot| slot.affinity_mask & (1u8 << cpu) != 0)
             }
         });
+        if selected.is_some() && cpu < self.cpu_dispatches.len() {
+            self.cpu_dispatches[cpu] = self.cpu_dispatches[cpu].saturating_add(1);
+        }
+        if let Some(info) = selected {
+            if let Some(slot) = self.contexts.iter().find(|slot| slot.pid == info.pid) {
+                if slot.role == ProcessRole::Toolchain
+                    && (cpu == 0
+                        || slot.pid != slot.group_pid
+                        || slot.affinity_mask != 1u8 << cpu)
+                {
+                    crate::fatal("AArch64 toolchain escaped kernel-selected AP affinity");
+                }
+                if slot.role == ProcessRole::Toolchain {
+                    TOOLCHAIN_CPU_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
+                    TOOLCHAIN_DISPATCHES[cpu].fetch_add(1, Ordering::AcqRel);
+                }
+            }
+        }
         if cpu != 0 {
             if let Some(info) = selected {
                 let production_worker = self
@@ -294,6 +317,47 @@ impl SchedulerState {
         }
         selected
     }
+
+    fn least_loaded_compute_ap(&mut self) -> ComputePlacement {
+        let start = usize::from(self.compute_placement_cursor.clamp(1, 3));
+        let mut idle_mask = 0u8;
+        let loads = [
+            self.cpu_dispatches[1],
+            self.cpu_dispatches[2],
+            self.cpu_dispatches[3],
+        ];
+        for cpu in 1..4 {
+            if self.table.current_pid_on(cpu).is_none() {
+                idle_mask |= 1u8 << cpu;
+            }
+        }
+        let prefer_idle = idle_mask != 0;
+        let mut selected_cpu = start;
+        let mut selected_load = u64::MAX;
+        for offset in 0..3 {
+            let cpu = 1 + (start - 1 + offset) % 3;
+            if prefer_idle && idle_mask & (1u8 << cpu) == 0 {
+                continue;
+            }
+            if self.cpu_dispatches[cpu] < selected_load {
+                selected_cpu = cpu;
+                selected_load = self.cpu_dispatches[cpu];
+            }
+        }
+        self.compute_placement_cursor = (1 + selected_cpu % 3) as u8;
+        ComputePlacement {
+            cpu: selected_cpu,
+            loads,
+            idle_mask,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ComputePlacement {
+    cpu: usize,
+    loads: [u64; 3],
+    idle_mask: u8,
 }
 
 struct LockedProcesses {
@@ -395,6 +459,10 @@ static PRODUCTION_WORKER_OVERLAP_CPU_MASK: AtomicU64 = AtomicU64::new(0);
 static PRODUCTION_WORKER_OVERLAP_TIDS: [AtomicU64; 4] =
     [const { AtomicU64::new(0) }; 4];
 static PRODUCTION_WORKER_OVERLAP_REPORTED: AtomicBool = AtomicBool::new(false);
+static TOOLCHAIN_CPU_MASK: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_REPORTED_MASK: AtomicU64 = AtomicU64::new(0);
+static TOOLCHAIN_PLACEMENTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static TOOLCHAIN_DISPATCHES: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 const THREAD_TRACE_LIMIT: u64 = 8;
 
 #[inline]
@@ -487,6 +555,7 @@ pub fn report_runtime_tasks() {
                 ProcessRole::Python => "python",
                 ProcessRole::Nano => "nano",
                 ProcessRole::Native => "native",
+                ProcessRole::Toolchain => "toolchain",
                 ProcessRole::SmpProbe => "smp-probe",
                 ProcessRole::SmpLoad => "smp-load",
                 ProcessRole::Firefox => "firefox",
@@ -2289,7 +2358,7 @@ pub fn run_desktop_shell() -> ! {
         .unwrap_or_else(|| crate::fatal("AArch64 shell spawn failed"));
     crate::arch::enable_production_userspace_scheduler();
     crate::serial_println!(
-        "MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=leader-cpu0,application-workers-shared-ap roles=firefox,native device_mmio_owner=cpu0 wake=sgi block=ap-idle"
+        "MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle"
     );
     crate::serial_println!(
         "MAKOS_AARCH64_SHELL_PROCESS_OK pid={} elf=1 el=0 entry={:#x} ttbr0={:#x} syscalls=input,auth,graphics,vfs process_table=owned",
@@ -3842,6 +3911,33 @@ fn reset_production_worker_evidence() {
     }
 }
 
+fn reset_toolchain_smp_evidence() {
+    TOOLCHAIN_CPU_MASK.store(0, Ordering::Release);
+    TOOLCHAIN_REPORTED_MASK.store(0, Ordering::Release);
+    for placements in &TOOLCHAIN_PLACEMENTS {
+        placements.store(0, Ordering::Release);
+    }
+    for dispatches in &TOOLCHAIN_DISPATCHES {
+        dispatches.store(0, Ordering::Release);
+    }
+}
+
+fn toolchain_smp_evidence() -> (u64, [u64; 3], [u64; 3]) {
+    (
+        TOOLCHAIN_CPU_MASK.load(Ordering::Acquire),
+        [
+            TOOLCHAIN_PLACEMENTS[1].load(Ordering::Acquire),
+            TOOLCHAIN_PLACEMENTS[2].load(Ordering::Acquire),
+            TOOLCHAIN_PLACEMENTS[3].load(Ordering::Acquire),
+        ],
+        [
+            TOOLCHAIN_DISPATCHES[1].load(Ordering::Acquire),
+            TOOLCHAIN_DISPATCHES[2].load(Ordering::Acquire),
+            TOOLCHAIN_DISPATCHES[3].load(Ordering::Acquire),
+        ],
+    )
+}
+
 fn production_worker_evidence() -> (u64, [u64; 4], u64, [u64; 4]) {
     (
         PRODUCTION_WORKER_CPU_MASK.load(Ordering::Acquire),
@@ -3922,9 +4018,9 @@ fn production_worker_leave(cpu: usize, group_pid: u64) {
 }
 
 /// AP dispatch loop for boot probes and the bounded production policy. Process
-/// leaders stay on CPU0; non-leader Firefox and native-application threads
-/// enter this path after the desktop opens the gate. Device MMIO remains
-/// CPU0-owned.
+/// interactive leaders stay on CPU0; non-leader Firefox/native threads and
+/// kernel-placed single-threaded toolchain leaders enter this path after the
+/// desktop opens the gate. Device MMIO remains CPU0-owned.
 pub(crate) fn run_secondary_scheduler() -> ! {
     let cpu = scheduler_cpu();
     if cpu == 0 {
@@ -4005,6 +4101,16 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                     }
                 }
                 production_worker_enter(cpu, pid, group_pid);
+            }
+        } else if role == ProcessRole::Toolchain {
+            let prior = TOOLCHAIN_REPORTED_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
+            if prior & cpu_bit == 0 {
+                crate::serial_println!(
+                    "MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK pid={} cpu={} affinity={:#x} ownership=exclusive policy=kernel-least-loaded-ap device_mmio_owner=cpu0",
+                    pid,
+                    cpu,
+                    cpu_bit,
+                );
             }
         }
         crate::arch::switch_address_space(context.ttbr0);
@@ -4116,6 +4222,8 @@ fn install_loaded_process(
         let Ok(pid) = state.table.spawn(parent_pid, process.root) else {
             return None;
         };
+        let compute_placement =
+            (role == ProcessRole::Toolchain).then(|| state.least_loaded_compute_ap());
         if !crate::aarch64_tty::register_process(pid, parent_pid) {
             crate::fatal("AArch64 TTY process table full");
         }
@@ -4128,7 +4236,7 @@ fn install_loaded_process(
             pid,
             group_pid: pid,
             role,
-            affinity_mask: 1,
+            affinity_mask: compute_placement.map_or(1, |placement| 1u8 << placement.cpu),
             context,
             clear_child_tid: 0,
             robust_list_head: 0,
@@ -4152,10 +4260,23 @@ fn install_loaded_process(
         if !crate::aarch64_vm::attach_process(pid, process.root, process.image_end) {
             crate::fatal("AArch64 VM process attach failed");
         }
-        Some(pid)
+        Some((pid, compute_placement))
     });
     match pid {
-        Some(pid) => {
+        Some((pid, compute_placement)) => {
+            if let Some(placement) = compute_placement {
+                TOOLCHAIN_PLACEMENTS[placement.cpu].fetch_add(1, Ordering::AcqRel);
+                crate::serial_println!(
+                    "MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK pid={} cpu={} affinity={:#x} loads={},{},{} idle_mask={:#x} policy=least-dispatched-idle-ap caller_selected=0 device_mmio_owner=cpu0",
+                    pid,
+                    placement.cpu,
+                    1u8 << placement.cpu,
+                    placement.loads[0],
+                    placement.loads[1],
+                    placement.loads[2],
+                    placement.idle_mask,
+                );
+            }
             notify_idle_cpus();
             Some((pid, process))
         }
@@ -4487,12 +4608,16 @@ pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool) -> Option<u64> {
     {
         return None;
     }
+    if fixture {
+        reset_toolchain_smp_evidence();
+        crate::graphics::reset_gpu_service_affinity_evidence();
+    }
     let argv: [&[u8]; 2] = [b"/system/aarch64-toolchain", manifest_path];
     let envp: [&[u8]; 1] = [if fixture { b"MODE=fixture" } else { b"MODE=build" }];
     let (pid, process) = spawn_process_sysv(
         parent_pid,
         TOOLCHAIN_ELF,
-        ProcessRole::Native,
+        ProcessRole::Toolchain,
         &argv,
         &envp,
     )?;
@@ -4505,7 +4630,7 @@ pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool) -> Option<u64> {
         return None;
     }
     crate::serial_println!(
-        "MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid={} parent={} elf=1 el=0 entry={:#x} ttbr0={:#x} source=guest-file startup=sysv argc=2 mode={}",
+        "MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid={} parent={} elf=1 el=0 entry={:#x} ttbr0={:#x} source=guest-file startup=sysv argc=2 mode={} scheduler=kernel-least-loaded-ap device_mmio_owner=cpu0",
         pid,
         parent_pid,
         process.entry,
@@ -5296,6 +5421,37 @@ pub fn wait(pid: u64) -> Option<u64> {
     });
     let (resource, status, role, group_pid) = reaped?;
     cleanup_reaped(pid, resource, status);
+    if pid == group_pid && role == ProcessRole::Toolchain {
+        if scheduler_cpu() != 0 {
+            crate::fatal("AArch64 toolchain parent wait escaped CPU0");
+        }
+        crate::graphics::service_deferred_actions();
+        let (cpu_mask, placements, dispatches) = toolchain_smp_evidence();
+        let (owner_composes, ap_deferrals, pending) =
+            crate::graphics::gpu_service_affinity_evidence();
+        if cpu_mask & 1 != 0
+            || placements.iter().sum::<u64>() == 0
+            || dispatches.iter().sum::<u64>() == 0
+            || owner_composes == 0
+            || ap_deferrals == 0
+            || pending
+        {
+            crate::fatal("AArch64 toolchain SMP evidence invalid");
+        }
+        crate::serial_println!(
+            "MAKOS_AARCH64_TOOLCHAIN_SMP_OK cpu_mask={:#x} placements={},{},{} dispatches={},{},{} leader=ap kernel_placement=least-dispatched-idle caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={} ap_deferrals={} pending=0 status={}",
+            cpu_mask,
+            placements[0],
+            placements[1],
+            placements[2],
+            dispatches[0],
+            dispatches[1],
+            dispatches[2],
+            owner_composes,
+            ap_deferrals,
+            status,
+        );
+    }
     if pid == group_pid && tracked_production_worker(role, group_pid) {
         let (cpu_mask, dispatches, overlap_mask, overlap_tids) = production_worker_evidence();
         if role == ProcessRole::Firefox {

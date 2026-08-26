@@ -31,9 +31,13 @@ closes the handle and exits 44. Runtime requires `ipc_idle_mask=0x2`,
 `ipc_resume_mask=0x2`, status-0 child return, parent reap, and exact frame
 recovery. The gate closes between the qualification fixtures. After driver and
 login-UI initialization, the desktop opens a bounded production gate:
-process leaders, the shell, and UI/service roles remain on CPU0, while
-non-leader Firefox and ordinary native-application threads are AP-eligible on
-the shared Ready queue. Device MMIO remains CPU0-owned. The production
+Firefox and ordinary Native process leaders, the shell, and UI/service roles
+remain on CPU0, while non-leader Firefox and ordinary native-application
+threads are AP-eligible on the shared Ready queue. Single-threaded guest
+compiler, assembler, and linker leaders have a separate `Toolchain` role: the
+kernel places each new process on one least-dispatched AP, preferring idle APs
+and rotating equal-load ties, then gives it a singleton affinity. Device MMIO
+remains CPU0-owned. The production
 scheduler scope remains bounded; this is not unrestricted desktop SMP
 scheduling.
 
@@ -60,6 +64,17 @@ the kernel records exclusive ownership plus a simultaneous distinct-TID AP
 interval. This proves the production policy is no longer Firefox-only; the
 Firefox evidence counters and markers remain scoped to the launched Firefox
 group and cannot be satisfied by the native fixture.
+
+The self-host gate covers automatic leader placement with real guest work.
+Fifteen authenticated toolchain processes compile, assemble, and link the
+fixture and tracked repository probe. The Pi/TCG run placed them `4,6,5`
+across AP1-3 and recorded nonzero dispatch totals `188,171,182`; each recorded
+decision selects a minimum-load AP and an idle AP whenever one exists. AP
+console writes retain their bytes but never submit GPU MMIO: they coalesce a
+composition request for CPU0, which the wait/reap path services. The final
+proof requires positive owner compositions and AP deferrals, zero pending
+handoff, and status 42. This placement is kernel-owned and caller-selected
+affinity is absent, but it does not yet rebalance an already-running process.
 
 Surface-key priority follows the same affinity split. A Firefox thread blocked
 in `surface_wait_event` publishes its TID; AP1-3 may select that non-leader
@@ -281,18 +296,21 @@ Firefox.
 
 ## Next enablement blockers
 
-- Initial and exception-time AP selectors restrict candidates to non-leader
-  Firefox and ordinary native-application workers after desktop startup.
-  Leaders, PID1, shell, UI, and service roles remain on CPU0. Eligible threads
-  may select kernel-owned masks through syscall 148; automatic load balancing
-  and additional built-in/service roles remain gated until their ownership
-  paths are qualified.
+- Initial and exception-time AP selectors admit non-leader Firefox/Native
+  application workers plus singleton-affinity `Toolchain` leaders after
+  desktop startup. Firefox/Native leaders, PID1, shell, UI, and service roles
+  remain on CPU0. Eligible application threads may select kernel-owned masks
+  through syscall 148. Toolchain spawn now performs least-dispatched,
+  idle-first AP placement with rotating ties, but dynamic migration/rebalancing
+  of running work and additional built-in/service roles remain gated until
+  their ownership paths are qualified.
 - One AP1-to-AP2 forced migration preserves GPR/SP/TLS/SIMD state and exclusive
   ownership through a Ready/unowned publication. Six load tasks also contend
   through 288 yields on the shared Ready queue and receive 99 dispatches on
   each AP with exclusive ownership. The musl production fixture also forces
   three caller-selected cross-AP migrations and restores its AP-pool masks.
-  Broader production policy/priorities, automatic load-driven migration, and
+  Broader production policy/priorities, automatic load-driven migration after
+  initial placement, and
   Firefox/desktop contention remain open.
 - `sleep_until`, timed poll/I/O, timed futex, and event waits with no AP-eligible
   successor now return through the per-CPU saved kernel record into the AP idle
@@ -326,7 +344,8 @@ Firefox.
 
 Before desktop startup and between bounded boot fixtures, APs remain in
 closed-gate WFI at EL1. After desktop startup, they stay available for eligible
-Firefox/native workers and return to WFI when the shared queue has no eligible task.
+Firefox/Native workers and Toolchain leaders and return to WFI when the shared
+queue has no eligible task.
 Routine BSP `SEV` traffic cannot open the gate. Enablement and Ready publication
 issue a GICv2 SGI after their Release stores.
 
@@ -345,9 +364,10 @@ issue a GICv2 SGI after their Release stores.
 
 2. AP dispatch
    - After desktop/session startup enables SMP scheduling, AP WFI dispatchers
-     select Ready Firefox and ordinary Native application worker threads. They
-     do not run PID1, shell, UI, service, or device-owner threads until those
-     paths are qualified for parallel use.
+     select Ready Firefox and ordinary Native application worker threads plus
+     kernel-placed singleton-affinity Toolchain leaders. They do not run PID1,
+     shell, UI, service, or device-owner threads until those paths are
+     qualified for parallel use.
    - Clone/wake/spawn publishes the context with Release ordering then sends an
      SGI/SEV to idle dispatchers. Selection consumes it with Acquire ordering.
    - A BSP-only boot option/fallback remains available until full regression
@@ -369,8 +389,9 @@ issue a GICv2 SGI after their Release stores.
      CPU0-only through a bounded copied-request service. CPU0's timer bottom
      half passes real AP VFS/MakFS4 read, write, and FLUSH traffic, while
      recursively interrupted CPU0 ownership defers one tick. Retained graphics
-     composition requested by an AP is coalesced and serviced by that same CPU0
-     timer path; low-level virtio-GPU submissions fail closed off-owner.
+     composition requested by an AP—including Toolchain console output—is
+     coalesced and serviced by the CPU0 timer path or the CPU0 toolchain
+     wait/reap path; low-level virtio-GPU submissions fail closed off-owner.
 
 4. Address spaces and TLBs
    - TTBR0 is per PE. Same-process Firefox threads may concurrently use one
@@ -409,5 +430,5 @@ issue a GICv2 SGI after their Release stores.
 The post-desktop marker reports `userspace_scheduler_cpus=4` only for this
 bounded policy. The original audit remains Partial until genuine Firefox
 threads overlap on multiple guest CPUs under the unchanged idle-macOS/HVF
-runtime gate and automatic balancing plus additional built-in/service roles
-are safely scheduled.
+runtime gate and dynamic balancing plus additional built-in/service roles are
+safely scheduled.

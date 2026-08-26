@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import selectors
 import shutil
 import socket
@@ -162,6 +163,8 @@ REPOSITORY_RUN_MARKER = (
     b"MAKOS_AARCH64_RUN_OK path=/home/user/makos-repo-probe.elf status=42 "
     b"lifecycle=spawn,run,exit,wait,reap"
 )
+TOOLCHAIN_SMP_MARKER = b"MAKOS_AARCH64_TOOLCHAIN_SMP_OK "
+TOOLCHAIN_PROCESS_COUNT = 15
 SIX_FUNCTION_MARKER = (
     b"MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5 "
     b"relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
@@ -197,6 +200,82 @@ EXECUTION_MARKER = (
 )
 
 
+def validate_toolchain_smp(output: bytes) -> tuple[list[int], list[int], int, int]:
+    placements = re.findall(
+        rb"MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK pid=(\d+) cpu=([1-3]) "
+        rb"affinity=0x([0-9a-f]+) loads=(\d+),(\d+),(\d+) "
+        rb"idle_mask=0x([0-9a-f]+) policy=least-dispatched-idle-ap "
+        rb"caller_selected=0 device_mmio_owner=cpu0",
+        output,
+    )
+    if len(placements) != TOOLCHAIN_PROCESS_COUNT:
+        raise AssertionError(
+            f"expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements, "
+            f"observed {len(placements)}"
+        )
+    for _, cpu_bytes, affinity_bytes, *load_and_idle in placements:
+        cpu = int(cpu_bytes)
+        affinity = int(affinity_bytes, 16)
+        loads = [int(value) for value in load_and_idle[:3]]
+        idle_mask = int(load_and_idle[3], 16)
+        candidates = [
+            candidate
+            for candidate in range(1, 4)
+            if idle_mask == 0 or idle_mask & (1 << candidate)
+        ]
+        if affinity != 1 << cpu or cpu not in candidates:
+            raise AssertionError(
+                f"invalid toolchain placement cpu={cpu} affinity={affinity:#x} "
+                f"idle_mask={idle_mask:#x}"
+            )
+        if loads[cpu - 1] != min(loads[candidate - 1] for candidate in candidates):
+            raise AssertionError(
+                f"toolchain placement was not least-loaded: cpu={cpu} "
+                f"loads={loads} idle_mask={idle_mask:#x}"
+            )
+
+    summaries = re.findall(
+        rb"MAKOS_AARCH64_TOOLCHAIN_SMP_OK cpu_mask=0x([0-9a-f]+) "
+        rb"placements=(\d+),(\d+),(\d+) dispatches=(\d+),(\d+),(\d+) "
+        rb"leader=ap kernel_placement=least-dispatched-idle caller_selected=0 "
+        rb"ownership=exclusive device_mmio_owner=cpu0 "
+        rb"console_gpu_handoff=ap-defer,cpu0-compose owner_composes=(\d+) "
+        rb"ap_deferrals=(\d+) pending=0 status=42",
+        output,
+    )
+    if len(summaries) != TOOLCHAIN_PROCESS_COUNT:
+        raise AssertionError(
+            f"expected {TOOLCHAIN_PROCESS_COUNT} toolchain SMP summaries, "
+            f"observed {len(summaries)}"
+        )
+    final = [int(value, 16 if index == 0 else 10) for index, value in enumerate(summaries[-1])]
+    cpu_mask, *counts = final
+    final_placements = counts[:3]
+    final_dispatches = counts[3:6]
+    owner_composes, ap_deferrals = counts[6:]
+    if (
+        cpu_mask != 0xE
+        or sum(final_placements) != TOOLCHAIN_PROCESS_COUNT
+        or min(final_placements) == 0
+        or min(final_dispatches) == 0
+        or owner_composes == 0
+        or ap_deferrals == 0
+    ):
+        raise AssertionError(
+            f"incomplete toolchain SMP coverage: mask={cpu_mask:#x} "
+            f"placements={final_placements} dispatches={final_dispatches}"
+        )
+    dispatched_cpus = {
+        int(cpu)
+        for cpu in re.findall(
+            rb"MAKOS_AARCH64_TOOLCHAIN_DISPATCH_OK pid=\d+ cpu=([1-3]) ", output
+        )
+    }
+    if dispatched_cpus != {1, 2, 3}:
+        raise AssertionError(f"missing toolchain AP dispatch markers: {dispatched_cpus}")
+    return final_placements, final_dispatches, owner_composes, ap_deferrals
+
+
 def main() -> int:
     if not IMAGE.is_file():
         raise FileNotFoundError(f"AArch64 boot image not found: {IMAGE}")
@@ -227,6 +306,10 @@ def main() -> int:
         os.environ.get("MAKOS_AARCH64_TEMP_ROOT", ROOT / "build")
     )
     serial_log = ROOT / "build/makos-selfhost-focused-serial.log"
+    toolchain_placements: list[int] = []
+    toolchain_dispatches: list[int] = []
+    toolchain_owner_composes = 0
+    toolchain_ap_deferrals = 0
     with tempfile.TemporaryDirectory(
         prefix="makos-selfhost-focused-", dir=output_root
     ) as name:
@@ -514,6 +597,20 @@ def main() -> int:
                 common.wait_for_output(
                     selector, process, output, REPOSITORY_RUN_MARKER, 60
                 )
+                common.wait_for_output_count(
+                    selector,
+                    process,
+                    output,
+                    TOOLCHAIN_SMP_MARKER,
+                    TOOLCHAIN_PROCESS_COUNT,
+                    60,
+                )
+                (
+                    toolchain_placements,
+                    toolchain_dispatches,
+                    toolchain_owner_composes,
+                    toolchain_ap_deferrals,
+                ) = validate_toolchain_smp(bytes(output))
                 common.qmp_command(stream, "quit")
             process.wait(timeout=10)
         finally:
@@ -530,6 +627,7 @@ def main() -> int:
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
         "toolchain_startup=sysv manifest_arg=1 cli_builds=14 seeded_modes=fixture,existing "
+        f"toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe placements={toolchain_placements[0]},{toolchain_placements[1]},{toolchain_placements[2]} dispatches={toolchain_dispatches[0]},{toolchain_dispatches[1]},{toolchain_dispatches[2]} processes={TOOLCHAIN_PROCESS_COUNT} caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={toolchain_owner_composes} ap_deferrals={toolchain_ap_deferrals} pending=0 "
         "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2 invalidations=object,source,state,header "
         "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0 "
         f"repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes={len(REPOSITORY_C_SOURCE)} asm_bytes={len(REPOSITORY_ASM_SOURCE)} c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} identity=build-generated-exact host_reference=compiled guest_execution=42 "

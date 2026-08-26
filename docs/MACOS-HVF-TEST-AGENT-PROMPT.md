@@ -66,6 +66,22 @@ Branch: main
    The final host marker must contain `cli_builds=14`,
    `runtime_graphs=4,3,2,2`, and
    `repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes=440 asm_bytes=53 c_fnv1a=5d0b854c29106f84 asm_fnv1a=7ad8871bd0e68af4 identity=build-generated-exact host_reference=compiled guest_execution=42`.
+   It must also prove kernel-owned SMP placement for all 15 real Toolchain
+   processes. Require exactly 15
+   `MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK` decisions, each with singleton AP
+   affinity, the selected AP at the minimum recorded load, an idle AP selected
+   whenever `idle_mask` is nonzero,
+   `policy=least-dispatched-idle-ap caller_selected=0`, and CPU0 device
+   ownership. Require dispatch markers covering AP1, AP2, and AP3. The final
+   `MAKOS_AARCH64_TOOLCHAIN_SMP_OK` must report `cpu_mask=0xe`, 15 total
+   placements with every AP nonzero, every AP dispatch count nonzero,
+   `leader=ap kernel_placement=least-dispatched-idle caller_selected=0`,
+   exclusive ownership, and
+   `console_gpu_handoff=ap-defer,cpu0-compose` with positive owner compositions
+   and AP deferrals, `pending=0`, and status 42. The final host marker must
+   retain `toolchain_smp=kernel-least-loaded-ap`, `cpu_mask=0xe`,
+   `processes=15`, `caller_selected=0`, `ownership=exclusive`,
+   `device_mmio_owner=cpu0`, and the drained console/GPU handoff evidence.
    The Native gate must
    report all of the following without borrowing Firefox
    evidence: `MAKOS_AARCH64_NATIVE_SMP_RUNTIME_OK`, `cpu_mask=0xe`, nonzero
@@ -73,7 +89,9 @@ Branch: main
    least two distinct nonzero TIDs, kernel-owned affinity get/set/migration and
    restoration, `device_mmio_owner=cpu0`, and status 42. The Firefox production
    gate must retain its exact-role, exact-group, surface-wake, IRQ, and CPU0
-   device-ownership assertions. The cursor gate must retain seven positions,
+   device-ownership assertions. Both production gates must observe
+   `MAKOS_AARCH64_PRODUCTION_SMP_READY userspace_scheduler_cpus=4 policy=interactive-leaders-cpu0,application-workers-shared-ap,toolchain-leaders-least-loaded-ap roles=firefox,native,toolchain device_mmio_owner=cpu0 wake=sgi block=ap-idle`.
+   The cursor gate must retain seven positions,
    zero changed scanout pixels, the virtio-GPU cursor plane, and hidden host
    cursor.
 4. Run the strict real-Firefox gate only when the host is idle and memory

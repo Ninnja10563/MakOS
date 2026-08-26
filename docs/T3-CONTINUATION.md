@@ -27,6 +27,21 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+- AArch64 authenticated guest compiler, assembler, and linker invocations now
+  have a distinct `Toolchain` process role. The kernel automatically assigns
+  each single-threaded leader a singleton AP affinity using idle-first,
+  least-dispatched placement with rotating equal-load ties; callers do not
+  select the CPU. The focused Pi/QEMU 10.0.11 TCG self-host run validates all
+  15 decisions and reports `cpu_mask=0xe`, placements `4,6,5`, dispatches
+  `188,171,182`, and status 42 for every process. Moving real compiler output
+  to APs found an actual ownership bug: AP console flush attempted virtio-GPU
+  MMIO. Retained AP output now coalesces a deferred composition for CPU0; the
+  same run proves 247 AP deferrals, 241 CPU0 owner compositions, pending zero,
+  and no off-owner GPU submission. Full `make unit`/`make check`, focused
+  self-host, Firefox-role production SMP, ordinary Native SMP, and cursor
+  runtime pass. This advances the Partial scheduler/self-hosting rows but does
+  not constitute general dynamic process balancing or a substantial MakOS
+  self-build.
 - The first exact tracked repository-native component now passes the bounded
   guest self-host path. `kernel/build.rs` reads the 440-byte
   `user/aarch64_selfhost_probe.c` and 53-byte
@@ -92,20 +107,26 @@ Preserve existing files and changes.
   status 42. Full `make unit check`, release/image artifacts, combined
   network/input-IRQ runtime, and cursor runtime pass on the Pi. This does not
   replace unchanged real-Firefox qualification on idle macOS/HVF.
-- Active visible Pi/QEMU 10.0.11 TCG repository-source milestone: PID 775104,
-  user service `makos-visible-selfhost-repository-final.service`, session
-  `build/makos-pi-visible-selfhost-repository-final-JJyWajUO`, private
+- Active visible Pi/QEMU 10.0.11 TCG Toolchain-placement milestone: PID 780052,
+  user service `makos-visible-toolchain-load-placement-final.service`, session
+  `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd`, private
   read-only `boot.img`, sparse `data.img`, private `vars.fd`, `qmp.sock`,
-  `serial.log`, and `login.ppm`. The boot clone and current
+  `serial.log`, `qemu.pid`, and `login.ppm`. The boot clone and current
   release image both have SHA-256
-  `3b03a276d5c6f6ab1c0654860088f1054087c82b9b5698a3b7fb9d2aa9d9e4b6`;
+  `5f3223dabae1f35e9ce213f55e9e3ac0ffc6be88c3c834d3922db1578d8f6f7a`;
   the 800x600 QMP login capture has SHA-256
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`.
   It reports `MAKOS_LOGIN_UI_OK`, `MAKOS_AARCH64_BOOT_OK`, four online PEs,
-  and post-desktop `userspace_scheduler_cpus=4`. The user-local Debian QEMU
+  and post-desktop `userspace_scheduler_cpus=4` with Firefox, Native, and
+  least-loaded Toolchain roles. The user-local Debian QEMU
   build lacks the optional VNC module, so live display is disabled while the
   guest remains fully inspectable and controllable through QMP captures/input.
   It is the sole QEMU process. Stop it with QMP `quit` before any runtime gate.
+- Prior visible repository-source milestone PID 775104, service
+  `makos-visible-selfhost-repository-final.service`, session
+  `build/makos-pi-visible-selfhost-repository-final-JJyWajUO`, was stopped
+  cleanly through QMP before the Toolchain-placement runtime. Its private files
+  remain.
 - Prior visible preprocessing milestone PID 766987, service
   `makos-visible-selfhost-preprocessor-final.service`, session
   `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr`, was stopped
@@ -601,11 +622,13 @@ Preserve existing files and changes.
   nested headers/eight dependencies, an arbitrary graph beyond six inputs, a parallel build
   system, debugger, or substantial
   in-guest MakOS build.
-- At this handoff PID 775104 in
-  `build/makos-pi-visible-selfhost-repository-final-JJyWajUO` is the sole
+- At this handoff PID 780052 in
+  `build/makos-pi-visible-toolchain-load-placement-final-gecyLSmd` is the sole
   QEMU and no runtime-test harness is active. Check process state before every
   runtime gate and stop this guest through its recorded QMP socket; never start
-  concurrent QEMU. PID 766987 in
+  concurrent QEMU. Prior PID 775104 in
+  `build/makos-pi-visible-selfhost-repository-final-JJyWajUO` was stopped
+  cleanly through QMP before this increment. PID 766987 in
   `build/makos-pi-visible-selfhost-preprocessor-final-M6OT7tSr` was stopped
   cleanly through QMP before this increment. PID 749533 in
   `build/makos-pi-visible-selfhost-transitive-header-final-eFN3BPGd` was
@@ -782,10 +805,11 @@ Preserve existing files and changes.
    still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
    or substitute Pi/TCG timing evidence.
 2. The strict target now requires overlapping distinct Firefox TIDs on multiple
-   guest CPUs; inspect that evidence in the next genuine macOS/HVF run. Then continue
-   automatic load balancing and repeated migration contention while retaining
-   CPU0-exclusive device ownership. Stop the visible QEMU through QMP before
-   any focused runtime.
+   guest CPUs; inspect that evidence in the next genuine macOS/HVF run. The
+   Toolchain role now has automatic idle-first least-dispatched initial AP
+   placement. Continue into safe dynamic migration/rebalancing and repeated
+   contention for other roles while retaining CPU0-exclusive device ownership.
+   Stop the visible QEMU through QMP before any focused runtime.
 3. Expand the bounded guest C compiler beyond its current six-function and
    six-parameter per-translation-unit limits. The primary runtime graph now
    spans four objects (with one same-object call, two cross-object calls, and
