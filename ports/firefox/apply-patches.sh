@@ -24,6 +24,8 @@ series_hash=$(
 )
 marker="$git_dir/makos-patches.sha256"
 if test -f "$marker" && test "$(sed -n '1p' "$marker")" = "$series_hash"; then
+    python3 "$repo_dir/scripts/firefox_provenance.py" verify-source \
+        --source-dir "$source_dir" >/dev/null
     echo "MAKOS_FIREFOX_PATCHES_OK target=MakOS toolkit=makos nspr=MakOS rust_target=MakOS linux_masquerade=0"
     exit 0
 fi
@@ -59,5 +61,7 @@ if test -n "$recorded_hash" && test "$past_recorded" = false; then
 fi
 
 printf '%s\n' "$series_hash" >"$marker"
+python3 "$repo_dir/scripts/firefox_provenance.py" verify-source \
+    --source-dir "$source_dir" >/dev/null
 
 echo "MAKOS_FIREFOX_PATCHES_OK target=MakOS toolkit=makos nspr=MakOS rust_target=MakOS linux_masquerade=0"

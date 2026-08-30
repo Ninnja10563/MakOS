@@ -102,6 +102,7 @@ def test_package_verification(base: pathlib.Path) -> None:
     }
     provenance_record = {
         **firefox_provenance.expected_identity(),
+        "source_tree": "1" * 40,
         "build_artifacts": {
             name: hashlib.sha256(name.encode()).hexdigest()
             for name in firefox_provenance.BUILD_ARTIFACTS
@@ -225,7 +226,7 @@ def main() -> int:
         "MAKOS_INTEGRATED_DATA_TEST_OK deterministic_package_zero=1 "
         "preserved_hashes=filesystem-metadata,account-profile "
         "crc_rejection=1 elf=aarch64-pie,interp licenses=6 "
-        "firefox_provenance=pinned-source,ordered-patches,build-and-runtime-sha256 "
+        "firefox_provenance=pinned-source,ordered-patched-tree,build-and-runtime-sha256 "
         "stale_image=denied mismatched_runtime=denied pre_qemu=1"
     )
     return 0

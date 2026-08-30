@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
+import shlex
 import subprocess
 import tempfile
 
@@ -34,9 +35,6 @@ def fixture_root(base: pathlib.Path) -> pathlib.Path:
     (root / "ports/firefox/source.lock").write_text(
         "FIREFOX_VERSION=1.2.3esr\nFIREFOX_COMMIT=" + "a" * 40 + "\n"
     )
-    # Creation order intentionally differs from lexical series order.
-    (patches / "0002-second.patch").write_bytes(b"second\n")
-    (patches / "0001-first.patch").write_bytes(b"first\n")
     return root
 
 
@@ -45,7 +43,11 @@ def fixture_source(base: pathlib.Path, root: pathlib.Path) -> pathlib.Path:
     source.mkdir()
     subprocess.run(["git", "init", "-q", str(source)], check=True)
     (source / "README").write_text("pinned Firefox fixture\n")
-    subprocess.run(["git", "-C", str(source), "add", "README"], check=True)
+    (source / ".gitattributes").write_text("README text filter=tripwire\n")
+    subprocess.run(
+        ["git", "-C", str(source), "add", "README", ".gitattributes"],
+        check=True,
+    )
     subprocess.run(
         [
             "git",
@@ -68,16 +70,182 @@ def fixture_source(base: pathlib.Path, root: pathlib.Path) -> pathlib.Path:
     (root / "ports/firefox/source.lock").write_text(
         f"FIREFOX_VERSION=1.2.3esr\nFIREFOX_COMMIT={commit}\n"
     )
+    patches = root / "ports/firefox/patches"
+    # Creation order intentionally differs from lexical application order.
+    (patches / "0002-second.patch").write_text(
+        "diff --git a/widget/fixture.cpp b/widget/fixture.cpp\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/widget/fixture.cpp\n"
+        "@@ -0,0 +1 @@\n"
+        "+int fixture(void) { return 42; }\n"
+        "diff --git a/widget/fixture-link b/widget/fixture-link\n"
+        "new file mode 120000\n"
+        "--- /dev/null\n"
+        "+++ b/widget/fixture-link\n"
+        "@@ -0,0 +1 @@\n"
+        "+fixture.cpp\n"
+        "\\ No newline at end of file\n"
+    )
+    (patches / "0001-first.patch").write_text(
+        "diff --git a/README b/README\n"
+        "--- a/README\n"
+        "+++ b/README\n"
+        "@@ -1 +1 @@\n"
+        "-pinned Firefox fixture\n"
+        "+patched Firefox fixture\n"
+    )
+    for patch in sorted(patches.glob("*.patch")):
+        subprocess.run(
+            ["git", "-C", str(source), "apply", str(patch)], check=True
+        )
     _, patch_identity = provenance.patch_series_identity(root)
     git_dir = provenance.source_git_dir(source)
     (git_dir / "makos-patches.sha256").write_text(patch_identity + "\n")
+    filter_sentinel = base / "filter-invoked"
+    filter_script = base / "tripwire-filter.sh"
+    filter_script.write_text(
+        "#!/bin/sh\n"
+        "printf invoked > \"$1\"\n"
+        "printf 'patched Firefox fixture\\n'\n"
+    )
+    filter_script.chmod(0o755)
+    filter_command = (
+        f"{shlex.quote(str(filter_script))} {shlex.quote(str(filter_sentinel))}"
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "config", "filter.tripwire.clean", filter_command],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "config", "core.autocrlf", "true"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "config", "core.fileMode", "false"], check=True
+    )
+    index_before = (git_dir / "index").read_bytes()
+    objects_dir = git_dir / "objects"
+    objects_before = {
+        path.relative_to(objects_dir): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in objects_dir.rglob("*")
+        if path.is_file()
+    }
     provenance.verify_source_state(source, root)
+    assert not filter_sentinel.exists()
+    assert (git_dir / "index").read_bytes() == index_before
+    assert {
+        path.relative_to(objects_dir): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in objects_dir.rglob("*")
+        if path.is_file()
+    } == objects_before
+
+    readme = source / "README"
+    original_readme = readme.read_bytes()
+    readme.write_bytes(original_readme + b"dirty tracked mutation\n")
+    expect_failure(
+        lambda: provenance.verify_source_state(source, root),
+        "differs from ordered patches",
+    )
+    assert not filter_sentinel.exists()
+    readme.write_bytes(original_readme)
+    provenance.verify_source_state(source, root)
+    assert not filter_sentinel.exists()
+
+    readme.write_bytes(b"patched Firefox fixture\r\n")
+    expect_failure(
+        lambda: provenance.verify_source_state(source, root),
+        "differs from ordered patches: content README",
+    )
+    assert not filter_sentinel.exists()
+    readme.write_bytes(original_readme)
+    provenance.verify_source_state(source, root)
+
+    fixture = source / "widget/fixture.cpp"
+    fixture.chmod(0o755)
+    expect_failure(
+        lambda: provenance.verify_source_state(source, root),
+        "differs from ordered patches: mode widget/fixture.cpp",
+    )
+    assert not filter_sentinel.exists()
+    fixture.chmod(0o644)
+    provenance.verify_source_state(source, root)
+
+    fixture_link = source / "widget/fixture-link"
+    fixture_link.unlink()
+    fixture_link.symlink_to("other.cpp")
+    expect_failure(
+        lambda: provenance.verify_source_state(source, root),
+        "differs from ordered patches: content widget/fixture-link",
+    )
+    assert not filter_sentinel.exists()
+    fixture_link.unlink()
+    fixture_link.write_text("fixture.cpp")
+    expect_failure(
+        lambda: provenance.verify_source_state(source, root),
+        "differs from ordered patches: type widget/fixture-link",
+    )
+    assert not filter_sentinel.exists()
+    fixture_link.unlink()
+    fixture_link.symlink_to("fixture.cpp")
+    provenance.verify_source_state(source, root)
+
+    untracked = source / "unexpected-build-source.cpp"
+    untracked.write_text("int unexpected(void) { return 1; }\n")
+    expect_failure(
+        lambda: provenance.verify_source_state(source, root),
+        "unexpected untracked path: unexpected-build-source.cpp",
+    )
+    untracked.unlink()
+    provenance.verify_source_state(source, root)
+    assert not filter_sentinel.exists()
+
     (git_dir / "makos-patches.sha256").write_text("0" * 64 + "\n")
     expect_failure(
         lambda: provenance.verify_source_state(source, root),
         "applied-patch marker mismatch",
     )
     (git_dir / "makos-patches.sha256").write_text(patch_identity + "\n")
+
+    linked = base / "linked-source"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "core.autocrlf=false",
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            str(linked),
+            commit,
+        ],
+        check=True,
+    )
+    assert (linked / ".git").is_file()
+    # Shared core.autocrlf/filter config must remain active for verification,
+    # but the fixture patch itself is deliberately LF-exact.
+    (linked / "README").write_bytes(b"pinned Firefox fixture\n")
+    for patch in sorted(patches.glob("*.patch")):
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(linked),
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "filter.tripwire.clean=cat",
+                "apply",
+                str(patch),
+            ],
+            check=True,
+        )
+    linked_git_dir = provenance.source_git_dir(linked)
+    (linked_git_dir / "makos-patches.sha256").write_text(patch_identity + "\n")
+    provenance.verify_source_state(linked, root)
+    assert not filter_sentinel.exists()
     return source
 
 
@@ -87,7 +255,8 @@ def main() -> int:
         root = fixture_root(base)
         source = fixture_source(base, root)
         ordered = hashlib.sha256()
-        for payload in (b"first\n", b"second\n"):
+        for patch in sorted((root / "ports/firefox/patches").glob("*.patch")):
+            payload = patch.read_bytes()
             ordered.update(hashlib.sha256(payload).hexdigest().encode())
             ordered.update(b"\n")
         count, identity = provenance.patch_series_identity(root)
@@ -100,9 +269,15 @@ def main() -> int:
                 b"\x7fELF" + artifact.encode() + bytes([index])
             )
         stamp = base / "stamp.json"
-        record = provenance.build_record(bin_dir, root)
+        source_tree = provenance.verify_source_state(source, root)
+        record = provenance.build_record(bin_dir, source_tree, root)
         provenance.write_record(stamp, record)
         assert provenance.verify_build_stamp(stamp, bin_dir, root) == record
+        provenance.verify_record_source_tree(record, source_tree)
+        expect_failure(
+            lambda: provenance.verify_record_source_tree(record, "0" * len(source_tree)),
+            "source tree differs from verified patched tree",
+        )
 
         package_dir = base / "package"
         package_dir.mkdir()
@@ -160,7 +335,9 @@ def main() -> int:
         "ports/firefox/build-makos.sh": (
             "create-build-stamp",
             "audit-binary.sh",
+            "dist/firefox/makos-build-provenance.json",
         ),
+        "ports/firefox/apply-patches.sh": ("verify-source",),
         "ports/firefox/package-makos.sh": (
             "verify-build-stamp",
             "create-runtime-record",
@@ -201,7 +378,11 @@ def main() -> int:
         "MAKOS_FIREFOX_PROVENANCE_TEST_OK "
         f"patches={current_count} patch_series_sha256={current_identity} "
         "source=pinned build_hashes=5 runtime_hashes=5 stale=denied fields=exact "
-        "pipeline=build,package,integrate,pre-qemu"
+        "source_tree=ordered-patches-exact raw_bytes=exact crlf=denied "
+        "clean_filter=not-invoked executable_mode=exact symlink=target-and-type-exact "
+        "tracked_dirty=denied untracked=denied "
+        "real_index=unchanged real_objects=unchanged git_worktree=supported "
+        "pipeline=apply,build,package,integrate,pre-qemu"
     )
     return 0
 

@@ -13,6 +13,36 @@ rust_toolchain="$repo_dir/build/ports/rust/toolchain-makos"
 bindgen_libdir=${MAKOS_BINDGEN_LIBDIR:-}
 profiler_bindgen_libdir=${MAKOS_PROFILER_BINDGEN_LIBDIR:-}
 
+clear_developer_provenance() {
+    for provenance in \
+        "$obj/makos-build-provenance.json" \
+        "$obj/dist/firefox/makos-build-provenance.json"
+    do
+        rm -f "$provenance" || {
+            echo "Firefox MakOS developer build blocked: cannot remove stale provenance: $provenance" >&2
+            return 1
+        }
+    done
+}
+
+developer_cleanup_on_exit() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if ! clear_developer_provenance; then
+        status=1
+    fi
+    exit "$status"
+}
+
+if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
+    # Failures and interruptions must not leave provenance restored after the
+    # pre-build invalidation. Signal traps route through the same EXIT cleanup.
+    trap developer_cleanup_on_exit EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+fi
+
 if test -z "$build_python"; then
     for candidate in python3.12 python3.11 python3; do
         if command -v "$candidate" >/dev/null 2>&1; then
@@ -172,13 +202,18 @@ export MOZCONFIG="$port_dir/mozconfig.makos"
 if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
     # Invalidate again immediately before mach in case a prerequisite command
     # restored this developer-only object directory from a build cache.
-    rm -f "$obj/makos-build-provenance.json"
+    clear_developer_provenance
 fi
 # Stable default keeps incremental Gecko/Rust artifacts valid across retries.
 # Override for release packaging when a different reproducible build ID is
 # required.
 export MOZ_BUILD_DATE=${MOZ_BUILD_DATE:-20260818193048}
 "$build_python" "$source_dir/mach" build "$@"
+if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
+    # A partial or complete successful mach invocation must not leave a staged
+    # record restored by an object-cache or packaging prerequisite.
+    clear_developer_provenance
+fi
 full_build=true
 for argument in "$@"; do
     case "$argument" in
@@ -192,7 +227,7 @@ if test "$full_build" = false; then
 fi
 FIREFOX_BIN_DIR="$obj/dist/bin" "$port_dir/audit-binary.sh"
 if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
-    rm -f "$obj/makos-build-provenance.json"
+    clear_developer_provenance
     echo "MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed release_provenance=withheld"
     exit 0
 fi

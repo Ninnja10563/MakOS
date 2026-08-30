@@ -88,7 +88,14 @@ for the same queue and command.
 Focused `test-aarch64-firefox-runtime` requires the integrated Firefox package,
 and first runs a no-QEMU fail-closed preflight. The package must carry a
 canonical record for the pinned Firefox source commit and current ordered
-patch-series SHA-256, the five successfully audited build artifacts, and the
+patch-series SHA-256. Before creating or accepting that record, the verifier
+reconstructs the expected patched Git tree in a temporary index, hashes the
+actual tracked source's raw regular-file bytes, executable mode, and symlink
+target bytes directly against expected blob IDs without applying Git clean
+filters or line-ending conversion. It rejects type/mode/content differences or
+unexpected non-ignored files without modifying the source index or object
+store. The resulting tree identity is part of the record, which also binds the
+five successfully audited build artifacts and the
 five exact stripped runtime artifacts. Package CRCs, AArch64 PIE/shared-object
 shape, and runtime hashes are checked before QEMU creation; a historical,
 unprovenanced, stale-patch, or mismatched-payload image is rejected. The
@@ -117,7 +124,8 @@ MAKOS_FIREFOX_DEVELOPER_BUILD=1 ports/firefox/build-makos.sh -j1
 This opt-in mode keeps the ordinary release configuration unchanged, still
 requires the complete Firefox binary audit, and never emits release provenance.
 It uses `obj-aarch64-makos-developer`, separate from the release object
-directory, and removes any stamp there before `mach` can modify it, so
+directory, and removes both the object-root build stamp and any staged runtime
+record there before `mach` can modify it, so
 interruption also fails closed. Its artifacts prove only that
 the full patched source graph compiles and links. The supported/default
 packaging flow rejects them because this mode withholds release provenance;

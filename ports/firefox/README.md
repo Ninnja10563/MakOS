@@ -71,8 +71,9 @@ full build rejects a partial LLVM installation before expensive Gecko work.
 `MAKOS_FIREFOX_DEVELOPER_BUILD=1` is an explicit, unoptimized full-source
 qualification mode for memory-constrained development hosts. It still runs the
 final ELF binary audit, but uses the isolated `obj-aarch64-makos-developer`
-directory, invalidates provenance there before the build, and never writes a
-new release stamp. The supported/default packaging flow therefore rejects
+directory, invalidates both object-root and staged runtime provenance there
+before the build, and never writes a new release stamp. The supported/default
+packaging flow therefore rejects
 developer outputs, and they cannot qualify runtime performance. The
 unset/default mode remains the release build contract.
 
@@ -116,7 +117,14 @@ replaces the 2.1 GiB debug `libxul.so` with the audited 191 MiB stripped ELF,
 then writes and fully CRC-verifies a 344 MiB sector-backed package image.
 The full build writes a canonical provenance stamp only after the binary audit.
 Packaging rechecks its pinned source HEAD, exact applied-patch-series marker,
-and SHA-256 of `firefox`, `plugin-container`, `xpcshell`, `libxul.so`, and
+and exact patched tracked tree. The tree is reconstructed from the pinned
+commit plus ordered local patches in a temporary Git index; tracked byte/mode
+or symlink-target differences and unexpected non-ignored source paths fail
+closed. Actual bytes are hashed directly without clean filters, line-ending
+normalization, or trust in `core.fileMode`, and the check does not change the
+real source index or object store. The stamp binds that source
+tree identity plus SHA-256 of `firefox`, `plugin-container`, `xpcshell`,
+`libxul.so`, and
 `libnspr4.so`; after stripping it emits a runtime record with hashes of those
 exact five packaged payloads. Integrated-image and strict-runtime preflights
 reject a missing/stale record or any package hash mismatch before QEMU.

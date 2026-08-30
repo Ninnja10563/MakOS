@@ -22,7 +22,15 @@ case "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" in
         obj="$repo_dir/build/ports/firefox/obj-aarch64-makos-developer"
         # A developer artifact can never authorize release packaging, even if
         # this separate directory was restored from an older build cache.
-        rm -f "$obj/makos-build-provenance.json"
+        for provenance in \
+            "$obj/makos-build-provenance.json" \
+            "$obj/dist/firefox/makos-build-provenance.json"
+        do
+            rm -f "$provenance" || {
+                echo "Firefox MakOS developer build blocked: cannot remove stale provenance: $provenance" >&2
+                exit 1
+            }
+        done
         ;;
     *)
         echo "Firefox MakOS build blocked: MAKOS_FIREFOX_DEVELOPER_BUILD must be 0 or 1." >&2

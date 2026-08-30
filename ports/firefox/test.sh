@@ -24,7 +24,10 @@ grep -Fq 'if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1' \
     "$port_dir/mozconfig.makos"
 grep -Fq 'MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed release_provenance=withheld' \
     "$port_dir/build-makos.sh"
-test "$(grep -Fc 'rm -f "$obj/makos-build-provenance.json"' "$port_dir/build-makos.sh")" -eq 2
+grep -Fq 'clear_developer_provenance()' "$port_dir/build-makos.sh"
+test "$(grep -Fc '    clear_developer_provenance' "$port_dir/build-makos.sh")" -eq 3
+grep -Fq '"$obj/dist/firefox/makos-build-provenance.json"' \
+    "$port_dir/build-makos.sh"
 if grep -Eq '^export (NM|RANLIB|STRIP)=' "$port_dir/mozconfig.makos"; then
     echo "Firefox MakOS mozconfig exports unavailable configure variables" >&2
     exit 1
