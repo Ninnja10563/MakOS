@@ -4,11 +4,11 @@
 set -eu
 
 port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-for script in apply-patches.sh audit.sh audit-binary.sh build-makos.sh clone.sh fetch.sh \
+for script in apply-patches.sh audit.sh audit-binary.sh build-makos.sh build-mode.sh clone.sh fetch.sh \
     prepare-rust-libc.sh prepare-rust-getrandom.sh prepare-rust-rustix.sh \
     prepare-rust-mtu.sh prepare-rust-nss-gk-api.sh prepare-rust-socket2.sh \
     prepare-rust-libloading.sh \
-    test-nspr.sh test-toolchain.sh test-widget.sh test.sh \
+    test-build-mode.sh test-nspr.sh test-toolchain.sh test-widget.sh test.sh \
     toolchain-audit.sh
 do
     sh -n "$port_dir/$script"
@@ -17,8 +17,14 @@ done
 "$port_dir/toolchain-audit.sh" | \
     grep -Eq '^MAKOS_FIREFOX_TOOLCHAIN_(OK|BLOCKED) '
 "$port_dir/test-toolchain.sh" >/dev/null
+"$port_dir/test-build-mode.sh" >/dev/null
 grep -Fq 'ac_add_options --enable-default-toolkit=cairo-makos' \
     "$port_dir/mozconfig.makos"
+grep -Fq 'if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1' \
+    "$port_dir/mozconfig.makos"
+grep -Fq 'MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed release_provenance=withheld' \
+    "$port_dir/build-makos.sh"
+test "$(grep -Fc 'rm -f "$obj/makos-build-provenance.json"' "$port_dir/build-makos.sh")" -eq 2
 if grep -Eq '^export (NM|RANLIB|STRIP)=' "$port_dir/mozconfig.makos"; then
     echo "Firefox MakOS mozconfig exports unavailable configure variables" >&2
     exit 1
@@ -31,7 +37,9 @@ if test -d "$source_dir/.git"; then
     "$port_dir/test-nspr.sh" >/dev/null
 fi
 
-bin_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)/build/ports/firefox/obj-aarch64-makos/dist/bin
+repo_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)
+obj=$("$port_dir/build-mode.sh" "$repo_dir")
+bin_dir="$obj/dist/bin"
 if test -f "$bin_dir/libxul.so"; then
     "$port_dir/audit-binary.sh" >/dev/null
 fi

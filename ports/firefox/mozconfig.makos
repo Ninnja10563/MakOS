@@ -1,11 +1,25 @@
 # Target contract. Not usable until Gecko recognizes MakOS and widget/multimedia
 # backends listed in ABI.md exist.
-mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/../obj-aarch64-makos
+if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
+    mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/../obj-aarch64-makos-developer
+else
+    mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/../obj-aarch64-makos
+fi
 
 ac_add_options --target=aarch64-unknown-makos
 ac_add_options --host=${MAKOS_BUILD_HOST:-aarch64-apple-darwin}
 ac_add_options --enable-application=browser
 ac_add_options --enable-default-toolkit=cairo-makos
+# A release Gecko build gives the top-level Rust archive full LTO.  Keep that
+# as the package/default contract, but allow memory-constrained development
+# hosts to compile the complete source graph without repeatedly exhausting the
+# host.  Artifacts from this mode are source-qualification evidence only; they
+# are not release or performance-qualification artifacts.
+if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
+    ac_add_options --disable-release
+    ac_add_options --disable-debug-symbols
+    ac_add_options --disable-optimize
+fi
 ac_add_options --disable-tests
 ac_add_options --disable-crashreporter
 ac_add_options --disable-updater

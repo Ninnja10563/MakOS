@@ -101,6 +101,29 @@ LLVM/libclang variables at locally staged tools when they are not installed
 system-wide. `ports/firefox/build-makos.sh widget/makos -j1` is a supported
 compile-only prerequisite gate and deliberately defers the final binary audit;
 it does not produce a package or qualify Firefox runtime behavior.
+The selected Clang installation must include its matching AArch64 intrinsic
+resource headers (`arm_neon.h`; Debian LLVM 19 packages this in
+`libclang-common-19-dev`). `ports/firefox/test-toolchain.sh` compiles a real
+NEON intrinsic probe so a compiler-only LLVM extraction cannot pass and then
+fail much later in SWGL or media code.
+
+On a memory-constrained source-qualification host, an unoptimized complete
+developer build may be requested explicitly:
+
+```sh
+MAKOS_FIREFOX_DEVELOPER_BUILD=1 ports/firefox/build-makos.sh -j1
+```
+
+This opt-in mode keeps the ordinary release configuration unchanged, still
+requires the complete Firefox binary audit, and never emits release provenance.
+It uses `obj-aarch64-makos-developer`, separate from the release object
+directory, and removes any stamp there before `mach` can modify it, so
+interruption also fails closed. Its artifacts prove only that
+the full patched source graph compiles and links. The supported/default
+packaging flow rejects them because this mode withholds release provenance;
+they also cannot be used as Firefox runtime, latency, or macOS/HVF
+qualification evidence. Run the default build in `obj-aarch64-makos` to
+produce release artifacts and a provenance stamp.
 The runtime then requires
 strict paint/input/TLS/exact-URI/page-pixel proof, then copies the selected URL
 through the MakOS system clipboard, clears the URL bar, pastes, and requires a

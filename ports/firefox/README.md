@@ -64,6 +64,17 @@ fallback exists. Override underlying tools with `MAKOS_REAL_CLANG`,
 `MAKOS_REAL_CLANGXX`, and `MAKOS_LLD`; override drivers with `MAKOS_CC` and
 `MAKOS_CXX`. `toolchain-audit.sh` compiles and links a freestanding target ELF;
 `build-makos.sh` refuses toolchains that cannot pass this executable check.
+The compiler resource directory must also contain the matching AArch64
+intrinsic headers. `test-toolchain.sh` compiles `arm_neon.h` operations, and the
+full build rejects a partial LLVM installation before expensive Gecko work.
+
+`MAKOS_FIREFOX_DEVELOPER_BUILD=1` is an explicit, unoptimized full-source
+qualification mode for memory-constrained development hosts. It still runs the
+final ELF binary audit, but uses the isolated `obj-aarch64-makos-developer`
+directory, invalidates provenance there before the build, and never writes a
+new release stamp. The supported/default packaging flow therefore rejects
+developer outputs, and they cannot qualify runtime performance. The
+unset/default mode remains the release build contract.
 
 Official musl and LLVM ports supply isolated C/C++ build and shared-runtime
 sysroots. Build and audit them without promoting them into the SDK:

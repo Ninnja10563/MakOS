@@ -46,6 +46,9 @@ mkdir -p "$out_dir/empty-sysroot"
     "$port_dir/toolchain-probe.c" -o "$out_dir/probe.o"
 file "$out_dir/probe.o" | grep -q 'ELF 64-bit.*ARM aarch64'
 "$driver" --target=aarch64-unknown-makos -ffreestanding -c \
+    "$port_dir/toolchain-neon-probe.c" -o "$out_dir/neon-probe.o"
+file "$out_dir/neon-probe.o" | grep -q 'ELF 64-bit.*ARM aarch64'
+"$driver" --target=aarch64-unknown-makos -ffreestanding -c \
     "$port_dir/stack-protector-probe.c" -o "$out_dir/stack-protected.o"
 "$nm" -u "$out_dir/stack-protected.o" | grep -q '__stack_chk_fail'
 "$driver" --target=aarch64-unknown-makos -ffreestanding \
@@ -91,4 +94,4 @@ fi
 grep -Fq 'default target runtime incomplete' "$out_dir/runtime.stderr"
 MAKOS_CC="$driver" "$port_dir/toolchain-audit.sh" --require >/dev/null
 
-echo "MAKOS_FIREFOX_TOOLCHAIN_DRIVER_OK target=aarch64-unknown-makos compile=elf link=elf stack_protector=strong-default,explicit-bootstrap-optout host_gcc=unused default_runtime=blocked"
+echo "MAKOS_FIREFOX_TOOLCHAIN_DRIVER_OK target=aarch64-unknown-makos compile=elf neon=intrinsics link=elf stack_protector=strong-default,explicit-bootstrap-optout host_gcc=unused default_runtime=blocked"

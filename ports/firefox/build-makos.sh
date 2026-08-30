@@ -6,7 +6,7 @@ set -eu
 port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$port_dir/../.." && pwd)
 source_dir="$repo_dir/build/ports/firefox/source"
-obj="$repo_dir/build/ports/firefox/obj-aarch64-makos"
+obj=$("$port_dir/build-mode.sh" "$repo_dir")
 sysroot=${MAKOS_SYSROOT:-"$repo_dir/build/ports/firefox/sysroot-runtime"}
 build_python=${FIREFOX_BUILD_PYTHON:-}
 rust_toolchain="$repo_dir/build/ports/rust/toolchain-makos"
@@ -89,6 +89,21 @@ if test -z "${MAKOS_CXX-}" && test -x "$port_dir/toolchain/makos-clang++"; then
 fi
 export MAKOS_CC MAKOS_CXX
 export PATH="$port_dir/toolchain:$PATH"
+clang_resource_dir=$("$MAKOS_CC" --print-resource-dir)
+test -f "$clang_resource_dir/include/arm_neon.h" || {
+    echo "Firefox MakOS build blocked: Clang AArch64 intrinsic headers are missing." >&2
+    echo "Expected: $clang_resource_dir/include/arm_neon.h" >&2
+    echo "Install/stage the matching Clang resource-header package (Debian: libclang-common-19-dev)." >&2
+    exit 1
+}
+intrinsic_probe_dir="$repo_dir/build/ports/firefox/toolchain-preflight"
+mkdir -p "$intrinsic_probe_dir"
+"$MAKOS_CC" --target=aarch64-unknown-makos -ffreestanding -c \
+    "$port_dir/toolchain-neon-probe.c" -o "$intrinsic_probe_dir/neon-probe.o" || {
+    echo "Firefox MakOS build blocked: Clang AArch64 intrinsic headers are unusable." >&2
+    echo "Compiler resource directory: $clang_resource_dir" >&2
+    exit 1
+}
 if test -z "${MAKOS_SYSROOT-}"; then
     FIREFOX_RUNTIME_SYSROOT="$sysroot" "$port_dir/prepare-runtime-sysroot.sh"
 fi
@@ -154,6 +169,11 @@ test -e "$source_dir/widget/makos/MakOSSurface.cpp" || {
 
 export MAKOS_SYSROOT="$sysroot"
 export MOZCONFIG="$port_dir/mozconfig.makos"
+if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
+    # Invalidate again immediately before mach in case a prerequisite command
+    # restored this developer-only object directory from a build cache.
+    rm -f "$obj/makos-build-provenance.json"
+fi
 # Stable default keeps incremental Gecko/Rust artifacts valid across retries.
 # Override for release packaging when a different reproducible build ID is
 # required.
@@ -167,11 +187,17 @@ for argument in "$@"; do
     esac
 done
 if test "$full_build" = false; then
-    echo "MAKOS_FIREFOX_PARTIAL_BUILD_OK targets=$* binary_audit=deferred"
+    echo "MAKOS_FIREFOX_PARTIAL_BUILD_OK targets=$* developer=${MAKOS_FIREFOX_DEVELOPER_BUILD:-0} binary_audit=deferred"
     exit 0
 fi
 FIREFOX_BIN_DIR="$obj/dist/bin" "$port_dir/audit-binary.sh"
+if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
+    rm -f "$obj/makos-build-provenance.json"
+    echo "MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed release_provenance=withheld"
+    exit 0
+fi
 python3 "$repo_dir/scripts/firefox_provenance.py" create-build-stamp \
     --source-dir "$source_dir" \
     --bin-dir "$obj/dist/bin" \
     --output "$obj/makos-build-provenance.json"
+echo "MAKOS_FIREFOX_BUILD_OK developer=0"
