@@ -834,11 +834,20 @@ fn build_aarch64_init() {
 fn generate_aarch64_selfhost_sources(manifest: &Path, output_dir: &Path) {
     let c_path = manifest.join("../user/aarch64_selfhost_probe.c");
     let assembly_path = manifest.join("../user/aarch64_selfhost_probe.S");
+    let production_path = manifest.join("../ports/musl/shared-demo.c");
+    let stdint_path = manifest.join("../sdk/selfhost/include/stdint.h");
     let c_source = fs::read(&c_path).expect("failed to read canonical self-host C source");
     let assembly_source =
         fs::read(&assembly_path).expect("failed to read canonical self-host assembly source");
+    let production_source =
+        fs::read(&production_path).expect("failed to read exact production shared-demo source");
+    let stdint_source =
+        fs::read(&stdint_path).expect("failed to read bounded self-host stdint header");
     assert!(
-        !c_source.is_empty() && !assembly_source.is_empty(),
+        !c_source.is_empty()
+            && !assembly_source.is_empty()
+            && !production_source.is_empty()
+            && !stdint_source.is_empty(),
         "canonical self-host sources must not be empty"
     );
 
@@ -855,6 +864,12 @@ fn generate_aarch64_selfhost_sources(manifest: &Path, output_dir: &Path) {
         "REPOSITORY_SELFHOST_ASM_SOURCE",
         &assembly_source,
     );
+    append_c_byte_array(
+        &mut generated,
+        "PRODUCTION_SHARED_DEMO_SOURCE",
+        &production_source,
+    );
+    append_c_byte_array(&mut generated, "SELFHOST_STDINT_SOURCE", &stdint_source);
     fs::write(
         output_dir.join("aarch64-selfhost-sources.inc"),
         generated,

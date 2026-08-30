@@ -2,6 +2,7 @@
 """Structural guard for guest-native multi-function AArch64 compilation/linking."""
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -384,6 +385,18 @@ for fragment in (
     '"/usr/include/stdint.h"',
     '"/home/user/makos-shared-demo.build"',
     "/home/user/makos-shared-demo.elf",
+    "static int validate_data_object_behavior(",
+    "static int validate_final_data_elf(",
+    "malformed_relocation_pair",
+    "unresolved_data_symbol",
+    "duplicate_data_definition",
+    "out_of_range_data_symbol",
+    "put16(image, 56, (uint16_t)(1 + (rodata_length != 0) +",
+    '"/home/user/makos-shared-const.build"',
+    '"/home/user/makos-shared-mutable.build"',
+    "PRODUCTION_SHARED_DEMO_SOURCE_FNV1A",
+    "SELFHOST_STDINT_SOURCE_FNV1A",
+    "identity=guest-read-exact readonly_write=denied",
 ):
     require(TOOLCHAIN, fragment)
 
@@ -445,6 +458,8 @@ for fragment in (
     'output_dir.join("aarch64-selfhost-reference.o")',
     "append_c_byte_array(",
     "fn fnv1a(",
+    '"PRODUCTION_SHARED_DEMO_SOURCE"',
+    '"SELFHOST_STDINT_SOURCE"',
 ):
     require(BUILD, fragment)
 for fragment in (
@@ -453,15 +468,33 @@ for fragment in (
     'path: b"/usr/include/stdint.h"',
     'data: include_bytes!("../../sdk/selfhost/include/stdint.h")',
     "mode: 0o100444",
+    "node: 242",
+    "inode: 12",
+    "node: 243",
+    "inode: 13",
+    "metadata(\n        file.mode",
     "if writable",
 ):
     require(VFS, fragment)
+system_table = VFS.split("static SYSTEM_FILES: [SystemFile; 5] = [", 1)[1].split("];", 1)[0]
+system_nodes = [int(value) for value in re.findall(r"\n\s+node: (\d+),", system_table)]
+system_inodes = [int(value) for value in re.findall(r"\n\s+inode: (\d+),", system_table)]
+if len(system_nodes) != 5 or len(system_nodes) != len(set(system_nodes)):
+    raise AssertionError("AArch64 system-file VFS nodes are not unique")
+if len(system_inodes) != 5 or len(system_inodes) != len(set(system_inodes)):
+    raise AssertionError("AArch64 system-file VFS inodes are not unique")
+if set(system_nodes) & {244, 245, 246} or set(system_inodes) & {9, 10, 11}:
+    raise AssertionError("self-host source VFS identities overlap reserved devices")
 for fragment in (
     '#include "aarch64-selfhost-sources.inc"',
     "REPOSITORY_SELFHOST_C_SOURCE",
     "REPOSITORY_SELFHOST_ASM_SOURCE",
     "REPOSITORY_SELFHOST_C_SOURCE_FNV1A",
     "REPOSITORY_SELFHOST_ASM_SOURCE_FNV1A",
+    "PRODUCTION_SHARED_DEMO_SOURCE_LENGTH",
+    "PRODUCTION_SHARED_DEMO_SOURCE_FNV1A",
+    "SELFHOST_STDINT_SOURCE_LENGTH",
+    "SELFHOST_STDINT_SOURCE_FNV1A",
     "MAKOS_AARCH64_REPOSITORY_SOURCE_OK",
     '"/home/user/makos-repo-probe.build"',
     '"/home/user/makos-repo-probe.c"',
@@ -591,7 +624,7 @@ require(FOCUSED_RUNTIME, "GLOBAL_DATA_WARM_MARKER")
 require(FOCUSED_RUNTIME, "GLOBAL_DATA_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "GLOBAL_DATA_RUN_MARKER")
 require(FOCUSED_RUNTIME, "TOOLCHAIN_SMP_MARKER")
-require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 19")
+require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 21")
 require(FOCUSED_RUNTIME, "def validate_toolchain_smp(")
 require(FOCUSED_RUNTIME, "expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements")
 require(FOCUSED_RUNTIME, "toolchain placement was not least-loaded")
@@ -620,13 +653,18 @@ require(FOCUSED_RUNTIME, "makbuild /home/user/makos-repo-probe.build")
 require(FOCUSED_RUNTIME, "run makos-repo-probe.elf")
 require(FOCUSED_RUNTIME, "makbuild /home/user/makos-shared-demo.build")
 require(FOCUSED_RUNTIME, "run makos-shared-demo.elf")
-require(FOCUSED_RUNTIME, "cli_builds=18")
+require(FOCUSED_RUNTIME, "makbuild /home/user/makos-shared-const.build")
+require(FOCUSED_RUNTIME, "run makos-shared-const.elf")
+require(FOCUSED_RUNTIME, "makbuild /home/user/makos-shared-mutable.build")
+require(FOCUSED_RUNTIME, "run makos-shared-mutable.elf")
+require(FOCUSED_RUNTIME, "cli_builds=20")
 require(FOCUSED_RUNTIME, "toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe")
 require(FOCUSED_RUNTIME, "console_gpu_handoff=ap-defer,cpu0-compose")
 require(FOCUSED_RUNTIME, "owner_composes == 0")
 require(FOCUSED_RUNTIME, "ap_deferrals == 0")
-require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2,3,3")
+require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2,3,2,2,3")
 require(FOCUSED_RUNTIME, "global-data-cold:0/3,global-data-warm:3/0")
+require(FOCUSED_RUNTIME, "const-only-cold:0/2,mutable-only-cold:0/2")
 require(FOCUSED_RUNTIME, "nested-cold:0/3,nested-warm:3/0")
 require(FOCUSED_RUNTIME, "validate_nested_build_output")
 require(FOCUSED_RUNTIME, "linked_bytes <= 512")

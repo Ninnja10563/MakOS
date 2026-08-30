@@ -4174,10 +4174,15 @@ static size_t emit_elf_data(volatile uint8_t image[IMAGE_CAPACITY],
                             size_t entry_offset) {
     static const char provenance[] =
         "MakOS guest-native ET_REL data linker output\n";
-    size_t provenance_offset = align_up(rodata_length, 8);
-    size_t rodata_file_length = provenance_offset + sizeof(provenance) - 1;
+    size_t provenance_offset = rodata_length ? align_up(rodata_length, 8) : 0;
+    size_t rodata_file_length = rodata_length
+                                    ? provenance_offset + sizeof(provenance) - 1
+                                    : 0;
+    size_t next_file_offset = rodata_length ? RODATA_FILE_OFFSET
+                                            : WRITABLE_FILE_OFFSET;
     if (!code_length || entry_offset >= code_length ||
-        CODE_OFFSET + code_length > RODATA_FILE_OFFSET ||
+        (!rodata_length && !data_length) ||
+        CODE_OFFSET + code_length > next_file_offset ||
         rodata_file_length > WRITABLE_FILE_OFFSET - RODATA_FILE_OFFSET ||
         data_length > IMAGE_CAPACITY - WRITABLE_FILE_OFFSET)
         return 0;
@@ -4189,7 +4194,8 @@ static size_t emit_elf_data(volatile uint8_t image[IMAGE_CAPACITY],
     put64(image, 32, ELF_HEADER_SIZE);
     put16(image, 52, ELF_HEADER_SIZE);
     put16(image, 54, PROGRAM_HEADER_SIZE);
-    put16(image, 56, 3);
+    put16(image, 56, (uint16_t)(1 + (rodata_length != 0) +
+                                (data_length != 0)));
     size_t first = ELF_HEADER_SIZE;
     put32(image, first, 1); put32(image, first + 4, 5);
     put64(image, first + 8, 0);
@@ -4198,28 +4204,35 @@ static size_t emit_elf_data(volatile uint8_t image[IMAGE_CAPACITY],
     put64(image, first + 32, CODE_OFFSET + code_length);
     put64(image, first + 40, CODE_OFFSET + code_length);
     put64(image, first + 48, 1);
-    size_t second = first + PROGRAM_HEADER_SIZE;
-    put32(image, second, 1); put32(image, second + 4, 4);
-    put64(image, second + 8, RODATA_FILE_OFFSET);
-    put64(image, second + 16, USER_BASE + RODATA_VIRTUAL_OFFSET);
-    put64(image, second + 24, USER_BASE + RODATA_VIRTUAL_OFFSET);
-    put64(image, second + 32, rodata_file_length);
-    put64(image, second + 40, rodata_file_length);
-    put64(image, second + 48, 1);
-    size_t third = second + PROGRAM_HEADER_SIZE;
-    put32(image, third, 1); put32(image, third + 4, 6);
-    put64(image, third + 8, WRITABLE_FILE_OFFSET);
-    put64(image, third + 16, USER_BASE + WRITABLE_VIRTUAL_OFFSET);
-    put64(image, third + 24, USER_BASE + WRITABLE_VIRTUAL_OFFSET);
-    put64(image, third + 32, data_length);
-    put64(image, third + 40, data_length);
-    put64(image, third + 48, 1);
+    size_t next_header = first + PROGRAM_HEADER_SIZE;
+    if (rodata_length) {
+        put32(image, next_header, 1); put32(image, next_header + 4, 4);
+        put64(image, next_header + 8, RODATA_FILE_OFFSET);
+        put64(image, next_header + 16, USER_BASE + RODATA_VIRTUAL_OFFSET);
+        put64(image, next_header + 24, USER_BASE + RODATA_VIRTUAL_OFFSET);
+        put64(image, next_header + 32, rodata_file_length);
+        put64(image, next_header + 40, rodata_file_length);
+        put64(image, next_header + 48, 1);
+        next_header += PROGRAM_HEADER_SIZE;
+    }
+    if (data_length) {
+        put32(image, next_header, 1); put32(image, next_header + 4, 6);
+        put64(image, next_header + 8, WRITABLE_FILE_OFFSET);
+        put64(image, next_header + 16, USER_BASE + WRITABLE_VIRTUAL_OFFSET);
+        put64(image, next_header + 24, USER_BASE + WRITABLE_VIRTUAL_OFFSET);
+        put64(image, next_header + 32, data_length);
+        put64(image, next_header + 40, data_length);
+        put64(image, next_header + 48, 1);
+    }
     copy_bytes(image + CODE_OFFSET, code, code_length);
-    copy_bytes(image + RODATA_FILE_OFFSET, rodata, rodata_length);
-    copy_bytes(image + RODATA_FILE_OFFSET + provenance_offset,
-               (const uint8_t *)provenance, sizeof(provenance) - 1);
+    if (rodata_length) {
+        copy_bytes(image + RODATA_FILE_OFFSET, rodata, rodata_length);
+        copy_bytes(image + RODATA_FILE_OFFSET + provenance_offset,
+                   (const uint8_t *)provenance, sizeof(provenance) - 1);
+    }
     copy_bytes(image + WRITABLE_FILE_OFFSET, data, data_length);
-    return WRITABLE_FILE_OFFSET + data_length;
+    return data_length ? WRITABLE_FILE_OFFSET + data_length
+                       : RODATA_FILE_OFFSET + rodata_file_length;
 }
 
 static uint64_t build_hash(const uint8_t *bytes, size_t count) {
@@ -4318,6 +4331,190 @@ static int write_build_state(
     return write_file(path, path_length, state, sizeof(state));
 }
 
+static int validate_final_data_elf(const uint8_t *image, size_t image_length,
+                                   size_t rodata_length,
+                                   size_t data_length) {
+    size_t expected = 1 + (rodata_length != 0) + (data_length != 0);
+    if (image_length > IMAGE_CAPACITY || get16(image, 16) != 2 ||
+        get16(image, 18) != 183 || get16(image, 56) != expected ||
+        get64(image, 32) != ELF_HEADER_SIZE)
+        return 0;
+    size_t header = ELF_HEADER_SIZE;
+    uint32_t expected_flags[3] = {5, 4, 6};
+    size_t flag_index = 0;
+    uint64_t previous_end = 0;
+    for (size_t index = 0; index < expected; ++index) {
+        uint32_t flags = get32(image, header + 4);
+        if (index == 1 && !rodata_length) ++flag_index;
+        uint64_t offset = get64(image, header + 8);
+        uint64_t virtual_address = get64(image, header + 16);
+        uint64_t file_size = get64(image, header + 32);
+        uint64_t memory_size = get64(image, header + 40);
+        uint64_t expected_offset = flags == 5 ? 0
+                                   : flags == 4 ? RODATA_FILE_OFFSET
+                                                : WRITABLE_FILE_OFFSET;
+        uint64_t expected_virtual = flags == 5
+                                        ? USER_BASE
+                                        : flags == 4
+                                              ? USER_BASE + RODATA_VIRTUAL_OFFSET
+                                              : USER_BASE + WRITABLE_VIRTUAL_OFFSET;
+        if (get32(image, header) != 1 || flags != expected_flags[flag_index] ||
+            offset != expected_offset || virtual_address != expected_virtual ||
+            !file_size || file_size != memory_size ||
+            offset > image_length || file_size > image_length - offset ||
+            (index && virtual_address < previous_end) ||
+            (flags & 3) == 3)
+            return 0;
+        previous_end = virtual_address + memory_size;
+        ++flag_index;
+        header += PROGRAM_HEADER_SIZE;
+    }
+    return 1;
+}
+
+static int validate_data_object_behavior(
+    const uint8_t *const objects[MAX_LINK_OBJECTS],
+    const size_t object_lengths[MAX_LINK_OBJECTS], size_t object_count,
+    const uint8_t *image, size_t image_length, size_t rodata_length,
+    size_t data_length, const char *entry_name) {
+    if (object_count < 3 || !rodata_length || !data_length ||
+        !validate_final_data_elf(image, image_length, rodata_length,
+                                 data_length))
+        return 0;
+    size_t function_symbols = 0, object_symbols = 0;
+    size_t page_relocations = 0, low_relocations = 0;
+    size_t assembly_object = MAX_LINK_OBJECTS;
+    size_t rodata_object = MAX_LINK_OBJECTS;
+    size_t data_object = MAX_LINK_OBJECTS;
+    for (size_t object = 0; object < object_count; ++object) {
+        struct object_view view = {0};
+        if (!parse_object(objects[object], object_lengths[object], &view) ||
+            !validate_symbols(&view) || !view.data_schema)
+            return 0;
+        if (view.rodata_length) rodata_object = object;
+        if (view.data_length) data_object = object;
+        for (size_t symbol_index = 1;
+             symbol_index < view.symbol_count; ++symbol_index) {
+            size_t symbol_entry = view.symbol_offset +
+                                  symbol_index * SYMBOL_SIZE;
+            if (view.bytes[symbol_entry + 4] == 0x11 &&
+                get16(view.bytes, symbol_entry + 6))
+                ++object_symbols;
+            if (view.bytes[symbol_entry + 4] == 0x12 &&
+                get16(view.bytes, symbol_entry + 6) == 1)
+                ++function_symbols;
+        }
+        for (size_t relocation_index = 0;
+             relocation_index < view.rela_count; ++relocation_index) {
+            size_t relocation = view.rela_offset +
+                                relocation_index * RELA_SIZE;
+            uint32_t type = (uint32_t)get64(view.bytes, relocation + 8);
+            page_relocations += type == R_AARCH64_ADR_PREL_PG_HI21;
+            low_relocations += type == R_AARCH64_ADD_ABS_LO12_NC;
+        }
+        if (view.rela_count >= 2 && !view.rodata_length && !view.data_length)
+            assembly_object = object;
+    }
+    if (function_symbols < 3 || object_symbols < 2 || page_relocations < 2 ||
+        page_relocations != low_relocations ||
+        assembly_object == MAX_LINK_OBJECTS ||
+        rodata_object == MAX_LINK_OBJECTS || data_object == MAX_LINK_OBJECTS)
+        return 0;
+    uint8_t corrupt[OBJECT_CAPACITY] = {0};
+    copy_bytes(corrupt, objects[assembly_object],
+               object_lengths[assembly_object]);
+    struct object_view corrupt_view = {0};
+    if (!parse_object(corrupt, object_lengths[assembly_object],
+                      &corrupt_view) || corrupt_view.rela_count < 2)
+        return 0;
+    size_t pair = corrupt_view.rela_offset;
+    while (pair < corrupt_view.rela_offset +
+                      corrupt_view.rela_count * RELA_SIZE &&
+           (uint32_t)get64(corrupt, pair + 8) !=
+               R_AARCH64_ADR_PREL_PG_HI21)
+        pair += RELA_SIZE;
+    if (pair + RELA_SIZE >= corrupt_view.rela_offset +
+                                    corrupt_view.rela_count * RELA_SIZE)
+        return 0;
+    put32(corrupt, pair + RELA_SIZE + 8, R_AARCH64_CALL26);
+    struct object_view rejected = {0};
+    int malformed_relocation_pair =
+        parse_object(corrupt, object_lengths[assembly_object], &rejected) &&
+        validate_symbols(&rejected);
+    if (malformed_relocation_pair) return 0;
+
+    const uint8_t *unresolved_objects[MAX_LINK_OBJECTS] = {0};
+    size_t unresolved_lengths[MAX_LINK_OBJECTS] = {0};
+    for (size_t object = 0; object < object_count; ++object) {
+        unresolved_objects[object] = objects[object];
+        unresolved_lengths[object] = object_lengths[object];
+    }
+    copy_bytes(corrupt, objects[data_object], object_lengths[data_object]);
+    if (!parse_object(corrupt, object_lengths[data_object], &corrupt_view))
+        return 0;
+    size_t unresolved_symbol = 1;
+    while (unresolved_symbol < corrupt_view.symbol_count) {
+        size_t candidate = corrupt_view.symbol_offset +
+                           unresolved_symbol * SYMBOL_SIZE;
+        if (corrupt[candidate + 4] == 0x11 &&
+            get16(corrupt, candidate + 6) == 4)
+            break;
+        ++unresolved_symbol;
+    }
+    if (unresolved_symbol == corrupt_view.symbol_count) return 0;
+    size_t unresolved_entry = corrupt_view.symbol_offset +
+                              unresolved_symbol * SYMBOL_SIZE;
+    put16(corrupt, unresolved_entry + 6, 0);
+    put64(corrupt, unresolved_entry + 8, 0);
+    put64(corrupt, unresolved_entry + 16, 0);
+    unresolved_objects[data_object] = corrupt;
+    uint8_t text[LINKED_CODE_CAPACITY] = {0};
+    uint8_t rodata[LINKED_RODATA_CAPACITY] = {0};
+    uint8_t data[LINKED_DATA_CAPACITY] = {0};
+    size_t text_length = 0, ro_length = 0, rw_length = 0, entry = 0;
+    int unresolved_data_symbol = link_objects_data(
+        unresolved_objects, unresolved_lengths, object_count,
+        text, sizeof(text), &text_length, rodata, sizeof(rodata), &ro_length,
+        data, sizeof(data), &rw_length, entry_name, &entry) != 0;
+    if (unresolved_data_symbol) return 0;
+
+    const uint8_t *duplicate_objects[MAX_LINK_OBJECTS] = {0};
+    size_t duplicate_lengths[MAX_LINK_OBJECTS] = {0};
+    if (object_count == MAX_LINK_OBJECTS) return 0;
+    for (size_t object = 0; object < object_count; ++object) {
+        duplicate_objects[object] = objects[object];
+        duplicate_lengths[object] = object_lengths[object];
+    }
+    duplicate_objects[object_count] = objects[data_object];
+    duplicate_lengths[object_count] = object_lengths[data_object];
+    int duplicate_data_definition = link_objects_data(
+        duplicate_objects, duplicate_lengths, object_count + 1,
+        text, sizeof(text), &text_length, rodata, sizeof(rodata), &ro_length,
+        data, sizeof(data), &rw_length, entry_name, &entry) != 0;
+    if (duplicate_data_definition) return 0;
+
+    copy_bytes(corrupt, objects[data_object], object_lengths[data_object]);
+    if (!parse_object(corrupt, object_lengths[data_object], &corrupt_view))
+        return 0;
+    size_t defined_object = 1;
+    while (defined_object < corrupt_view.symbol_count) {
+        size_t symbol_entry = corrupt_view.symbol_offset +
+                              defined_object * SYMBOL_SIZE;
+        if (corrupt[symbol_entry + 4] == 0x11 &&
+            get16(corrupt, symbol_entry + 6) == 4)
+            break;
+        ++defined_object;
+    }
+    if (defined_object == corrupt_view.symbol_count) return 0;
+    size_t symbol_entry = corrupt_view.symbol_offset +
+                          defined_object * SYMBOL_SIZE;
+    put64(corrupt, symbol_entry + 8, corrupt_view.data_length);
+    int out_of_range_data_symbol =
+        parse_object(corrupt, object_lengths[data_object], &rejected) &&
+        validate_symbols(&rejected);
+    return !out_of_range_data_symbol;
+}
+
 static size_t compile_build_object(const struct build_manifest *build,
                                    size_t input, const uint8_t *source,
                                    size_t source_length,
@@ -4372,14 +4569,17 @@ static int incremental_build(
     size_t manifest_path_length, const uint8_t *manifest,
     size_t manifest_length, const uint8_t *const sources[MAX_BUILD_INPUTS],
     const size_t source_lengths[MAX_BUILD_INPUTS], size_t *cache_hits,
-    size_t *cache_misses, size_t *linked_bytes, size_t *image_bytes) {
+    size_t *cache_misses, size_t *linked_bytes, size_t *image_bytes,
+    int *data_evidence) {
     char state_path[MAX_BUILD_PATH_BYTES + BUILD_STATE_SUFFIX_BYTES] = {0};
     size_t state_path_length = 0;
     if (!cache_hits || !cache_misses || !linked_bytes || !image_bytes ||
+        !data_evidence ||
         !build_state_path(manifest_path, manifest_path_length, state_path,
                           &state_path_length) ||
         !build_state_path_safe(build, state_path, state_path_length))
         return 0;
+    *data_evidence = 0;
 
     uint64_t saved_source_hashes[MAX_BUILD_INPUTS] = {0};
     uint64_t saved_object_hashes[MAX_BUILD_INPUTS] = {0};
@@ -4443,6 +4643,17 @@ static int incremental_build(
                                               entry_offset)
                               : emit_elf(image, linked_code, linked_length,
                                          entry_offset);
+    static const char shared_manifest[] =
+        "/home/user/makos-shared-demo.build";
+    if (same_name(manifest_path, manifest_path_length,
+                  shared_manifest, sizeof(shared_manifest) - 1)) {
+        if (!validate_data_object_behavior(
+                objects, object_lengths, build->input_count,
+                (const uint8_t *)image, image_length, rodata_length,
+                data_length, build->entry))
+            return 0;
+        *data_evidence = 1;
+    }
     if (!linked_length || !image_length ||
         !write_file(build->output_path, build->output_path_length,
                     (const uint8_t *)image, image_length) ||
@@ -4537,15 +4748,61 @@ static void write_repository_source_marker(void) {
     write_text(" identity=build-generated-exact host_reference=compiled\n");
 }
 
-static void write_global_data_marker(void) {
+static int exact_read_only_system_file(
+    const char *path, size_t path_length, const uint8_t *expected,
+    size_t expected_length, uint64_t expected_hash) {
+    uint8_t bytes[512] = {0};
+    size_t byte_count = read_file(path, path_length, bytes, sizeof(bytes));
+    if (byte_count != expected_length ||
+        build_hash(bytes, byte_count) != expected_hash)
+        return 0;
+    for (size_t index = 0; index < byte_count; ++index)
+        if (bytes[index] != expected[index]) return 0;
+    uint64_t writable = syscall4(SYS_OPEN, (uintptr_t)path, path_length, 1, 0);
+    if (writable != UINT64_MAX) {
+        (void)syscall4(SYS_CLOSE, writable, 0, 0, 0);
+        return 0;
+    }
+    if (syscall4(SYS_UNLINK, (uintptr_t)path, path_length, 0, 0) == 1 ||
+        syscall4(SYS_CREATE, (uintptr_t)path, path_length, 0, 0) == 1)
+        return 0;
+    return 1;
+}
+
+static int write_global_data_marker(void) {
+    static const char production_path[] =
+        "/usr/src/makos/ports/musl/shared-demo.c";
+    static const char stdint_path[] = "/usr/include/stdint.h";
+    if (!exact_read_only_system_file(
+            production_path, sizeof(production_path) - 1,
+            PRODUCTION_SHARED_DEMO_SOURCE,
+            PRODUCTION_SHARED_DEMO_SOURCE_LENGTH,
+            PRODUCTION_SHARED_DEMO_SOURCE_FNV1A) ||
+        !exact_read_only_system_file(
+            stdint_path, sizeof(stdint_path) - 1,
+            SELFHOST_STDINT_SOURCE, SELFHOST_STDINT_SOURCE_LENGTH,
+            SELFHOST_STDINT_SOURCE_FNV1A))
+        return 0;
     write_text(
         "MAKOS_AARCH64_C_GLOBAL_DATA_OK "
         "source=/usr/src/makos/ports/musl/shared-demo.c "
-        "header=/usr/include/stdint.h sections=.text,.rodata,.data "
+        "source_bytes=");
+    write_size_decimal(PRODUCTION_SHARED_DEMO_SOURCE_LENGTH);
+    write_text(" source_fnv1a=");
+    write_hex64(PRODUCTION_SHARED_DEMO_SOURCE_FNV1A);
+    write_text(" header=/usr/include/stdint.h header_bytes=");
+    write_size_decimal(SELFHOST_STDINT_SOURCE_LENGTH);
+    write_text(" header_fnv1a=");
+    write_hex64(SELFHOST_STDINT_SOURCE_FNV1A);
+    write_text(
+        " identity=guest-read-exact readonly_write=denied "
+        "readonly_truncate=denied sections=.text,.rodata,.data "
         "symbols=STT_FUNC,STT_OBJECT "
         "relocations=R_AARCH64_ADR_PREL_PG_HI21,"
         "R_AARCH64_ADD_ABS_LO12_NC segments=R-X,R--,RW-NX "
-        "qualification=build-complete-runtime-pending\n");
+        "negative=relocation-pair,unresolved-data,duplicate-data,"
+        "out-of-range-data qualification=build-complete-runtime-pending\n");
+    return 1;
 }
 
 static void fail(uint64_t status) {
@@ -4566,10 +4823,18 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "/home/user/generated-nested.build";
     static const char shared_manifest_path[] =
         "/home/user/makos-shared-demo.build";
+    static const char shared_const_manifest_path[] =
+        "/home/user/makos-shared-const.build";
+    static const char shared_mutable_manifest_path[] =
+        "/home/user/makos-shared-mutable.build";
     static const char shared_asm_path[] =
         "/home/user/makos-shared-demo.s";
     static const char shared_mutable_path[] =
         "/home/user/makos-shared-mutable.c";
+    static const char shared_const_asm_path[] =
+        "/home/user/makos-shared-const.s";
+    static const char shared_mutable_asm_path[] =
+        "/home/user/makos-shared-mutable.s";
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
     static const char library_source_path[] = "/home/user/generated-library.c";
@@ -4630,6 +4895,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "c /usr/src/makos/ports/musl/shared-demo.c /home/user/makos-shared-demo-production.o\n"
         "c /home/user/makos-shared-mutable.c /home/user/makos-shared-demo-mutable.o\n"
         "link /home/user/makos-shared-demo.elf _start\n";
+    static const char shared_const_manifest_source[] =
+        "MAKBUILD1\n"
+        "asm /home/user/makos-shared-const.s /home/user/makos-shared-const-main.o\n"
+        "c /usr/src/makos/ports/musl/shared-demo.c /home/user/makos-shared-const-production.o\n"
+        "link /home/user/makos-shared-const.elf _start\n";
+    static const char shared_mutable_manifest_source[] =
+        "MAKBUILD1\n"
+        "asm /home/user/makos-shared-mutable.s /home/user/makos-shared-mutable-main.o\n"
+        "c /home/user/makos-shared-mutable.c /home/user/makos-shared-mutable-c.o\n"
+        "link /home/user/makos-shared-mutable.elf _start\n";
     static const char malformed_build_header[] =
         "MAKBUILD0\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -4784,6 +5059,41 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char shared_mutable_source[] =
         "int makos_counter = 1;\n"
         "int read_counter(int value) { return makos_counter + value; }\n";
+    static const char shared_const_asm_source[] =
+        "_start:\n"
+        "mov x0, #20\n"
+        "mov x1, #22\n"
+        "bl makos_shared_add\n"
+        "cmp x0, #42\n"
+        "b.ne const_fail\n"
+        "adrp x3, makos_shared_name\n"
+        "add x3, x3, :lo12:makos_shared_name\n"
+        "ldrb w4, [x3]\n"
+        "cmp x4, #108\n"
+        "b.ne const_fail\n"
+        "mov x0, #42\n"
+        "mov x8, #5\n"
+        "svc #0\n"
+        "const_fail:\n"
+        "mov x0, #86\n"
+        "mov x8, #5\n"
+        "svc #0\n";
+    static const char shared_mutable_asm_source[] =
+        "_start:\n"
+        "adrp x3, makos_counter\n"
+        "add x3, x3, :lo12:makos_counter\n"
+        "mov x4, #40\n"
+        "str w4, [x3]\n"
+        "mov x0, #2\n"
+        "bl read_counter\n"
+        "cmp x0, #42\n"
+        "b.ne mutable_fail\n"
+        "mov x8, #5\n"
+        "svc #0\n"
+        "mutable_fail:\n"
+        "mov x0, #86\n"
+        "mov x8, #5\n"
+        "svc #0\n";
     static const char header_main_source[] =
         "_start:\n"
         "mov x0, #40\n"
@@ -5056,12 +5366,28 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                      sizeof(shared_manifest_path) - 1,
                      (const uint8_t *)shared_manifest_source,
                      sizeof(shared_manifest_source) - 1) ||
+         !write_file(shared_const_manifest_path,
+                     sizeof(shared_const_manifest_path) - 1,
+                     (const uint8_t *)shared_const_manifest_source,
+                     sizeof(shared_const_manifest_source) - 1) ||
+         !write_file(shared_mutable_manifest_path,
+                     sizeof(shared_mutable_manifest_path) - 1,
+                     (const uint8_t *)shared_mutable_manifest_source,
+                     sizeof(shared_mutable_manifest_source) - 1) ||
          !write_file(shared_asm_path, sizeof(shared_asm_path) - 1,
                      (const uint8_t *)shared_asm_source,
                      sizeof(shared_asm_source) - 1) ||
          !write_file(shared_mutable_path, sizeof(shared_mutable_path) - 1,
                      (const uint8_t *)shared_mutable_source,
                      sizeof(shared_mutable_source) - 1) ||
+         !write_file(shared_const_asm_path,
+                     sizeof(shared_const_asm_path) - 1,
+                     (const uint8_t *)shared_const_asm_source,
+                     sizeof(shared_const_asm_source) - 1) ||
+         !write_file(shared_mutable_asm_path,
+                     sizeof(shared_mutable_asm_path) - 1,
+                     (const uint8_t *)shared_mutable_asm_source,
+                     sizeof(shared_mutable_asm_source) - 1) ||
          !write_file(repository_asm_path,
                      sizeof(repository_asm_path) - 1,
                      REPOSITORY_SELFHOST_ASM_SOURCE,
@@ -5341,11 +5667,13 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     if (build_mode) {
         size_t cache_hits = 0, cache_misses = 0;
         size_t linked_bytes = 0, image_bytes = 0;
+        int data_evidence = 0;
         if (!incremental_build(&build, build_manifest_path,
                                build_manifest_path_length, manifest_input,
                                manifest_length, build_sources,
                                build_source_lengths, &cache_hits,
-                               &cache_misses, &linked_bytes, &image_bytes) ||
+                               &cache_misses, &linked_bytes, &image_bytes,
+                               &data_evidence) ||
             cache_hits + cache_misses != build.input_count)
             fail(91);
         write_build_marker("build", build_manifest_path,
@@ -5359,8 +5687,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                                       linked_bytes, image_bytes);
         if (same_name(build_manifest_path, build_manifest_path_length,
                       shared_manifest_path,
-                      sizeof(shared_manifest_path) - 1))
-            write_global_data_marker();
+                      sizeof(shared_manifest_path) - 1)) {
+            if (!data_evidence) fail(88);
+            if (!write_global_data_marker()) fail(88);
+        }
         for (size_t input = 0; input < build.input_count; ++input)
             if (dependencies[input].count)
                 write_header_marker(&build, input, &dependencies[input]);

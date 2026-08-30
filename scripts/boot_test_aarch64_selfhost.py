@@ -175,9 +175,19 @@ REPOSITORY_RUN_MARKER = (
     b"lifecycle=spawn,run,exit,wait,reap"
 )
 GLOBAL_DATA_MARKER = (
-    b"MAKOS_AARCH64_C_GLOBAL_DATA_OK "
-    b"source=/usr/src/makos/ports/musl/shared-demo.c"
-)
+    "MAKOS_AARCH64_C_GLOBAL_DATA_OK "
+    "source=/usr/src/makos/ports/musl/shared-demo.c "
+    f"source_bytes={len(PRODUCTION_C_SOURCE)} "
+    f"source_fnv1a={fnv1a(PRODUCTION_C_SOURCE):016x} "
+    "header=/usr/include/stdint.h "
+    f"header_bytes={len(SELFHOST_STDINT_SOURCE)} "
+    f"header_fnv1a={fnv1a(SELFHOST_STDINT_SOURCE):016x} "
+    "identity=guest-read-exact readonly_write=denied readonly_truncate=denied "
+    "sections=.text,.rodata,.data symbols=STT_FUNC,STT_OBJECT "
+    "relocations=R_AARCH64_ADR_PREL_PG_HI21,R_AARCH64_ADD_ABS_LO12_NC "
+    "segments=R-X,R--,RW-NX "
+    "negative=relocation-pair,unresolved-data,duplicate-data,out-of-range-data"
+).encode()
 GLOBAL_DATA_COLD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
     b"manifest=/home/user/makos-shared-demo.build startup=sysv argc=2 envc=1 "
@@ -198,6 +208,36 @@ GLOBAL_DATA_CLI_REAP_MARKER = (
 GLOBAL_DATA_RUN_MARKER = (
     b"MAKOS_AARCH64_RUN_OK path=/home/user/makos-shared-demo.elf status=42 "
     b"lifecycle=spawn,run,exit,wait,reap"
+)
+CONST_ONLY_COLD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/makos-shared-const.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=0 cache_misses=2 "
+    b"state_committed=1 status=42"
+)
+CONST_ONLY_RUN_MARKER = (
+    b"MAKOS_AARCH64_RUN_OK path=/home/user/makos-shared-const.elf status=42 "
+    b"lifecycle=spawn,run,exit,wait,reap"
+)
+CONST_ONLY_CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK "
+    b"manifest=/home/user/makos-shared-const.build source=existing-makfs "
+    b"seeded=0 startup=sysv status=42"
+)
+MUTABLE_ONLY_COLD_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
+    b"manifest=/home/user/makos-shared-mutable.build startup=sysv argc=2 envc=1 "
+    b"seeded=0 cache=makstate-v2 build_inputs=2 cache_hits=0 cache_misses=2 "
+    b"state_committed=1 status=42"
+)
+MUTABLE_ONLY_RUN_MARKER = (
+    b"MAKOS_AARCH64_RUN_OK path=/home/user/makos-shared-mutable.elf status=42 "
+    b"lifecycle=spawn,run,exit,wait,reap"
+)
+MUTABLE_ONLY_CLI_REAP_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_CLI_OK "
+    b"manifest=/home/user/makos-shared-mutable.build source=existing-makfs "
+    b"seeded=0 startup=sysv status=42"
 )
 NESTED_COLD_MARKER = (
     b"MAKOS_AARCH64_MAKBUILD_OK mode=build "
@@ -225,7 +265,7 @@ NESTED_RUN_MARKER = (
     b"lifecycle=spawn,run,exit,wait,reap"
 )
 TOOLCHAIN_SMP_MARKER = b"MAKOS_AARCH64_TOOLCHAIN_SMP_OK "
-TOOLCHAIN_PROCESS_COUNT = 19
+TOOLCHAIN_PROCESS_COUNT = 21
 SIX_FUNCTION_MARKER = (
     b"MAKOS_AARCH64_C_SIX_FUNCTION_OK functions=6 calls=5 "
     b"relocations=R_AARCH64_CALL26:5 object=elf64-et-rel linked=1 "
@@ -809,6 +849,32 @@ def main() -> int:
                     selector, process, output, GLOBAL_DATA_RUN_MARKER, 60
                 )
                 common.send_command(
+                    stream, "makbuild /home/user/makos-shared-const.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, CONST_ONLY_COLD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, CONST_ONLY_CLI_REAP_MARKER, 60
+                )
+                common.send_command(stream, "run makos-shared-const.elf")
+                common.wait_for_output(
+                    selector, process, output, CONST_ONLY_RUN_MARKER, 60
+                )
+                common.send_command(
+                    stream, "makbuild /home/user/makos-shared-mutable.build"
+                )
+                common.wait_for_output(
+                    selector, process, output, MUTABLE_ONLY_COLD_MARKER, 60
+                )
+                common.wait_for_output(
+                    selector, process, output, MUTABLE_ONLY_CLI_REAP_MARKER, 60
+                )
+                common.send_command(stream, "run makos-shared-mutable.elf")
+                common.wait_for_output(
+                    selector, process, output, MUTABLE_ONLY_RUN_MARKER, 60
+                )
+                common.send_command(
                     stream, "makbuild /home/user/generated-nested.build"
                 )
                 common.wait_for_output(
@@ -870,10 +936,10 @@ def main() -> int:
         "compiler=guest-native assembler=guest-native objects=4 "
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
-        "toolchain_startup=sysv manifest_arg=1 cli_builds=18 seeded_modes=fixture,existing "
+        "toolchain_startup=sysv manifest_arg=1 cli_builds=20 seeded_modes=fixture,existing "
         f"toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe placements={toolchain_placements[0]},{toolchain_placements[1]},{toolchain_placements[2]} dispatches={toolchain_dispatches[0]},{toolchain_dispatches[1]},{toolchain_dispatches[2]} processes={TOOLCHAIN_PROCESS_COUNT} migrations={toolchain_migrations} migration_source_mask={toolchain_migration_source_mask:#x} migration_target_mask={toolchain_migration_target_mask:#x} migration_policy=timer-safe-dispatch-imbalance migration_delta=8 migration_evidence_drops=0 caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={toolchain_owner_composes} ap_deferrals={toolchain_ap_deferrals} pending=0 "
-        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2,3,3 invalidations=object,source,state,header "
-        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0,global-data-cold:0/3,global-data-warm:3/0,nested-cold:0/3,nested-warm:3/0 "
+        "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2,3,2,2,3 invalidations=object,source,state,header "
+        "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0,global-data-cold:0/3,global-data-warm:3/0,const-only-cold:0/2,mutable-only-cold:0/2,nested-cold:0/3,nested-warm:3/0 "
         f"nested_build=authenticated-makfs linked_bytes={nested_linked_bytes} linked_capacity=1024 output_bytes=1583 image_capacity=2048 data_offset=1536 control=while-to-if-else execution=42 "
         f"gpu_completion=fast-plus-bounded-recovery delayed_recoveries={gpu_delayed_recoveries} timeouts=0 errors=0 "
         f"repository_source=user/aarch64_selfhost_probe.c,user/aarch64_selfhost_probe.S c_bytes={len(REPOSITORY_C_SOURCE)} asm_bytes={len(REPOSITORY_ASM_SOURCE)} c_fnv1a={fnv1a(REPOSITORY_C_SOURCE):016x} asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} identity=build-generated-exact host_reference=compiled guest_execution=42 "

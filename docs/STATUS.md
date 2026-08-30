@@ -12,12 +12,16 @@ Last updated: 2026-08-30.
   under `/home/user`. Bounded `STT_OBJECT` definitions, `.rodata`/`.data`,
   paired `R_AARCH64_ADR_PREL_PG_HI21` + `R_AARCH64_ADD_ABS_LO12_NC` address
   relocations, cross-object data resolution, and separate R-X/R--/RW-NX load
-  regions are implemented and structurally guarded. The focused gate now
+  regions are implemented. The build success path parses the emitted sections,
+  symbols, relocations, and segments and runs real malformed-pair, unresolved,
+  duplicate, and out-of-range mutated-object rejection checks. The focused gate now
   requires authenticated cold/warm builds, a relocated read from the production
   `libmakosdemo.so` string, `makos_shared_add(20,22) == 42`, mutable-data
-  execution. Its new runtime evidence is still pending; it has not been run in
-  this implementation pass. Fail-closed malformed-pair and unresolved,
-  duplicate, or out-of-range object validation paths are structurally checked.
+  execution plus separate const-only and mutable-only ordinary-loader runs.
+  Its new runtime evidence is still pending; it has not been run in this
+  implementation pass. ET_REL construction has a 4 KiB in-memory work bound,
+  while persisted objects and packed executables retain MakFS's 2 KiB file
+  bound; empty R--/RW segments are omitted.
   This remains bounded and the SDK and
   self-hosting audit rows remain Partial: it is not a general system-header
   implementation, arbitrary initializer/aggregate/TLS support, a self-hosted

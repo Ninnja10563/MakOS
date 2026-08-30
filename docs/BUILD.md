@@ -340,10 +340,19 @@ global addresses use validated paired `R_AARCH64_ADR_PREL_PG_HI21` and
 `R_AARCH64_ADD_ABS_LO12_NC` relocations. The final static ELF separates R-X,
 R--, and RW/NX load regions. Focused runtime requires cold `0/3`, warm `3/0`,
 `makos_shared_add(20,22) == 42`, a relocated read from the production string
-object, and writable data mutation. Structural checks cover the fail-closed malformed-pair,
-unresolved/duplicate/out-of-range object-symbol validation paths. These runtime
+object, and writable data mutation. The build process performs real mutated-object
+negative checks for malformed pairs and unresolved, duplicate, or out-of-range
+data symbols before emitting its success marker. These runtime
 requirements remain pending until the focused gate is actually run; this does
 not claim a self-hosted shared library.
+
+The linker uses a 4 KiB in-memory ET_REL work buffer so section tables and
+relocations can be validated without truncation. Persisted MakFS objects and
+executables still have the filesystem's 2 KiB per-file ceiling; writes fail
+closed when serialized output exceeds it. The packed final ELF uses file
+offsets 0/1024/1536 and distinct virtual pages for R-X/R--/RW-NX mappings.
+Empty read-only or writable regions are omitted rather than serialized as
+zero-sized `PT_LOAD` entries.
 
 Each authenticated compiler/assembler/linker invocation is a real sandboxed
 EL0 process with the distinct `Toolchain` role. Its leader is not pinned to
@@ -355,7 +364,7 @@ the singleton affinity to an idle lower-load AP under the scheduler lock,
 publish the task Ready/unowned, and wake the destination by SGI. The source
 cannot retain ownership and the destination restores GPR/SP/TLS/SIMD state.
 The focused gate validates every placement decision and requires all three APs
-to receive work across 19 toolchain processes. It also validates every
+to receive work across 21 toolchain processes. It also validates every
 migration's measured loads and affinity transition, requires nonzero source
 and destination masks contained in `0xe`, and rejects dropped evidence.
 Console bytes written by an AP
@@ -378,8 +387,8 @@ The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
 broader pointer/lvalue expressions, variable-length or multidimensional
-arrays, aggregates, arbitrary global initializers, tentative/common objects,
-TLS, structs, nested/general blocks beyond that bounded depth-four control
+arrays, aggregates, arbitrary global initializers, internal-linkage `static`
+objects, tentative/common objects, TLS, structs, nested/general blocks beyond that bounded depth-four control
 form, more than six functions or parameters per translation unit, or a
 general object/relocation repertoire. Angle includes are limited to the exact
 bounded `/usr/include/stdint.h`; this is not a general system-header,
@@ -392,8 +401,9 @@ reads the existing MakFS manifest and sources without seeding or overwriting
 them. The deterministic self-host fixture uses a separate `MODE=fixture` startup
 and is the only path that seeds the documented files. The fixture also seeds a
 separate three-input manifest, a two-input quoted-header graph, the exact
-two-input repository-source graph, the read-only production-source graph, and
-a three-input nested-control graph; focused runtime builds all six. The current
+two-input repository-source graph, the three-input read-only production-source
+graph, separate two-input const-only and mutable-only data graphs, and a
+three-input nested-control graph; focused runtime builds all eight. The current
 CLI remains bounded to one leading assembly
 input plus one through five C inputs. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end

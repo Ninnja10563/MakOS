@@ -33,9 +33,9 @@ exact production-source graph. It reads the unchanged
 `/usr/src/makos/ports/musl/shared-demo.c`, resolves its bounded
 `/usr/include/stdint.h`, emits typed object symbols plus `.rodata`/`.data`,
 applies paired AArch64 page/low-12 address relocations, and emits separate
-R-X/R--/RW-NX regions. The focused gate is extended from 17 to 19 Toolchain
-processes and from 16 to 18 CLI builds for authenticated cold/warm production
-builds and normal-loader execution. Do not record Pi or macOS runtime evidence
+R-X/R--/RW-NX regions. The focused gate is extended from 17 to 21 Toolchain
+processes and from 16 to 20 CLI builds for authenticated cold/warm production,
+const-only and mutable-only builds plus ordinary-loader execution. Do not record Pi or macOS runtime evidence
 until those unchanged gates actually complete; SDK/self-hosting remain Partial.
 
 - Implementation baseline `7c01848e9098d8c5f44bd51f542ca06da592e7fe`
@@ -1229,8 +1229,8 @@ until those unchanged gates actually complete; SDK/self-hosting remain Partial.
    while retaining CPU0-exclusive device ownership. Stop any visible QEMU
    through QMP before a focused runtime.
 3. Expand the bounded guest C compiler beyond its current six-function and
-   six-parameter per-translation-unit limits. Six persistent runtime graphs
-   now include the primary four-object graph and a three-object nested-control
+   six-parameter per-translation-unit limits. The staged gate has eight
+   persistent runtime graphs, including the primary four-object graph and a three-object nested-control
    graph whose 564 linked bytes pass the expanded 1,024-byte aggregate bound;
    the build driver accepts two through six inputs. The bounded production
    graph now proves exact read-only `shared-demo.c`, one exact system header,

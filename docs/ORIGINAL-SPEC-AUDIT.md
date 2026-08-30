@@ -125,8 +125,10 @@ global-data or system-header support is superseded by the staged bounded
 increment: exact read-only `ports/musl/shared-demo.c`, the exact bounded
 self-host `/usr/include/stdint.h`, `STT_OBJECT`, `.rodata`/`.data`, paired
 AArch64 ADRP+ADD relocations, cross-object data resolution, and final
-R-X/R--/RW-NX regions are implemented. The extended focused gate requires six
-graphs, 18 CLI builds, and 19 Toolchain processes before new runtime evidence
+R-X/R--/RW-NX regions are implemented. ET_REL construction uses a 4 KiB
+in-memory work buffer but persistent files remain bounded by MakFS's 2 KiB
+limit. The extended focused gate requires eight
+graphs, 20 CLI builds, and 21 Toolchain processes before new runtime evidence
 is recorded. General globals/initializers, aggregates, common objects, TLS,
 general system headers, a self-hosted DSO, and substantial in-guest builds
 remain missing, so both rows stay Partial.
