@@ -236,6 +236,7 @@ unit:
 	python3 scripts/test_cpu_affinity.py
 	python3 scripts/test_aarch64_surface_priority.py
 	python3 scripts/test_aarch64_firefox_interaction.py
+	python3 scripts/test_aarch64_firefox_serial_log.py
 	python3 scripts/test_firefox_provenance.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
 	ports/firefox/test-toolchain.sh
@@ -289,6 +290,7 @@ check:
 	python3 scripts/test_cpu_affinity.py
 	python3 scripts/test_aarch64_surface_priority.py
 	python3 scripts/test_aarch64_firefox_interaction.py
+	python3 scripts/test_aarch64_firefox_serial_log.py
 	python3 scripts/test_firefox_provenance.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
 	ports/firefox/test-toolchain.sh

@@ -144,6 +144,26 @@ def wait_for_new_output(
         )
 
 
+def wait_for_firefox_selection_output(
+    selector: selectors.BaseSelector,
+    process: subprocess.Popen[bytes],
+    output: bytearray,
+    serial_log: str | None,
+) -> None:
+    try:
+        wait_for_new_output(
+            selector,
+            process,
+            output,
+            b"MAKOS_WIDGET_KEY raw=132",
+            180,
+        )
+    except AssertionError:
+        if serial_log:
+            pathlib.Path(serial_log).write_bytes(output)
+        raise
+
+
 def wait_for_output_count(
     selector: selectors.BaseSelector,
     process: subprocess.Popen[bytes],
@@ -1187,12 +1207,11 @@ def main() -> int:
                         click_pointer(stream, 400, 164)
                         selection_started = time.monotonic()
                         send_key(stream, "ctrl-a")
-                        wait_for_new_output(
+                        wait_for_firefox_selection_output(
                             selector,
                             process,
                             output,
-                            b"MAKOS_WIDGET_KEY raw=132",
-                            180,
+                            serial_log,
                         )
                         selection_latency_ms = int(
                             (time.monotonic() - selection_started) * 1000
