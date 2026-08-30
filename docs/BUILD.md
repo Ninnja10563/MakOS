@@ -319,6 +319,32 @@ misses, a warm build with two hits, and `run makos-repo-probe.elf` exiting 42.
 Changing either tracked source changes the generated identity and the runtime
 expectation together; a hard-coded substitute cannot satisfy the gate.
 
+The same gate is now extended to qualify bounded file-scope data against the unchanged
+production source `ports/musl/shared-demo.c`, not a normalized copy. MakOS
+exposes it read-only as `/usr/src/makos/ports/musl/shared-demo.c` and exposes
+the bounded SDK header `sdk/selfhost/include/stdint.h` read-only as
+`/usr/include/stdint.h`. The manifest remains writable under `/home/user`:
+
+```text
+MAKBUILD1
+asm /home/user/makos-shared-demo.s /home/user/makos-shared-demo-main.o
+c /usr/src/makos/ports/musl/shared-demo.c /home/user/makos-shared-demo-production.o
+c /home/user/makos-shared-mutable.c /home/user/makos-shared-demo-mutable.o
+link /home/user/makos-shared-demo.elf _start
+```
+
+The compiler accepts the source's exact `uint64_t`, default-visibility
+attribute, constant string object, and 64-bit addition. Its object contains
+typed function/object symbols plus bounded `.text`, `.rodata`, and `.data`;
+global addresses use validated paired `R_AARCH64_ADR_PREL_PG_HI21` and
+`R_AARCH64_ADD_ABS_LO12_NC` relocations. The final static ELF separates R-X,
+R--, and RW/NX load regions. Focused runtime requires cold `0/3`, warm `3/0`,
+`makos_shared_add(20,22) == 42`, a relocated read from the production string
+object, and writable data mutation. Structural checks cover the fail-closed malformed-pair,
+unresolved/duplicate/out-of-range object-symbol validation paths. These runtime
+requirements remain pending until the focused gate is actually run; this does
+not claim a self-hosted shared library.
+
 Each authenticated compiler/assembler/linker invocation is a real sandboxed
 EL0 process with the distinct `Toolchain` role. Its leader is not pinned to
 CPU0: the kernel snapshots AP1-3 dispatch counts, prefers idle APs, chooses the
@@ -329,7 +355,7 @@ the singleton affinity to an idle lower-load AP under the scheduler lock,
 publish the task Ready/unowned, and wake the destination by SGI. The source
 cannot retain ownership and the destination restores GPR/SP/TLS/SIMD state.
 The focused gate validates every placement decision and requires all three APs
-to receive work across 15 toolchain processes. It also validates every
+to receive work across 19 toolchain processes. It also validates every
 migration's measured loads and affinity transition, requires nonzero source
 and destination masks contained in `0xe`, and rejects dropped evidence.
 Console bytes written by an AP
@@ -351,12 +377,14 @@ general block or nested lexical-scope support.
 The gate is a real but bounded A64 C-compiler/assembler/static-linker seed. It
 has no general pointer arithmetic beyond constant/scalar-variable element
 addition and typed pointer difference, no pointer-provenance analysis or
-broader pointer/lvalue expressions, variable-length/global/multidimensional arrays,
-structs, nested/general blocks beyond that bounded depth-four control form, more than
-six functions or parameters per translation unit, general object
-count/relocation repertoire, a general preprocessor or transitive dependency
-engine, or
-unbounded input graphs. The
+broader pointer/lvalue expressions, variable-length or multidimensional
+arrays, aggregates, arbitrary global initializers, tentative/common objects,
+TLS, structs, nested/general blocks beyond that bounded depth-four control
+form, more than six functions or parameters per translation unit, or a
+general object/relocation repertoire. Angle includes are limited to the exact
+bounded `/usr/include/stdint.h`; this is not a general system-header,
+preprocessor, or transitive dependency engine, and input graphs remain bounded.
+The
 authenticated shell command `makbuild <manifest>` accepts either a name under
 `/home/user/` or an absolute `/home/user/` path. The kernel validates and copies
 that path into the sandboxed toolchain's child-owned SysV `argv[1]`; build mode
@@ -364,8 +392,9 @@ reads the existing MakFS manifest and sources without seeding or overwriting
 them. The deterministic self-host fixture uses a separate `MODE=fixture` startup
 and is the only path that seeds the documented files. The fixture also seeds a
 separate three-input manifest, a two-input quoted-header graph, the exact
-two-input repository-source graph, and a three-input nested-control graph;
-focused runtime builds all five. The current CLI remains bounded to one leading assembly
+two-input repository-source graph, the read-only production-source graph, and
+a three-input nested-control graph; focused runtime builds all six. The current
+CLI remains bounded to one leading assembly
 input plus one through five C inputs. It is not a
 full C/Rust compiler, general linker/build system, debugger, or end-to-end
 in-guest OS build. The repository probe is the first exact tracked component,

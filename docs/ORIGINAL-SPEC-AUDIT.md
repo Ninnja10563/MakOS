@@ -118,6 +118,19 @@ proof.
 
 ## Current critical path
 
+Qualification note (2026-08-30): the SDK/developer-tools and self-hosting rows
+above retain the last completed Pi/TCG evidence (five graphs, 16 CLI builds,
+and 17 Toolchain processes). Their older gap wording that says there is no
+global-data or system-header support is superseded by the staged bounded
+increment: exact read-only `ports/musl/shared-demo.c`, the exact bounded
+self-host `/usr/include/stdint.h`, `STT_OBJECT`, `.rodata`/`.data`, paired
+AArch64 ADRP+ADD relocations, cross-object data resolution, and final
+R-X/R--/RW-NX regions are implemented. The extended focused gate requires six
+graphs, 18 CLI builds, and 19 Toolchain processes before new runtime evidence
+is recorded. General globals/initializers, aggregates, common objects, TLS,
+general system headers, a self-hosted DSO, and substantial in-guest builds
+remain missing, so both rows stay Partial.
+
 1. Requalify strict Firefox Gate 3 on an idle host, then widen upstream apps.
 2. Add package repositories, key rotation, richer dependency solving, and
    transaction-recovery UI.

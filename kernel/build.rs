@@ -26,6 +26,8 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_toolchain.c");
     println!("cargo:rerun-if-changed=../user/aarch64_selfhost_probe.c");
     println!("cargo:rerun-if-changed=../user/aarch64_selfhost_probe.S");
+    println!("cargo:rerun-if-changed=../ports/musl/shared-demo.c");
+    println!("cargo:rerun-if-changed=../sdk/selfhost/include/stdint.h");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_ipc_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_exit_group_probe.S");

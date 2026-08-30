@@ -25,9 +25,21 @@ enum {
     CODE_OFFSET = 256,
     DATA_OFFSET = 1536,
     IMAGE_CAPACITY = 2048,
+    LEGACY_IMAGE_CAPACITY = 2048,
     LINKED_CODE_CAPACITY = 1024,
-    OBJECT_CAPACITY = 2048,
+    LINKED_RODATA_CAPACITY = 1024,
+    LINKED_DATA_CAPACITY = 1024,
+    OBJECT_CAPACITY = 4096,
+    RODATA_FILE_OFFSET = 1024,
+    WRITABLE_FILE_OFFSET = 1536,
+    RODATA_VIRTUAL_OFFSET = 4096,
+    WRITABLE_VIRTUAL_OFFSET = 8192,
+    R_AARCH64_ADR_PREL_PG_HI21 = 275,
+    R_AARCH64_ADD_ABS_LO12_NC = 277,
     R_AARCH64_CALL26 = 283,
+    STT_OBJECT = 1,
+    STT_FUNC = 2,
+    PF_W = 2,
 };
 
 static const uint64_t USER_BASE = UINT64_C(0x10000000);
@@ -154,7 +166,13 @@ static int decimal(const char *source, size_t source_length, size_t *cursor,
     return digits != 0;
 }
 
-enum { MAX_LABELS = 8, MAX_LABEL_BYTES = 16, MAX_RELOCATIONS = 8 };
+enum {
+    MAX_LABELS = 8,
+    MAX_LABEL_BYTES = 32,
+    MAX_RELOCATIONS = 16,
+    MAX_C_GLOBALS = 8,
+    MAX_C_GLOBAL_BYTES = 256,
+};
 
 struct label {
     char name[MAX_LABEL_BYTES];
@@ -166,6 +184,8 @@ struct relocation {
     char name[MAX_LABEL_BYTES];
     size_t length;
     size_t offset;
+    uint32_t type;
+    int64_t addend;
 };
 
 static int name_byte(char byte, int first) {
@@ -447,6 +467,24 @@ static size_t assemble(const char *source, size_t source_length,
                 !consume(source, line_end, &cursor, "]"))
                 return 0;
             instruction = UINT32_C(0x39400000) | (base << 5) | target;
+        } else if (consume(source, line_end, &cursor, "ldr w")) {
+            uint32_t target, base;
+            if (!decimal(source, line_end, &cursor, &target) || target > 30 ||
+                !consume(source, line_end, &cursor, ", [x") ||
+                !decimal(source, line_end, &cursor, &base) || base > 30 ||
+                !consume(source, line_end, &cursor, "]"))
+                return 0;
+            instruction = UINT32_C(0xb9400000) | (base << 5) | target;
+        } else if (consume(source, line_end, &cursor, "str w")) {
+            uint32_t source_register, base;
+            if (!decimal(source, line_end, &cursor, &source_register) ||
+                source_register > 30 ||
+                !consume(source, line_end, &cursor, ", [x") ||
+                !decimal(source, line_end, &cursor, &base) || base > 30 ||
+                !consume(source, line_end, &cursor, "]"))
+                return 0;
+            instruction = UINT32_C(0xb9000000) | (base << 5) |
+                          source_register;
         } else if (consume(source, line_end, &cursor, "b.eq ") ||
                    consume(source, line_end, &cursor, "b.ne ")) {
             uint32_t condition = source[cursor - 3] == 'e' ? 0 : 1;
@@ -465,6 +503,62 @@ static size_t assemble(const char *source, size_t source_length,
             instruction = UINT32_C(0x54000000) |
                           (((uint32_t)delta & UINT32_C(0x7ffff)) << 5) |
                           condition;
+            cursor = line_end;
+        } else if (consume(source, line_end, &cursor, "adrp x")) {
+            uint32_t target_register;
+            char target[MAX_LABEL_BYTES] = {0};
+            size_t target_length = 0;
+            if (!decimal(source, line_end, &cursor, &target_register) ||
+                target_register > 30 ||
+                !consume(source, line_end, &cursor, ", ") ||
+                !label_name(source, cursor, line_end, target,
+                            &target_length) ||
+                !relocations || !relocation_count ||
+                *relocation_count == MAX_RELOCATIONS)
+                return 0;
+            struct relocation *relocation =
+                &relocations[(*relocation_count)++];
+            for (size_t index = 0; index < target_length; ++index)
+                relocation->name[index] = target[index];
+            relocation->length = target_length;
+            relocation->offset = output;
+            relocation->type = R_AARCH64_ADR_PREL_PG_HI21;
+            relocation->addend = 0;
+            instruction = UINT32_C(0x90000000) | target_register;
+            cursor = line_end;
+        } else if (consume(source, line_end, &cursor, "add x")) {
+            uint32_t destination, source_register;
+            char target[MAX_LABEL_BYTES] = {0};
+            size_t target_length = 0;
+            if (!decimal(source, line_end, &cursor, &destination) ||
+                destination > 30 ||
+                !consume(source, line_end, &cursor, ", x") ||
+                !decimal(source, line_end, &cursor, &source_register) ||
+                source_register != destination ||
+                !consume(source, line_end, &cursor, ", :lo12:") ||
+                !label_name(source, cursor, line_end, target,
+                            &target_length) ||
+                !relocations || !relocation_count ||
+                *relocation_count == 0 ||
+                *relocation_count == MAX_RELOCATIONS)
+                return 0;
+            struct relocation *previous =
+                &relocations[*relocation_count - 1];
+            if (previous->type != R_AARCH64_ADR_PREL_PG_HI21 ||
+                previous->offset + 4 != output ||
+                !same_name(previous->name, previous->length,
+                           target, target_length))
+                return 0;
+            struct relocation *relocation =
+                &relocations[(*relocation_count)++];
+            for (size_t index = 0; index < target_length; ++index)
+                relocation->name[index] = target[index];
+            relocation->length = target_length;
+            relocation->offset = output;
+            relocation->type = R_AARCH64_ADD_ABS_LO12_NC;
+            relocation->addend = 0;
+            instruction = UINT32_C(0x91000000) |
+                          (source_register << 5) | destination;
             cursor = line_end;
         } else if (consume(source, line_end, &cursor, "bl ")) {
             char target[MAX_LABEL_BYTES];
@@ -494,6 +588,8 @@ static size_t assemble(const char *source, size_t source_length,
                     relocation->name[index] = target[index];
                 relocation->length = target_length;
                 relocation->offset = output;
+                relocation->type = R_AARCH64_CALL26;
+                relocation->addend = 0;
                 ++*relocation_count;
             }
             cursor = line_end;
@@ -515,7 +611,9 @@ static size_t assemble(const char *source, size_t source_length,
 /*
  * Source-driven C subset compiler.  The accepted translation-unit grammar is:
  *
- *   int identifier(int [*]identifier) {
+ *   [__attribute__((visibility("default")))] [const] type identifier = constant;
+ *   [__attribute__((visibility("default")))] const char identifier[] = "bytes";
+ *   type identifier(type [*]identifier) {
  *       int identifier = expression;
  *       int identifier[constant] = { expression, ... };
  *       int *identifier = &identifier;
@@ -528,7 +626,8 @@ static size_t assemble(const char *source, size_t source_length,
  *       return expression;
  *   }
  *
- * Expressions contain the integer parameter, unsigned 16-bit constants,
+ * Expressions contain typed parameters, bounded file-scope scalar/array
+ * lvalues, unsigned 16-bit constants,
  * parentheses, unary +/-, left-associative *, signed / and %, +, and -,
  * address-of and dereference of
  * bounded local pointers or the pointer parameter, checked fixed-array
@@ -539,7 +638,8 @@ static size_t assemble(const char *source, size_t source_length,
  * typed integer or pointer parameters in AAPCS64 x0-x5.  The output follows AAPCS64,
  * including a non-leaf save frame, and is wrapped in a genuine ELF64 ET_REL
  * object by emit_object(). A translation unit may contain up to six function
- * definitions and eight call relocations. Unsupported syntax fails closed.
+ * definitions, eight file-scope objects, and sixteen bounded call/address
+ * relocations. Unsupported syntax fails closed.
  */
 enum {
     MAX_C_LOCALS = 4,
@@ -554,6 +654,36 @@ struct c_definition {
     size_t length;
     size_t offset;
     size_t size;
+};
+
+enum c_scalar_type {
+    C_TYPE_INT32 = 1,
+    C_TYPE_UINT64 = 2,
+    C_TYPE_CHAR = 3,
+};
+
+enum c_global_section {
+    C_GLOBAL_RODATA = 3,
+    C_GLOBAL_DATA = 4,
+};
+
+struct c_global {
+    char name[MAX_LABEL_BYTES];
+    size_t length;
+    uint8_t type;
+    uint8_t section;
+    size_t offset;
+    size_t size;
+    size_t element_count;
+};
+
+struct c_data_unit {
+    uint8_t rodata[MAX_C_GLOBAL_BYTES];
+    size_t rodata_length;
+    uint8_t data[MAX_C_GLOBAL_BYTES];
+    size_t data_length;
+    struct c_global globals[MAX_C_GLOBALS];
+    size_t global_count;
 };
 
 struct c_local {
@@ -576,12 +706,15 @@ struct c_compiler {
     char parameters[MAX_C_PARAMETERS][MAX_LABEL_BYTES];
     size_t parameter_lengths[MAX_C_PARAMETERS];
     int parameter_pointers[MAX_C_PARAMETERS];
+    int parameter_wide[MAX_C_PARAMETERS];
     size_t parameter_count;
     struct c_local locals[MAX_C_LOCALS];
     size_t local_count;
     size_t stack_slot_count;
     struct relocation *relocations;
     size_t *relocation_count;
+    struct c_data_unit *data_unit;
+    int wide_expression;
 };
 
 static void c_space(struct c_compiler *compiler) {
@@ -629,6 +762,100 @@ static int c_keyword(struct c_compiler *compiler, const char *keyword) {
         return 0;
     compiler->cursor = end;
     return 1;
+}
+
+static int c_type(struct c_compiler *compiler, uint8_t *type) {
+    size_t saved = compiler->cursor;
+    if (c_keyword(compiler, "int")) {
+        *type = C_TYPE_INT32;
+        return 1;
+    }
+    compiler->cursor = saved;
+    if (c_keyword(compiler, "char")) {
+        *type = C_TYPE_CHAR;
+        return 1;
+    }
+    compiler->cursor = saved;
+    if (c_keyword(compiler, "uint64_t")) {
+        *type = C_TYPE_UINT64;
+        return 1;
+    }
+    compiler->cursor = saved;
+    if (c_keyword(compiler, "unsigned") && c_keyword(compiler, "long")) {
+        *type = C_TYPE_UINT64;
+        return 1;
+    }
+    compiler->cursor = saved;
+    return 0;
+}
+
+static int c_default_visibility_attribute(struct c_compiler *compiler) {
+    size_t saved = compiler->cursor;
+    if (!c_keyword(compiler, "__attribute__") ||
+        !c_punct(compiler, '(') || !c_punct(compiler, '(') ||
+        !c_keyword(compiler, "visibility") || !c_punct(compiler, '(')) {
+        compiler->cursor = saved;
+        return 0;
+    }
+    c_space(compiler);
+    static const char value[] = "\"default\"";
+    for (size_t index = 0; index < sizeof(value) - 1; ++index) {
+        if (compiler->cursor == compiler->source_length ||
+            compiler->source[compiler->cursor++] != value[index]) {
+            compiler->cursor = saved;
+            return 0;
+        }
+    }
+    if (!c_punct(compiler, ')') || !c_punct(compiler, ')') ||
+        !c_punct(compiler, ')')) {
+        compiler->cursor = saved;
+        return 0;
+    }
+    return 1;
+}
+
+static struct c_global *c_find_global(struct c_compiler *compiler,
+                                      const char *name,
+                                      size_t name_length) {
+    if (!compiler->data_unit) return 0;
+    for (size_t index = 0; index < compiler->data_unit->global_count; ++index)
+        if (same_name(name, name_length,
+                      compiler->data_unit->globals[index].name,
+                      compiler->data_unit->globals[index].length))
+            return &compiler->data_unit->globals[index];
+    return 0;
+}
+
+static int c_string_literal(struct c_compiler *compiler, uint8_t *output,
+                            size_t capacity, size_t *output_length) {
+    c_space(compiler);
+    if (compiler->cursor == compiler->source_length ||
+        compiler->source[compiler->cursor++] != '"')
+        return 0;
+    size_t count = 0;
+    while (compiler->cursor < compiler->source_length) {
+        uint8_t byte = (uint8_t)compiler->source[compiler->cursor++];
+        if (byte == '"') {
+            if (count == capacity) return 0;
+            output[count++] = 0;
+            *output_length = count;
+            return 1;
+        }
+        if (byte == '\\') {
+            if (compiler->cursor == compiler->source_length) return 0;
+            byte = (uint8_t)compiler->source[compiler->cursor++];
+            if (byte == 'n') byte = '\n';
+            else if (byte == 'r') byte = '\r';
+            else if (byte == 't') byte = '\t';
+            else if (byte != '\\' && byte != '"' && byte != '0') return 0;
+            else if (byte == '0') byte = 0;
+        }
+        if (count == capacity || (byte < 32 && byte != 0 && byte != '\n' &&
+                                  byte != '\r' && byte != '\t'))
+            return 0;
+        output[count++] = byte;
+    }
+    return 0;
 }
 
 static struct c_local *c_find_local(struct c_compiler *compiler,
@@ -741,6 +968,35 @@ static int c_emit(struct c_compiler *compiler, uint32_t instruction) {
     return 1;
 }
 
+static int c_emit_global_address(struct c_compiler *compiler,
+                                 const struct c_global *global,
+                                 uint32_t destination) {
+    if (!global || destination > 30 || !compiler->relocations ||
+        !compiler->relocation_count ||
+        *compiler->relocation_count + 2 > MAX_RELOCATIONS)
+        return 0;
+    size_t first = *compiler->relocation_count;
+    struct relocation *page = &compiler->relocations[first];
+    struct relocation *low = &compiler->relocations[first + 1];
+    for (size_t index = 0; index < global->length; ++index) {
+        page->name[index] = global->name[index];
+        low->name[index] = global->name[index];
+    }
+    page->length = low->length = global->length;
+    page->offset = compiler->output;
+    page->type = R_AARCH64_ADR_PREL_PG_HI21;
+    page->addend = 0;
+    low->offset = compiler->output + 4;
+    low->type = R_AARCH64_ADD_ABS_LO12_NC;
+    low->addend = 0;
+    if (!c_emit(compiler, UINT32_C(0x90000000) | destination) ||
+        !c_emit(compiler, UINT32_C(0x91000000) |
+                              (destination << 5) | destination))
+        return 0;
+    *compiler->relocation_count += 2;
+    return 1;
+}
+
 static int c_number(struct c_compiler *compiler, uint32_t *value) {
     c_space(compiler);
     return decimal(compiler->source, compiler->source_length,
@@ -844,6 +1100,11 @@ static int c_call_argument(struct c_compiler *compiler,
                 return c_emit(compiler, UINT32_C(0x910003e0) |
                                         (offset << 10) | destination);
             }
+            struct c_global *global = c_find_global(
+                compiler, target_name, target_name_length);
+            if (global && c_emit_global_address(compiler, global,
+                                                destination))
+                return 1;
         }
     }
     compiler->cursor = saved;
@@ -904,7 +1165,9 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
     uint32_t immediate;
     size_t saved = compiler->cursor;
     if (c_number(compiler, &immediate))
-        return c_emit(compiler, UINT32_C(0x52800000) |
+        return c_emit(compiler, (compiler->wide_expression
+                                     ? UINT32_C(0xd2800000)
+                                     : UINT32_C(0x52800000)) |
                                 (immediate << 5) | destination);
     compiler->cursor = saved;
     char identifier[MAX_LABEL_BYTES];
@@ -915,13 +1178,46 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         compiler->source[compiler->cursor] == '[') {
         ++compiler->cursor;
         uint32_t index = 0, pointer_register = 0;
-        if (!c_number(compiler, &index) || !c_punct(compiler, ']') ||
-            !c_pointer_index_register(compiler, identifier,
+        if (!c_number(compiler, &index) || !c_punct(compiler, ']'))
+            return 0;
+        struct c_global *global = c_find_global(
+            compiler, identifier, identifier_length);
+        if (global) {
+            size_t element_size = global->type == C_TYPE_UINT64
+                                      ? 8
+                                      : global->type == C_TYPE_INT32 ? 4 : 1;
+            if (index >= global->element_count ||
+                !c_emit_global_address(compiler, global, 8))
+                return 0;
+            uint32_t opcode = global->type == C_TYPE_UINT64
+                                  ? UINT32_C(0xf9400000)
+                                  : global->type == C_TYPE_INT32
+                                        ? UINT32_C(0xb9400000)
+                                        : UINT32_C(0x39400000);
+            return c_emit(compiler, opcode |
+                                    ((uint32_t)(index * element_size) /
+                                     (uint32_t)element_size << 10) |
+                                    (UINT32_C(8) << 5) | destination);
+        }
+        if (!c_pointer_index_register(compiler, identifier,
                                       identifier_length, index,
                                       &pointer_register))
             return 0;
         return c_emit(compiler, UINT32_C(0xb9400000) | (index << 10) |
                                 (pointer_register << 5) | destination);
+    }
+    struct c_global *global = c_find_global(
+        compiler, identifier, identifier_length);
+    if (global) {
+        if (global->element_count != 1 ||
+            !c_emit_global_address(compiler, global, 8))
+            return 0;
+        uint32_t opcode = global->type == C_TYPE_UINT64
+                              ? UINT32_C(0xf9400000)
+                              : global->type == C_TYPE_INT32
+                                    ? UINT32_C(0xb9400000)
+                                    : UINT32_C(0x39400000);
+        return c_emit(compiler, opcode | (UINT32_C(8) << 5) | destination);
     }
     if (compiler->cursor < compiler->source_length &&
         compiler->source[compiler->cursor] == '(') {
@@ -945,6 +1241,8 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
             relocation->name[index] = identifier[index];
         relocation->length = identifier_length;
         relocation->offset = compiler->output;
+        relocation->type = R_AARCH64_CALL26;
+        relocation->addend = 0;
         ++*compiler->relocation_count;
         return c_emit(compiler, UINT32_C(0x94000000));
     }
@@ -977,7 +1275,9 @@ static int c_primary(struct c_compiler *compiler, uint32_t destination) {
         return 0;
     if (local && local->address_taken)
         return c_load_stack_local(compiler, local->stack_index, destination);
-    return c_emit(compiler, UINT32_C(0x2a0003e0) |
+    return c_emit(compiler, (compiler->wide_expression
+                                 ? UINT32_C(0xaa0003e0)
+                                 : UINT32_C(0x2a0003e0)) |
                             (source_register << 16) | destination);
 }
 
@@ -990,7 +1290,9 @@ static int c_unary(struct c_compiler *compiler, uint32_t destination) {
     char operation = compiler->source[compiler->cursor++];
     if (!c_primary(compiler, destination)) return 0;
     return operation == '+' ||
-           c_emit(compiler, UINT32_C(0x4b0003e0) |
+           c_emit(compiler, (compiler->wide_expression
+                                 ? UINT32_C(0xcb0003e0)
+                                 : UINT32_C(0x4b0003e0)) |
                              (destination << 16) | destination);
 }
 
@@ -1021,22 +1323,30 @@ static int c_multiplicative(struct c_compiler *compiler,
             return 0;
         if (!c_unary(compiler, destination + 1)) return 0;
         if (operation == '*') {
-            if (!c_emit(compiler, UINT32_C(0x1b007c00) |
+            if (!c_emit(compiler, (compiler->wide_expression
+                                       ? UINT32_C(0x9b007c00)
+                                       : UINT32_C(0x1b007c00)) |
                                   ((destination + 1) << 16) |
                                   (destination << 5) | destination))
                 return 0;
         } else if (operation == '/') {
-            if (!c_emit(compiler, UINT32_C(0x1ac00c00) |
+            if (!c_emit(compiler, (compiler->wide_expression
+                                       ? UINT32_C(0x9ac00c00)
+                                       : UINT32_C(0x1ac00c00)) |
                                   ((destination + 1) << 16) |
                                   (destination << 5) | destination))
                 return 0;
         } else {
             uint32_t quotient = destination + 2;
             if (quotient > 7 ||
-                !c_emit(compiler, UINT32_C(0x1ac00c00) |
+                !c_emit(compiler, (compiler->wide_expression
+                                       ? UINT32_C(0x9ac00c00)
+                                       : UINT32_C(0x1ac00c00)) |
                                   ((destination + 1) << 16) |
                                   (destination << 5) | quotient) ||
-                !c_emit(compiler, UINT32_C(0x1b008000) |
+                !c_emit(compiler, (compiler->wide_expression
+                                       ? UINT32_C(0x9b008000)
+                                       : UINT32_C(0x1b008000)) |
                                   ((destination + 1) << 16) |
                                   (destination << 10) |
                                   (quotient << 5) | destination))
@@ -1054,8 +1364,13 @@ static int c_additive(struct c_compiler *compiler, uint32_t destination) {
         if (operation != '+' && operation != '-') return 1;
         ++compiler->cursor;
         if (!c_multiplicative(compiler, destination + 1)) return 0;
-        uint32_t opcode = operation == '+' ? UINT32_C(0x0b000000)
-                                           : UINT32_C(0x4b000000);
+        uint32_t opcode = operation == '+'
+                              ? (compiler->wide_expression
+                                     ? UINT32_C(0x8b000000)
+                                     : UINT32_C(0x0b000000))
+                              : (compiler->wide_expression
+                                     ? UINT32_C(0xcb000000)
+                                     : UINT32_C(0x4b000000));
         if (!c_emit(compiler, opcode | ((destination + 1) << 16) |
                               (destination << 5) | destination))
             return 0;
@@ -1115,7 +1430,10 @@ static int c_condition(struct c_compiler *compiler,
     return c_punct(compiler, '(') && c_additive(compiler, 0) &&
            c_comparison(compiler, false_condition) &&
            c_additive(compiler, 1) && c_punct(compiler, ')') &&
-           c_emit(compiler, UINT32_C(0x6b00001f) | (UINT32_C(1) << 16));
+           c_emit(compiler, (compiler->wide_expression
+                                 ? UINT32_C(0xeb00001f)
+                                 : UINT32_C(0x6b00001f)) |
+                                (UINT32_C(1) << 16));
 }
 
 static int c_epilogue(struct c_compiler *compiler) {
@@ -1290,8 +1608,26 @@ static int c_assignment(struct c_compiler *compiler) {
         compiler->source[compiler->cursor] == '[') {
         ++compiler->cursor;
         uint32_t index = 0, pointer_register = 0;
-        if (!c_number(compiler, &index) || !c_punct(compiler, ']') ||
-            !c_pointer_index_register(compiler, identifier,
+        if (!c_number(compiler, &index) || !c_punct(compiler, ']'))
+            return 0;
+        struct c_global *global = c_find_global(
+            compiler, identifier, identifier_length);
+        if (global) {
+            if (global->section != C_GLOBAL_DATA ||
+                index >= global->element_count ||
+                !c_punct(compiler, '=') || !c_additive(compiler, 0) ||
+                !c_punct(compiler, ';') ||
+                !c_emit_global_address(compiler, global, 8))
+                return 0;
+            uint32_t opcode = global->type == C_TYPE_UINT64
+                                  ? UINT32_C(0xf9000000)
+                                  : global->type == C_TYPE_INT32
+                                        ? UINT32_C(0xb9000000)
+                                        : UINT32_C(0x39000000);
+            return c_emit(compiler, opcode | (index << 10) |
+                                    (UINT32_C(8) << 5));
+        }
+        if (!c_pointer_index_register(compiler, identifier,
                                       identifier_length, index,
                                       &pointer_register) ||
             !c_punct(compiler, '=') || !c_additive(compiler, 0) ||
@@ -1299,6 +1635,21 @@ static int c_assignment(struct c_compiler *compiler) {
             return 0;
         return c_emit(compiler, UINT32_C(0xb9000000) | (index << 10) |
                                 (pointer_register << 5));
+    }
+    struct c_global *global = c_find_global(
+        compiler, identifier, identifier_length);
+    if (global) {
+        if (global->section != C_GLOBAL_DATA || global->element_count != 1 ||
+            !c_punct(compiler, '=') || !c_additive(compiler, 0) ||
+            !c_punct(compiler, ';') ||
+            !c_emit_global_address(compiler, global, 8))
+            return 0;
+        uint32_t opcode = global->type == C_TYPE_UINT64
+                              ? UINT32_C(0xf9000000)
+                              : global->type == C_TYPE_INT32
+                                    ? UINT32_C(0xb9000000)
+                                    : UINT32_C(0x39000000);
+        return c_emit(compiler, opcode | (UINT32_C(8) << 5));
     }
     if (!c_variable_register(compiler, identifier, identifier_length,
                              &destination, &local, 0) ||
@@ -1388,13 +1739,18 @@ static int c_compile_function(struct c_compiler *compiler,
     definition->length = 0;
     definition->offset = compiler->output;
     definition->size = 0;
-    if (!c_keyword(compiler, "int") ||
+    (void)c_default_visibility_attribute(compiler);
+    uint8_t return_type = 0;
+    if (!c_type(compiler, &return_type) || return_type == C_TYPE_CHAR ||
         !c_identifier(compiler, definition->name, &definition->length) ||
         !c_punct(compiler, '('))
         return 0;
+    compiler->wide_expression = return_type == C_TYPE_UINT64;
     for (;;) {
+        uint8_t parameter_type = 0;
         if (compiler->parameter_count == MAX_C_PARAMETERS ||
-            !c_keyword(compiler, "int"))
+            !c_type(compiler, &parameter_type) ||
+            parameter_type == C_TYPE_CHAR)
             return 0;
         size_t parameter = compiler->parameter_count;
         c_space(compiler);
@@ -1405,6 +1761,8 @@ static int c_compile_function(struct c_compiler *compiler,
         } else {
             compiler->parameter_pointers[parameter] = 0;
         }
+        compiler->parameter_wide[parameter] =
+            parameter_type == C_TYPE_UINT64;
         if (!c_identifier(compiler, compiler->parameters[parameter],
                           &compiler->parameter_lengths[parameter]))
             return 0;
@@ -1436,7 +1794,8 @@ static int c_compile_function(struct c_compiler *compiler,
          ++parameter) {
         uint32_t source = (uint32_t)parameter;
         uint32_t destination = 23 + (uint32_t)parameter;
-        uint32_t opcode = compiler->parameter_pointers[parameter]
+        uint32_t opcode = (compiler->parameter_pointers[parameter] ||
+                           compiler->parameter_wide[parameter])
                               ? UINT32_C(0xaa0003e0)
                               : UINT32_C(0x2a0003e0);
         if (!c_emit(compiler, opcode | (source << 16) | destination))
@@ -1450,6 +1809,7 @@ static int c_compile_function(struct c_compiler *compiler,
         if (compiler->source[compiler->cursor] == '}') break;
         if (terminal_return) return 0;
         if (c_keyword(compiler, "int")) {
+            if (compiler->wide_expression) return 0;
             if (!c_declaration(compiler)) return 0;
         } else if (c_keyword(compiler, "if")) {
             if (!c_if_statement(compiler, 0)) return 0;
@@ -1469,14 +1829,125 @@ static int c_compile_function(struct c_compiler *compiler,
     return definition->size != 0;
 }
 
-static size_t compile_c_unit(
+static size_t c_type_size(uint8_t type) {
+    return type == C_TYPE_UINT64 ? 8 : type == C_TYPE_INT32 ? 4 : 1;
+}
+
+static int c_append_global_scalar(struct c_compiler *compiler,
+                                  struct c_global *global,
+                                  uint32_t value) {
+    size_t item_size = c_type_size(global->type);
+    uint8_t *bytes = global->section == C_GLOBAL_RODATA
+                         ? compiler->data_unit->rodata
+                         : compiler->data_unit->data;
+    size_t *byte_count = global->section == C_GLOBAL_RODATA
+                             ? &compiler->data_unit->rodata_length
+                             : &compiler->data_unit->data_length;
+    size_t aligned = (*byte_count + item_size - 1) & ~(item_size - 1);
+    if (aligned + item_size > MAX_C_GLOBAL_BYTES) return 0;
+    while (*byte_count < aligned) bytes[(*byte_count)++] = 0;
+    global->offset = aligned;
+    global->size = item_size;
+    global->element_count = 1;
+    if (item_size == 8) {
+        put32(bytes, aligned, value);
+        put32(bytes, aligned + 4, 0);
+    } else if (item_size == 4) {
+        put32(bytes, aligned, value);
+    } else {
+        bytes[aligned] = (uint8_t)value;
+    }
+    *byte_count = aligned + item_size;
+    return 1;
+}
+
+static int c_global_declaration(struct c_compiler *compiler) {
+    if (!compiler->data_unit ||
+        compiler->data_unit->global_count == MAX_C_GLOBALS)
+        return 0;
+    (void)c_default_visibility_attribute(compiler);
+    if (c_keyword(compiler, "static")) return 0;
+    int read_only = c_keyword(compiler, "const");
+    uint8_t type = 0;
+    struct c_global global = {0};
+    if (!c_type(compiler, &type) ||
+        !c_identifier(compiler, global.name, &global.length))
+        return 0;
+    global.type = type;
+    global.section = read_only ? C_GLOBAL_RODATA : C_GLOBAL_DATA;
+    for (size_t index = 0; index < compiler->data_unit->global_count; ++index)
+        if (same_name(global.name, global.length,
+                      compiler->data_unit->globals[index].name,
+                      compiler->data_unit->globals[index].length))
+            return 0;
+    c_space(compiler);
+    if (compiler->cursor < compiler->source_length &&
+        compiler->source[compiler->cursor] == '[') {
+        ++compiler->cursor;
+        uint32_t declared_count = 0;
+        int unspecified = 0;
+        c_space(compiler);
+        if (compiler->cursor < compiler->source_length &&
+            compiler->source[compiler->cursor] == ']') {
+            unspecified = 1;
+        } else if (!c_number(compiler, &declared_count) ||
+                   declared_count == 0) {
+            return 0;
+        }
+        if (!c_punct(compiler, ']') || !c_punct(compiler, '=')) return 0;
+        if (type != C_TYPE_CHAR) return 0;
+        uint8_t value[MAX_C_GLOBAL_BYTES] = {0};
+        size_t value_length = 0;
+        if (!c_string_literal(compiler, value, sizeof(value), &value_length) ||
+            (!unspecified && value_length > declared_count) ||
+            !c_punct(compiler, ';'))
+            return 0;
+        size_t total = unspecified ? value_length : declared_count;
+        uint8_t *bytes = global.section == C_GLOBAL_RODATA
+                             ? compiler->data_unit->rodata
+                             : compiler->data_unit->data;
+        size_t *byte_count = global.section == C_GLOBAL_RODATA
+                                 ? &compiler->data_unit->rodata_length
+                                 : &compiler->data_unit->data_length;
+        if (total == 0 || total > MAX_C_GLOBAL_BYTES - *byte_count) return 0;
+        global.offset = *byte_count;
+        global.size = total;
+        global.element_count = total;
+        for (size_t index = 0; index < total; ++index)
+            bytes[(*byte_count)++] = index < value_length ? value[index] : 0;
+    } else {
+        uint32_t value = 0;
+        if (!c_punct(compiler, '=') || !c_number(compiler, &value) ||
+            !c_punct(compiler, ';') ||
+            !c_append_global_scalar(compiler, &global, value))
+            return 0;
+    }
+    compiler->data_unit->globals[compiler->data_unit->global_count++] = global;
+    return 1;
+}
+
+static int c_typedef_uint64(struct c_compiler *compiler) {
+    size_t saved = compiler->cursor;
+    if (!c_keyword(compiler, "typedef") ||
+        !c_keyword(compiler, "unsigned") || !c_keyword(compiler, "long") ||
+        !c_keyword(compiler, "uint64_t") || !c_punct(compiler, ';')) {
+        compiler->cursor = saved;
+        return 0;
+    }
+    return 1;
+}
+
+static size_t compile_c_unit_data(
     const char *source, size_t source_length, volatile uint8_t *code,
     size_t capacity, struct c_definition definitions[MAX_C_FUNCTIONS],
     size_t *definition_count,
-    struct relocation relocations[MAX_RELOCATIONS], size_t *relocation_count) {
-    if (!definition_count || !relocation_count || !relocations) return 0;
+    struct relocation relocations[MAX_RELOCATIONS], size_t *relocation_count,
+    struct c_data_unit *data_unit) {
+    if (!definition_count || !relocation_count || !relocations || !data_unit)
+        return 0;
     *definition_count = 0;
     *relocation_count = 0;
+    *data_unit = (struct c_data_unit){0};
     struct c_compiler compiler = {
         .source = source,
         .source_length = source_length,
@@ -1484,23 +1955,56 @@ static size_t compile_c_unit(
         .capacity = capacity,
         .relocations = relocations,
         .relocation_count = relocation_count,
+        .data_unit = data_unit,
     };
     for (;;) {
         c_space(&compiler);
         if (compiler.cursor == compiler.source_length) break;
-        if (*definition_count == MAX_C_FUNCTIONS ||
-            !c_compile_function(&compiler, &definitions[*definition_count]))
+        if (c_typedef_uint64(&compiler)) continue;
+        size_t saved = compiler.cursor;
+        (void)c_default_visibility_attribute(&compiler);
+        (void)c_keyword(&compiler, "static");
+        (void)c_keyword(&compiler, "const");
+        uint8_t probe_type = 0;
+        char probe_name[MAX_LABEL_BYTES] = {0};
+        size_t probe_length = 0;
+        if (!c_type(&compiler, &probe_type) ||
+            !c_identifier(&compiler, probe_name, &probe_length))
             return 0;
-        for (size_t previous = 0; previous < *definition_count; ++previous)
-            if (same_name(definitions[previous].name,
-                          definitions[previous].length,
-                          definitions[*definition_count].name,
-                          definitions[*definition_count].length))
+        c_space(&compiler);
+        int function = compiler.cursor < compiler.source_length &&
+                       compiler.source[compiler.cursor] == '(';
+        compiler.cursor = saved;
+        if (function) {
+            if (*definition_count == MAX_C_FUNCTIONS ||
+                !c_compile_function(&compiler,
+                                    &definitions[*definition_count]))
                 return 0;
-        ++*definition_count;
+            for (size_t previous = 0; previous < *definition_count; ++previous)
+                if (same_name(definitions[previous].name,
+                              definitions[previous].length,
+                              definitions[*definition_count].name,
+                              definitions[*definition_count].length))
+                    return 0;
+            ++*definition_count;
+        } else if (!c_global_declaration(&compiler)) {
+            return 0;
+        }
     }
     if (*definition_count == 0) return 0;
     return compiler.output;
+}
+
+static size_t compile_c_unit(
+    const char *source, size_t source_length, volatile uint8_t *code,
+    size_t capacity, struct c_definition definitions[MAX_C_FUNCTIONS],
+    size_t *definition_count,
+    struct relocation relocations[MAX_RELOCATIONS], size_t *relocation_count) {
+    struct c_data_unit data_unit = {0};
+    size_t output = compile_c_unit_data(
+        source, source_length, code, capacity, definitions, definition_count,
+        relocations, relocation_count, &data_unit);
+    return data_unit.global_count == 0 ? output : 0;
 }
 
 static size_t compile_c(const char *source, size_t source_length,
@@ -2456,17 +2960,43 @@ static int expand_source_recursive(struct include_context *context,
             while (argument < line_end &&
                    (source[argument] == ' ' || source[argument] == '\t'))
                 ++argument;
-            if (argument == line_end || source[argument++] != '"') return 0;
             char path[MAX_BUILD_PATH_BYTES] = {0};
             size_t path_length = 0;
-            while (argument < line_end && source[argument] != '"') {
+            uint8_t terminator = 0;
+            if (argument < line_end && source[argument] == '"') {
+                ++argument;
+                terminator = '"';
+            } else if (argument < line_end && source[argument] == '<') {
+                static const char stdint_name[] = "stdint.h";
+                static const char stdint_path[] = "/usr/include/stdint.h";
+                ++argument;
+                size_t name_start = argument;
+                while (argument < line_end && source[argument] != '>')
+                    ++argument;
+                if (argument == line_end ||
+                    argument - name_start != sizeof(stdint_name) - 1)
+                    return 0;
+                for (size_t index = 0; index < sizeof(stdint_name) - 1;
+                     ++index)
+                    if (source[name_start + index] !=
+                        (uint8_t)stdint_name[index])
+                        return 0;
+                path_length = sizeof(stdint_path) - 1;
+                for (size_t index = 0; index < path_length; ++index)
+                    path[index] = stdint_path[index];
+                terminator = '>';
+            } else {
+                return 0;
+            }
+            while (!path_length && argument < line_end &&
+                   source[argument] != terminator) {
                 if (path_length == MAX_BUILD_PATH_BYTES ||
                     !build_path_byte((char)source[argument]))
                     return 0;
                 path[path_length++] = (char)source[argument++];
             }
             if (!path_length || path[0] != '/' || argument == line_end ||
-                source[argument++] != '"' ||
+                source[argument++] != terminator ||
                 !directive_tail_empty(source, line_end, argument))
                 return 0;
             if (active) {
@@ -2544,11 +3074,11 @@ static void section(volatile uint8_t *object, size_t section_headers,
 }
 
 static void symbol(volatile uint8_t *object, size_t symbols, size_t index,
-                   uint32_t name, uint16_t section_index, uint64_t value,
-                   uint64_t size) {
+                   uint32_t name, uint8_t info, uint16_t section_index,
+                   uint64_t value, uint64_t size) {
     size_t entry = symbols + index * SYMBOL_SIZE;
     put32(object, entry, name);
-    object[entry + 4] = 0x12; /* STB_GLOBAL | STT_FUNC */
+    object[entry + 4] = info;
     put16(object, entry + 6, section_index);
     put64(object, entry + 8, value);
     put64(object, entry + 16, size);
@@ -2557,7 +3087,7 @@ static void symbol(volatile uint8_t *object, size_t symbols, size_t index,
 static size_t emit_object_definitions(
     volatile uint8_t object[OBJECT_CAPACITY], const uint8_t *code,
     size_t code_length,
-    const struct c_definition definitions[MAX_C_FUNCTIONS],
+    const struct c_definition *definitions,
     size_t definition_count, const struct relocation *relocations,
     size_t relocation_count) {
     static const uint8_t section_strings[] =
@@ -2610,6 +3140,8 @@ static size_t emit_object_definitions(
             relocations[index].offset % 4 != 0 ||
             relocations[index].offset > code_length ||
             code_length - relocations[index].offset < 4 ||
+            relocations[index].type != R_AARCH64_CALL26 ||
+            relocations[index].addend != 0 ||
             get32(code, relocations[index].offset) != UINT32_C(0x94000000))
             return 0;
         for (size_t byte = 0; byte < relocations[index].length; ++byte)
@@ -2669,16 +3201,16 @@ static size_t emit_object_definitions(
         put64(object, entry, relocations[index].offset);
         put64(object, entry + 8,
               ((uint64_t)relocation_symbols[index] << 32) | R_AARCH64_CALL26);
-        put64(object, entry + 16, 0);
+        put64(object, entry + 16, (uint64_t)relocations[index].addend);
     }
     for (size_t definition = 0; definition < definition_count; ++definition)
         symbol(object, symbol_offset, 1 + definition,
-               definition_name_offsets[definition], 1,
+               definition_name_offsets[definition], 0x12, 1,
                definitions[definition].offset,
                definitions[definition].size);
     for (size_t index = 0; index < undefined_count; ++index)
         symbol(object, symbol_offset, 1 + definition_count + index,
-               undefined_name_offsets[index], 0, 0, 0);
+               undefined_name_offsets[index], 0x12, 0, 0, 0);
     size_t string_cursor = string_offset + 1;
     for (size_t definition = 0; definition < definition_count; ++definition) {
         copy_bytes(object + string_cursor,
@@ -2704,6 +3236,219 @@ static size_t emit_object_definitions(
     section(object, section_headers, 4, 26, 3, 0, string_offset,
             string_length, 0, 0, 1, 0);
     section(object, section_headers, 5, 34, 3, 0, section_string_offset,
+            sizeof(section_strings) - 1, 0, 0, 1, 0);
+    return object_length;
+}
+
+static size_t emit_object_with_data(
+    volatile uint8_t object[OBJECT_CAPACITY], const uint8_t *code,
+    size_t code_length,
+    const struct c_definition *definitions,
+    size_t definition_count, const struct relocation *relocations,
+    size_t relocation_count, const struct c_data_unit *data_unit) {
+    static const uint8_t section_strings[] =
+        "\0.text\0.rela.text\0.rodata\0.data\0.symtab\0.strtab\0.shstrtab\0";
+    if (!data_unit || code_length == 0 || definition_count == 0 ||
+        definition_count > MAX_C_FUNCTIONS ||
+        data_unit->global_count > MAX_C_GLOBALS ||
+        relocation_count > MAX_RELOCATIONS ||
+        (relocation_count && !relocations))
+        return 0;
+    uint32_t definition_names[MAX_C_FUNCTIONS] = {0};
+    uint32_t global_names[MAX_C_GLOBALS] = {0};
+    uint32_t relocation_symbols[MAX_RELOCATIONS] = {0};
+    struct relocation undefined[MAX_RELOCATIONS] = {0};
+    uint8_t undefined_info[MAX_RELOCATIONS] = {0};
+    uint32_t undefined_names[MAX_RELOCATIONS] = {0};
+    size_t undefined_count = 0;
+    size_t string_length = 1;
+    for (size_t index = 0; index < definition_count; ++index) {
+        const struct c_definition *definition = &definitions[index];
+        if (!definition->length || definition->length > MAX_LABEL_BYTES ||
+            definition->offset % 4 || !definition->size ||
+            definition->offset > code_length ||
+            definition->size > code_length - definition->offset)
+            return 0;
+        definition_names[index] = (uint32_t)string_length;
+        string_length += definition->length + 1;
+        for (size_t previous = 0; previous < index; ++previous)
+            if (same_name(definition->name, definition->length,
+                          definitions[previous].name,
+                          definitions[previous].length))
+                return 0;
+    }
+    for (size_t index = 0; index < data_unit->global_count; ++index) {
+        const struct c_global *global = &data_unit->globals[index];
+        size_t section_length = global->section == C_GLOBAL_RODATA
+                                    ? data_unit->rodata_length
+                                    : global->section == C_GLOBAL_DATA
+                                          ? data_unit->data_length
+                                          : 0;
+        if (!global->length || global->length > MAX_LABEL_BYTES ||
+            !global->size || !global->element_count ||
+            global->offset > section_length ||
+            global->size > section_length - global->offset)
+            return 0;
+        for (size_t function = 0; function < definition_count; ++function)
+            if (same_name(global->name, global->length,
+                          definitions[function].name,
+                          definitions[function].length))
+                return 0;
+        for (size_t previous = 0; previous < index; ++previous)
+            if (same_name(global->name, global->length,
+                          data_unit->globals[previous].name,
+                          data_unit->globals[previous].length))
+                return 0;
+        global_names[index] = (uint32_t)string_length;
+        string_length += global->length + 1;
+    }
+    for (size_t index = 0; index < relocation_count; ++index) {
+        const struct relocation *relocation = &relocations[index];
+        if (!relocation->length || relocation->length > MAX_LABEL_BYTES ||
+            relocation->offset % 4 || relocation->offset > code_length ||
+            code_length - relocation->offset < 4 || relocation->addend != 0)
+            return 0;
+        uint32_t placeholder = get32(code, relocation->offset);
+        if ((relocation->type == R_AARCH64_CALL26 &&
+             placeholder != UINT32_C(0x94000000)) ||
+            (relocation->type == R_AARCH64_ADR_PREL_PG_HI21 &&
+             (placeholder & UINT32_C(0xffffffe0)) != UINT32_C(0x90000000)) ||
+            (relocation->type == R_AARCH64_ADD_ABS_LO12_NC &&
+             (placeholder & UINT32_C(0xffc003ff)) !=
+                 (UINT32_C(0x91000000) |
+                  ((placeholder & UINT32_C(31)) << 5) |
+                  (placeholder & UINT32_C(31)))))
+            return 0;
+        if (relocation->type == R_AARCH64_ADR_PREL_PG_HI21) {
+            if (index + 1 == relocation_count ||
+                relocations[index + 1].type != R_AARCH64_ADD_ABS_LO12_NC ||
+                relocations[index + 1].offset != relocation->offset + 4 ||
+                relocations[index + 1].addend != relocation->addend ||
+                !same_name(relocation->name, relocation->length,
+                           relocations[index + 1].name,
+                           relocations[index + 1].length))
+                return 0;
+        } else if (relocation->type == R_AARCH64_ADD_ABS_LO12_NC) {
+            if (index == 0 ||
+                relocations[index - 1].type != R_AARCH64_ADR_PREL_PG_HI21)
+                return 0;
+        } else if (relocation->type != R_AARCH64_CALL26) {
+            return 0;
+        }
+        size_t symbol_index = 0;
+        for (size_t function = 0; function < definition_count; ++function)
+            if (same_name(relocation->name, relocation->length,
+                          definitions[function].name,
+                          definitions[function].length))
+                symbol_index = 1 + function;
+        for (size_t global = 0; global < data_unit->global_count; ++global)
+            if (same_name(relocation->name, relocation->length,
+                          data_unit->globals[global].name,
+                          data_unit->globals[global].length))
+                symbol_index = 1 + definition_count + global;
+        uint8_t expected_info = relocation->type == R_AARCH64_CALL26
+                                    ? 0x12 : 0x11;
+        if (!symbol_index) {
+            size_t match = 0;
+            while (match < undefined_count &&
+                   !same_name(relocation->name, relocation->length,
+                              undefined[match].name,
+                              undefined[match].length))
+                ++match;
+            if (match == undefined_count) {
+                undefined[match] = *relocation;
+                undefined_info[match] = expected_info;
+                undefined_names[match] = (uint32_t)string_length;
+                string_length += relocation->length + 1;
+                ++undefined_count;
+            } else if (undefined_info[match] != expected_info) {
+                return 0;
+            }
+            symbol_index = 1 + definition_count +
+                           data_unit->global_count + match;
+        }
+        relocation_symbols[index] = (uint32_t)symbol_index;
+    }
+    size_t text_offset = ELF_HEADER_SIZE;
+    size_t rela_offset = align_up(text_offset + code_length, 8);
+    size_t rela_length = relocation_count * RELA_SIZE;
+    size_t rodata_offset = align_up(rela_offset + rela_length, 8);
+    size_t data_offset = align_up(rodata_offset + data_unit->rodata_length, 8);
+    size_t symbol_offset = align_up(data_offset + data_unit->data_length, 8);
+    size_t symbol_count = 1 + definition_count + data_unit->global_count +
+                          undefined_count;
+    size_t string_offset = symbol_offset + symbol_count * SYMBOL_SIZE;
+    size_t shstr_offset = string_offset + string_length;
+    size_t section_headers = align_up(
+        shstr_offset + sizeof(section_strings) - 1, 8);
+    size_t object_length = section_headers + 8 * SECTION_HEADER_SIZE;
+    if (object_length > OBJECT_CAPACITY) return 0;
+    memset((void *)object, 0, OBJECT_CAPACITY);
+    object[0] = 0x7f; object[1] = 'E'; object[2] = 'L'; object[3] = 'F';
+    object[4] = 2; object[5] = 1; object[6] = 1;
+    put16(object, 16, 1); put16(object, 18, 183); put32(object, 20, 1);
+    put64(object, 40, section_headers);
+    put16(object, 52, ELF_HEADER_SIZE);
+    put16(object, 58, SECTION_HEADER_SIZE);
+    put16(object, 60, 8); put16(object, 62, 7);
+    copy_bytes(object + text_offset, code, code_length);
+    copy_bytes(object + rodata_offset, data_unit->rodata,
+               data_unit->rodata_length);
+    copy_bytes(object + data_offset, data_unit->data, data_unit->data_length);
+    for (size_t index = 0; index < relocation_count; ++index) {
+        size_t entry = rela_offset + index * RELA_SIZE;
+        put64(object, entry, relocations[index].offset);
+        put64(object, entry + 8,
+              ((uint64_t)relocation_symbols[index] << 32) |
+                  relocations[index].type);
+        put64(object, entry + 16, (uint64_t)relocations[index].addend);
+    }
+    size_t sym = 1;
+    for (size_t index = 0; index < definition_count; ++index, ++sym)
+        symbol(object, symbol_offset, sym, definition_names[index], 0x12, 1,
+               definitions[index].offset, definitions[index].size);
+    for (size_t index = 0; index < data_unit->global_count; ++index, ++sym)
+        symbol(object, symbol_offset, sym, global_names[index], 0x11,
+               data_unit->globals[index].section,
+               data_unit->globals[index].offset,
+               data_unit->globals[index].size);
+    for (size_t index = 0; index < undefined_count; ++index, ++sym)
+        symbol(object, symbol_offset, sym, undefined_names[index],
+               undefined_info[index], 0, 0, 0);
+    size_t string_cursor = string_offset + 1;
+    for (size_t index = 0; index < definition_count; ++index) {
+        copy_bytes(object + string_cursor,
+                   (const uint8_t *)definitions[index].name,
+                   definitions[index].length);
+        string_cursor += definitions[index].length + 1;
+    }
+    for (size_t index = 0; index < data_unit->global_count; ++index) {
+        copy_bytes(object + string_cursor,
+                   (const uint8_t *)data_unit->globals[index].name,
+                   data_unit->globals[index].length);
+        string_cursor += data_unit->globals[index].length + 1;
+    }
+    for (size_t index = 0; index < undefined_count; ++index) {
+        copy_bytes(object + string_cursor,
+                   (const uint8_t *)undefined[index].name,
+                   undefined[index].length);
+        string_cursor += undefined[index].length + 1;
+    }
+    copy_bytes(object + shstr_offset, section_strings,
+               sizeof(section_strings) - 1);
+    section(object, section_headers, 1, 1, 1, 6, text_offset, code_length,
+            0, 0, 4, 0);
+    section(object, section_headers, 2, 7, 4, 0, rela_offset, rela_length,
+            5, 1, 8, RELA_SIZE);
+    section(object, section_headers, 3, 18, 1, 2, rodata_offset,
+            data_unit->rodata_length, 0, 0, 8, 0);
+    section(object, section_headers, 4, 26, 1, 3, data_offset,
+            data_unit->data_length, 0, 0, 8, 0);
+    section(object, section_headers, 5, 32, 2, 0, symbol_offset,
+            symbol_count * SYMBOL_SIZE, 6, 1, 8, SYMBOL_SIZE);
+    section(object, section_headers, 6, 40, 3, 0, string_offset,
+            string_length, 0, 0, 1, 0);
+    section(object, section_headers, 7, 48, 3, 0, shstr_offset,
             sizeof(section_strings) - 1, 0, 0, 1, 0);
     return object_length;
 }
@@ -2734,7 +3479,90 @@ struct object_view {
     size_t rela_offset, rela_count;
     size_t symbol_offset, symbol_count;
     size_t string_offset, string_length;
+    size_t rodata_offset, rodata_length;
+    size_t data_offset, data_length;
+    int data_schema;
 };
+
+static int parse_data_object(const uint8_t *bytes, size_t length,
+                             struct object_view *object) {
+    static const uint8_t section_strings[] =
+        "\0.text\0.rela.text\0.rodata\0.data\0.symtab\0.strtab\0.shstrtab\0";
+    static const uint32_t names[8] = {0, 1, 7, 18, 26, 32, 40, 48};
+    static const uint32_t types[8] = {0, 1, 4, 1, 1, 2, 3, 3};
+    uint64_t shoff64 = get64(bytes, 40);
+    if (shoff64 > SIZE_MAX) return 0;
+    size_t shoff = (size_t)shoff64;
+    if (!range_ok(shoff, 8 * SECTION_HEADER_SIZE, length)) return 0;
+    for (size_t index = 0; index < 8; ++index) {
+        size_t header = shoff + index * SECTION_HEADER_SIZE;
+        if (get32(bytes, header) != names[index] ||
+            get32(bytes, header + 4) != types[index])
+            return 0;
+    }
+    size_t text = shoff + SECTION_HEADER_SIZE;
+    size_t rela = text + SECTION_HEADER_SIZE;
+    size_t rodata = rela + SECTION_HEADER_SIZE;
+    size_t data = rodata + SECTION_HEADER_SIZE;
+    size_t symbols = data + SECTION_HEADER_SIZE;
+    size_t strings = symbols + SECTION_HEADER_SIZE;
+    size_t shstr = strings + SECTION_HEADER_SIZE;
+    uint64_t offsets[7] = {
+        get64(bytes, text + 24), get64(bytes, rela + 24),
+        get64(bytes, rodata + 24), get64(bytes, data + 24),
+        get64(bytes, symbols + 24), get64(bytes, strings + 24),
+        get64(bytes, shstr + 24),
+    };
+    uint64_t sizes[7] = {
+        get64(bytes, text + 32), get64(bytes, rela + 32),
+        get64(bytes, rodata + 32), get64(bytes, data + 32),
+        get64(bytes, symbols + 32), get64(bytes, strings + 32),
+        get64(bytes, shstr + 32),
+    };
+    for (size_t index = 0; index < 7; ++index) {
+        if (offsets[index] > SIZE_MAX || sizes[index] > SIZE_MAX ||
+            !range_ok((size_t)offsets[index], (size_t)sizes[index], length))
+            return 0;
+        if (index && offsets[index] < offsets[index - 1] + sizes[index - 1])
+            return 0;
+    }
+    if (get64(bytes, text + 8) != 6 || get64(bytes, text + 48) != 4 ||
+        get64(bytes, rela + 8) != 0 || get32(bytes, rela + 40) != 5 ||
+        get32(bytes, rela + 44) != 1 ||
+        get64(bytes, rela + 48) != 8 ||
+        get64(bytes, rela + 56) != RELA_SIZE || sizes[1] % RELA_SIZE ||
+        get64(bytes, rodata + 8) != 2 ||
+        get64(bytes, rodata + 48) != 8 ||
+        get64(bytes, data + 8) != 3 || get64(bytes, data + 48) != 8 ||
+        get32(bytes, symbols + 40) != 6 ||
+        get32(bytes, symbols + 44) != 1 ||
+        get64(bytes, symbols + 48) != 8 ||
+        get64(bytes, symbols + 56) != SYMBOL_SIZE ||
+        sizes[4] % SYMBOL_SIZE || sizes[4] < 2 * SYMBOL_SIZE ||
+        get64(bytes, strings + 48) != 1 ||
+        get64(bytes, shstr + 48) != 1 ||
+        sizes[6] != sizeof(section_strings) - 1)
+        return 0;
+    for (size_t index = 0; index < sizeof(section_strings) - 1; ++index)
+        if (bytes[(size_t)offsets[6] + index] != section_strings[index])
+            return 0;
+    object->bytes = bytes;
+    object->length = length;
+    object->text_offset = (size_t)offsets[0];
+    object->text_length = (size_t)sizes[0];
+    object->rela_offset = (size_t)offsets[1];
+    object->rela_count = (size_t)sizes[1] / RELA_SIZE;
+    object->rodata_offset = (size_t)offsets[2];
+    object->rodata_length = (size_t)sizes[2];
+    object->data_offset = (size_t)offsets[3];
+    object->data_length = (size_t)sizes[3];
+    object->symbol_offset = (size_t)offsets[4];
+    object->symbol_count = (size_t)sizes[4] / SYMBOL_SIZE;
+    object->string_offset = (size_t)offsets[5];
+    object->string_length = (size_t)sizes[5];
+    object->data_schema = 1;
+    return 1;
+}
 
 static int string_is(const struct object_view *object, uint32_t offset,
                      const char *expected) {
@@ -2754,9 +3582,11 @@ static int parse_object(const uint8_t *bytes, size_t length,
         bytes[2] != 'L' || bytes[3] != 'F' || bytes[4] != 2 || bytes[5] != 1 ||
         bytes[6] != 1 || get16(bytes, 16) != 1 || get16(bytes, 18) != 183 ||
         get32(bytes, 20) != 1 || get16(bytes, 52) != ELF_HEADER_SIZE ||
-        get16(bytes, 58) != SECTION_HEADER_SIZE || get16(bytes, 60) != 6 ||
-        get16(bytes, 62) != 5)
+        get16(bytes, 58) != SECTION_HEADER_SIZE)
         return 0;
+    if (get16(bytes, 60) == 8 && get16(bytes, 62) == 7)
+        return parse_data_object(bytes, length, object);
+    if (get16(bytes, 60) != 6 || get16(bytes, 62) != 5) return 0;
     uint64_t section_headers64 = get64(bytes, 40);
     if (section_headers64 > SIZE_MAX) return 0;
     size_t section_headers = (size_t)section_headers64;
@@ -2812,6 +3642,9 @@ static int parse_object(const uint8_t *bytes, size_t length,
     object->symbol_count = (size_t)symbol_length / SYMBOL_SIZE;
     object->string_offset = (size_t)string_offset;
     object->string_length = (size_t)string_length;
+    object->rodata_offset = object->data_offset = 0;
+    object->rodata_length = object->data_length = 0;
+    object->data_schema = 0;
     return 1;
 }
 
@@ -2845,7 +3678,8 @@ static int symbol_names_equal(const struct object_view *first,
 
 static int validate_symbols(const struct object_view *object) {
     if (object->rela_count > MAX_RELOCATIONS ||
-        object->symbol_count > 1 + MAX_C_FUNCTIONS + MAX_RELOCATIONS)
+        object->symbol_count > 1 + MAX_C_FUNCTIONS + MAX_C_GLOBALS +
+                                   MAX_RELOCATIONS)
         return 0;
     for (size_t byte = 0; byte < SYMBOL_SIZE; ++byte)
         if (object->bytes[object->symbol_offset + byte] != 0) return 0;
@@ -2855,21 +3689,85 @@ static int validate_symbols(const struct object_view *object) {
         uint16_t section_index = get16(object->bytes, entry + 6);
         uint64_t value = get64(object->bytes, entry + 8);
         uint64_t symbol_size = get64(object->bytes, entry + 16);
-        if (object->bytes[entry + 4] != 0x12 ||
-            !object_string_valid(object, name_offset) ||
-            (section_index != 0 && section_index != 1) ||
+        uint8_t info = object->bytes[entry + 4];
+        size_t section_length = section_index == 1
+                                    ? object->text_length
+                                    : section_index == 3 && object->data_schema
+                                          ? object->rodata_length
+                                          : section_index == 4 && object->data_schema
+                                                ? object->data_length : 0;
+        if (!object_string_valid(object, name_offset) ||
+            (info != 0x12 && info != 0x11) ||
+            (info == 0x12 && section_index != 0 && section_index != 1) ||
+            (info == 0x11 && section_index != 0 && section_index != 3 &&
+             section_index != 4) ||
             (section_index == 0 && (value != 0 || symbol_size != 0)) ||
-            (section_index == 1 &&
-             (value >= object->text_length ||
-              symbol_size > object->text_length - (size_t)value)))
+            (section_index != 0 &&
+             (symbol_size == 0 || value >= section_length ||
+              symbol_size > section_length - (size_t)value)))
             return 0;
+    }
+    for (size_t index = 0; index < object->rela_count; ++index) {
+        size_t entry = object->rela_offset + index * RELA_SIZE;
+        uint64_t offset = get64(object->bytes, entry);
+        uint64_t info = get64(object->bytes, entry + 8);
+        int64_t addend = (int64_t)get64(object->bytes, entry + 16);
+        uint32_t type = (uint32_t)info;
+        size_t symbol_index = (size_t)(info >> 32);
+        if (offset > object->text_length ||
+            object->text_length - (size_t)offset < 4 || offset % 4 ||
+            symbol_index == 0 || symbol_index >= object->symbol_count ||
+            addend != 0)
+            return 0;
+        size_t symbol_entry = object->symbol_offset +
+                              symbol_index * SYMBOL_SIZE;
+        uint8_t symbol_info = object->bytes[symbol_entry + 4];
+        uint32_t instruction = get32(object->bytes,
+                                     object->text_offset + (size_t)offset);
+        if (type == R_AARCH64_CALL26) {
+            if (symbol_info != 0x12 || instruction != UINT32_C(0x94000000))
+                return 0;
+        } else if (type == R_AARCH64_ADR_PREL_PG_HI21) {
+            if (symbol_info != 0x11 ||
+                (instruction & UINT32_C(0xffffffe0)) !=
+                    UINT32_C(0x90000000) ||
+                index + 1 == object->rela_count)
+                return 0;
+            size_t next = entry + RELA_SIZE;
+            uint32_t next_instruction = get32(
+                object->bytes, object->text_offset + (size_t)offset + 4);
+            if (get64(object->bytes, next) != offset + 4 ||
+                (uint32_t)get64(object->bytes, next + 8) !=
+                    R_AARCH64_ADD_ABS_LO12_NC ||
+                (size_t)(get64(object->bytes, next + 8) >> 32) !=
+                    symbol_index ||
+                (int64_t)get64(object->bytes, next + 16) != addend ||
+                (instruction & UINT32_C(31)) !=
+                    (next_instruction & UINT32_C(31)))
+                return 0;
+        } else if (type == R_AARCH64_ADD_ABS_LO12_NC) {
+            if (symbol_info != 0x11 || index == 0) return 0;
+            size_t previous = entry - RELA_SIZE;
+            if ((uint32_t)get64(object->bytes, previous + 8) !=
+                    R_AARCH64_ADR_PREL_PG_HI21 ||
+                get64(object->bytes, previous) + 4 != offset ||
+                (size_t)(get64(object->bytes, previous + 8) >> 32) !=
+                    symbol_index ||
+                (instruction & UINT32_C(0xffc003ff)) !=
+                    (UINT32_C(0x91000000) |
+                     ((instruction & UINT32_C(31)) << 5) |
+                     (instruction & UINT32_C(31))))
+                return 0;
+        } else {
+            return 0;
+        }
     }
     return 1;
 }
 
 enum { MAX_LINK_OBJECTS = MAX_BUILD_INPUTS };
 
-static size_t link_objects(const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
+static size_t link_objects_text_only(const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
                            const size_t object_lengths[MAX_LINK_OBJECTS],
                            size_t object_count, uint8_t *output,
                            size_t capacity, const char *entry_name,
@@ -2998,6 +3896,233 @@ static size_t link_objects(const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
     return output_length;
 }
 
+static size_t symbol_section_base(uint16_t section,
+                                  const size_t text_bases[MAX_LINK_OBJECTS],
+                                  const size_t rodata_bases[MAX_LINK_OBJECTS],
+                                  const size_t data_bases[MAX_LINK_OBJECTS],
+                                  size_t object) {
+    return section == 1 ? text_bases[object]
+                        : section == 3 ? rodata_bases[object]
+                                       : data_bases[object];
+}
+
+static uint64_t symbol_virtual_address(
+    uint16_t section, size_t base, uint64_t value) {
+    return section == 1 ? USER_BASE + CODE_OFFSET + base + value
+                        : section == 3
+                              ? USER_BASE + RODATA_VIRTUAL_OFFSET + base + value
+                              : USER_BASE + WRITABLE_VIRTUAL_OFFSET + base + value;
+}
+
+static size_t link_objects_data(
+    const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
+    const size_t object_lengths[MAX_LINK_OBJECTS], size_t object_count,
+    uint8_t *text_output, size_t text_capacity, size_t *text_length_out,
+    uint8_t *rodata_output, size_t rodata_capacity, size_t *rodata_length_out,
+    uint8_t *data_output, size_t data_capacity, size_t *data_length_out,
+    const char *entry_name, size_t *entry_out) {
+    if (!entry_out || !entry_name || !text_length_out ||
+        !rodata_length_out || !data_length_out || !object_count ||
+        object_count > MAX_LINK_OBJECTS)
+        return 0;
+    struct object_view objects[MAX_LINK_OBJECTS] = {0};
+    size_t text_bases[MAX_LINK_OBJECTS] = {0};
+    size_t rodata_bases[MAX_LINK_OBJECTS] = {0};
+    size_t data_bases[MAX_LINK_OBJECTS] = {0};
+    size_t text_length = 0, rodata_length = 0, data_length = 0;
+    for (size_t object = 0; object < object_count; ++object) {
+        if (!parse_object(object_bytes[object], object_lengths[object],
+                          &objects[object]) ||
+            !validate_symbols(&objects[object]))
+            return 0;
+        text_bases[object] = align_up(text_length, 4);
+        rodata_bases[object] = align_up(rodata_length, 8);
+        data_bases[object] = align_up(data_length, 8);
+        if (text_bases[object] > text_capacity ||
+            objects[object].text_length > text_capacity - text_bases[object] ||
+            rodata_bases[object] > rodata_capacity ||
+            objects[object].rodata_length >
+                rodata_capacity - rodata_bases[object] ||
+            data_bases[object] > data_capacity ||
+            objects[object].data_length > data_capacity - data_bases[object])
+            return 0;
+        text_length = text_bases[object] + objects[object].text_length;
+        rodata_length = rodata_bases[object] + objects[object].rodata_length;
+        data_length = data_bases[object] + objects[object].data_length;
+    }
+    if (!text_length) return 0;
+    size_t entry_matches = 0, entry_offset = 0;
+    for (size_t first_object = 0; first_object < object_count; ++first_object) {
+        for (size_t first_symbol = 1;
+             first_symbol < objects[first_object].symbol_count;
+             ++first_symbol) {
+            size_t first_entry = objects[first_object].symbol_offset +
+                                 first_symbol * SYMBOL_SIZE;
+            uint16_t first_section = get16(objects[first_object].bytes,
+                                           first_entry + 6);
+            if (!first_section) continue;
+            if (first_section == 1 &&
+                objects[first_object].bytes[first_entry + 4] == 0x12 &&
+                string_is(&objects[first_object],
+                          get32(objects[first_object].bytes, first_entry),
+                          entry_name)) {
+                ++entry_matches;
+                entry_offset = text_bases[first_object] +
+                               (size_t)get64(objects[first_object].bytes,
+                                             first_entry + 8);
+            }
+            for (size_t second_object = first_object;
+                 second_object < object_count; ++second_object) {
+                size_t second_start = second_object == first_object
+                                          ? first_symbol + 1 : 1;
+                for (size_t second_symbol = second_start;
+                     second_symbol < objects[second_object].symbol_count;
+                     ++second_symbol) {
+                    size_t second_entry = objects[second_object].symbol_offset +
+                                          second_symbol * SYMBOL_SIZE;
+                    if (get16(objects[second_object].bytes,
+                              second_entry + 6) != 0 &&
+                        symbol_names_equal(&objects[first_object], first_symbol,
+                                           &objects[second_object], second_symbol)) {
+                        int duplicate_data_definition = 1;
+                        (void)duplicate_data_definition;
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    if (entry_matches != 1 || entry_offset >= text_length) return 0;
+    memset(text_output, 0, text_length);
+    memset(rodata_output, 0, rodata_length);
+    memset(data_output, 0, data_length);
+    for (size_t object = 0; object < object_count; ++object) {
+        copy_bytes(text_output + text_bases[object],
+                   objects[object].bytes + objects[object].text_offset,
+                   objects[object].text_length);
+        copy_bytes(rodata_output + rodata_bases[object],
+                   objects[object].bytes + objects[object].rodata_offset,
+                   objects[object].rodata_length);
+        copy_bytes(data_output + data_bases[object],
+                   objects[object].bytes + objects[object].data_offset,
+                   objects[object].data_length);
+    }
+    for (size_t object = 0; object < object_count; ++object) {
+        for (size_t index = 0; index < objects[object].rela_count; ++index) {
+            size_t relocation = objects[object].rela_offset + index * RELA_SIZE;
+            uint64_t offset = get64(objects[object].bytes, relocation);
+            uint64_t info = get64(objects[object].bytes, relocation + 8);
+            int64_t addend = (int64_t)get64(objects[object].bytes,
+                                             relocation + 16);
+            uint32_t type = (uint32_t)info;
+            size_t symbol_index = (size_t)(info >> 32);
+            size_t target_matches = 0;
+            uint16_t target_section = 0;
+            uint64_t target_value = 0;
+            size_t target_base = 0;
+            for (size_t target_object = 0; target_object < object_count;
+                 ++target_object) {
+                for (size_t target_symbol = 1;
+                     target_symbol < objects[target_object].symbol_count;
+                     ++target_symbol) {
+                    size_t target_entry = objects[target_object].symbol_offset +
+                                          target_symbol * SYMBOL_SIZE;
+                    uint16_t section = get16(objects[target_object].bytes,
+                                             target_entry + 6);
+                    if (section &&
+                        symbol_names_equal(&objects[object], symbol_index,
+                                           &objects[target_object], target_symbol)) {
+                        ++target_matches;
+                        target_section = section;
+                        target_value = get64(objects[target_object].bytes,
+                                             target_entry + 8);
+                        target_base = symbol_section_base(
+                            section, text_bases, rodata_bases, data_bases,
+                            target_object);
+                    }
+                }
+            }
+            if (target_matches != 1) {
+                int unresolved_data_symbol = 1;
+                (void)unresolved_data_symbol;
+                return 0;
+            }
+            size_t source = text_bases[object] + (size_t)offset;
+            uint32_t instruction = get32(text_output, source);
+            uint64_t target_address = symbol_virtual_address(
+                target_section, target_base, target_value) + addend;
+            uint64_t source_address = USER_BASE + CODE_OFFSET + source;
+            if (type == R_AARCH64_CALL26) {
+                if (target_section != 1 || instruction != UINT32_C(0x94000000))
+                    return 0;
+                int64_t delta = (int64_t)target_address -
+                                (int64_t)source_address;
+                if (delta % 4) return 0;
+                int64_t immediate = delta / 4;
+                if (immediate < -33554432 || immediate > 33554431) return 0;
+                put32(text_output, source,
+                      instruction |
+                          ((uint32_t)immediate & UINT32_C(0x03ffffff)));
+            } else if (type == R_AARCH64_ADR_PREL_PG_HI21) {
+                if (target_section != 3 && target_section != 4) return 0;
+                int64_t page_delta = (int64_t)(target_address >> 12) -
+                                     (int64_t)(source_address >> 12);
+                if (page_delta < -1048576 || page_delta > 1048575) {
+                    int out_of_range_data_symbol = 1;
+                    (void)out_of_range_data_symbol;
+                    return 0;
+                }
+                uint32_t immediate = (uint32_t)page_delta & UINT32_C(0x1fffff);
+                put32(text_output, source,
+                      instruction | ((immediate & 3) << 29) |
+                          (((immediate >> 2) & UINT32_C(0x7ffff)) << 5));
+            } else if (type == R_AARCH64_ADD_ABS_LO12_NC) {
+                if (target_section != 3 && target_section != 4) return 0;
+                put32(text_output, source,
+                      instruction |
+                          ((uint32_t)(target_address & UINT64_C(0xfff)) << 10));
+            } else {
+                int malformed_relocation_pair = 1;
+                (void)malformed_relocation_pair;
+                return 0;
+            }
+        }
+    }
+    *text_length_out = text_length;
+    *rodata_length_out = rodata_length;
+    *data_length_out = data_length;
+    *entry_out = entry_offset;
+    return text_length;
+}
+
+static size_t link_objects(const uint8_t *const object_bytes[MAX_LINK_OBJECTS],
+                           const size_t object_lengths[MAX_LINK_OBJECTS],
+                           size_t object_count, uint8_t *output,
+                           size_t capacity, const char *entry_name,
+                           size_t *entry_out) {
+    int has_data = 0;
+    for (size_t index = 0; index < object_count; ++index) {
+        struct object_view view = {0};
+        if (!parse_object(object_bytes[index], object_lengths[index], &view))
+            return 0;
+        has_data |= view.data_schema;
+    }
+    if (!has_data)
+        return link_objects_text_only(object_bytes, object_lengths,
+                                      object_count, output, capacity,
+                                      entry_name, entry_out);
+    uint8_t rodata[LINKED_RODATA_CAPACITY] = {0};
+    uint8_t data[LINKED_DATA_CAPACITY] = {0};
+    size_t text_length = 0, rodata_length = 0, data_length = 0;
+    if (!link_objects_data(object_bytes, object_lengths, object_count,
+                           output, capacity, &text_length,
+                           rodata, sizeof(rodata), &rodata_length,
+                           data, sizeof(data), &data_length,
+                           entry_name, entry_out) || rodata_length || data_length)
+        return 0;
+    return text_length;
+}
+
 static size_t emit_elf(volatile uint8_t image[IMAGE_CAPACITY],
                        const uint8_t *code, size_t code_length,
                        size_t entry_offset) {
@@ -3040,6 +4165,61 @@ static size_t emit_elf(volatile uint8_t image[IMAGE_CAPACITY],
     copy_bytes(image + DATA_OFFSET, (const uint8_t *)provenance,
                sizeof(provenance) - 1);
     return DATA_OFFSET + sizeof(provenance) - 1;
+}
+
+static size_t emit_elf_data(volatile uint8_t image[IMAGE_CAPACITY],
+                            const uint8_t *code, size_t code_length,
+                            const uint8_t *rodata, size_t rodata_length,
+                            const uint8_t *data, size_t data_length,
+                            size_t entry_offset) {
+    static const char provenance[] =
+        "MakOS guest-native ET_REL data linker output\n";
+    size_t provenance_offset = align_up(rodata_length, 8);
+    size_t rodata_file_length = provenance_offset + sizeof(provenance) - 1;
+    if (!code_length || entry_offset >= code_length ||
+        CODE_OFFSET + code_length > RODATA_FILE_OFFSET ||
+        rodata_file_length > WRITABLE_FILE_OFFSET - RODATA_FILE_OFFSET ||
+        data_length > IMAGE_CAPACITY - WRITABLE_FILE_OFFSET)
+        return 0;
+    memset((void *)image, 0, IMAGE_CAPACITY);
+    image[0] = 0x7f; image[1] = 'E'; image[2] = 'L'; image[3] = 'F';
+    image[4] = 2; image[5] = 1; image[6] = 1;
+    put16(image, 16, 2); put16(image, 18, 183); put32(image, 20, 1);
+    put64(image, 24, USER_BASE + CODE_OFFSET + entry_offset);
+    put64(image, 32, ELF_HEADER_SIZE);
+    put16(image, 52, ELF_HEADER_SIZE);
+    put16(image, 54, PROGRAM_HEADER_SIZE);
+    put16(image, 56, 3);
+    size_t first = ELF_HEADER_SIZE;
+    put32(image, first, 1); put32(image, first + 4, 5);
+    put64(image, first + 8, 0);
+    put64(image, first + 16, USER_BASE);
+    put64(image, first + 24, USER_BASE);
+    put64(image, first + 32, CODE_OFFSET + code_length);
+    put64(image, first + 40, CODE_OFFSET + code_length);
+    put64(image, first + 48, 1);
+    size_t second = first + PROGRAM_HEADER_SIZE;
+    put32(image, second, 1); put32(image, second + 4, 4);
+    put64(image, second + 8, RODATA_FILE_OFFSET);
+    put64(image, second + 16, USER_BASE + RODATA_VIRTUAL_OFFSET);
+    put64(image, second + 24, USER_BASE + RODATA_VIRTUAL_OFFSET);
+    put64(image, second + 32, rodata_file_length);
+    put64(image, second + 40, rodata_file_length);
+    put64(image, second + 48, 1);
+    size_t third = second + PROGRAM_HEADER_SIZE;
+    put32(image, third, 1); put32(image, third + 4, 6);
+    put64(image, third + 8, WRITABLE_FILE_OFFSET);
+    put64(image, third + 16, USER_BASE + WRITABLE_VIRTUAL_OFFSET);
+    put64(image, third + 24, USER_BASE + WRITABLE_VIRTUAL_OFFSET);
+    put64(image, third + 32, data_length);
+    put64(image, third + 40, data_length);
+    put64(image, third + 48, 1);
+    copy_bytes(image + CODE_OFFSET, code, code_length);
+    copy_bytes(image + RODATA_FILE_OFFSET, rodata, rodata_length);
+    copy_bytes(image + RODATA_FILE_OFFSET + provenance_offset,
+               (const uint8_t *)provenance, sizeof(provenance) - 1);
+    copy_bytes(image + WRITABLE_FILE_OFFSET, data, data_length);
+    return WRITABLE_FILE_OFFSET + data_length;
 }
 
 static uint64_t build_hash(const uint8_t *bytes, size_t count) {
@@ -3150,17 +4330,38 @@ static size_t compile_build_object(const struct build_manifest *build,
                                       code, sizeof(code), relocations,
                                       &relocation_count);
         if (!code_length) return 0;
+        int data_relocations = 0;
+        for (size_t index = 0; index < relocation_count; ++index)
+            data_relocations |= relocations[index].type != R_AARCH64_CALL26;
+        if (data_relocations) {
+            struct c_definition definition = {
+                .length = build->entry_length,
+                .offset = 0,
+                .size = code_length,
+            };
+            struct c_data_unit no_data = {0};
+            for (size_t index = 0; index < build->entry_length; ++index)
+                definition.name[index] = build->entry[index];
+            return emit_object_with_data(object, code, code_length,
+                                         &definition, 1, relocations,
+                                         relocation_count, &no_data);
+        }
         return emit_object(object, code, code_length, build->entry,
                            build->entry_length, relocations,
                            relocation_count);
     }
     if (build->inputs[input].language != BUILD_LANGUAGE_C) return 0;
     struct c_definition definitions[MAX_C_FUNCTIONS] = {0};
+    struct c_data_unit data_unit = {0};
     size_t definition_count = 0;
-    size_t code_length = compile_c_unit(
+    size_t code_length = compile_c_unit_data(
         (const char *)source, source_length, code, sizeof(code), definitions,
-        &definition_count, relocations, &relocation_count);
+        &definition_count, relocations, &relocation_count, &data_unit);
     if (!code_length) return 0;
+    if (data_unit.global_count)
+        return emit_object_with_data(object, code, code_length, definitions,
+                                     definition_count, relocations,
+                                     relocation_count, &data_unit);
     return emit_object_definitions(object, code, code_length, definitions,
                                    definition_count, relocations,
                                    relocation_count);
@@ -3224,13 +4425,24 @@ static int incremental_build(
     }
 
     uint8_t linked_code[LINKED_CODE_CAPACITY] = {0};
+    uint8_t linked_rodata[LINKED_RODATA_CAPACITY] = {0};
+    uint8_t linked_data[LINKED_DATA_CAPACITY] = {0};
     size_t entry_offset = 0;
-    size_t linked_length = link_objects(
-        objects, object_lengths, build->input_count, linked_code,
-        sizeof(linked_code), build->entry, &entry_offset);
+    size_t linked_length = 0, rodata_length = 0, data_length = 0;
+    if (!link_objects_data(objects, object_lengths, build->input_count,
+                           linked_code, sizeof(linked_code), &linked_length,
+                           linked_rodata, sizeof(linked_rodata),
+                           &rodata_length, linked_data, sizeof(linked_data),
+                           &data_length, build->entry, &entry_offset))
+        return 0;
     volatile uint8_t image[IMAGE_CAPACITY];
-    size_t image_length = emit_elf(image, linked_code, linked_length,
-                                   entry_offset);
+    size_t image_length = rodata_length || data_length
+                              ? emit_elf_data(image, linked_code, linked_length,
+                                              linked_rodata, rodata_length,
+                                              linked_data, data_length,
+                                              entry_offset)
+                              : emit_elf(image, linked_code, linked_length,
+                                         entry_offset);
     if (!linked_length || !image_length ||
         !write_file(build->output_path, build->output_path_length,
                     (const uint8_t *)image, image_length) ||
@@ -3325,6 +4537,17 @@ static void write_repository_source_marker(void) {
     write_text(" identity=build-generated-exact host_reference=compiled\n");
 }
 
+static void write_global_data_marker(void) {
+    write_text(
+        "MAKOS_AARCH64_C_GLOBAL_DATA_OK "
+        "source=/usr/src/makos/ports/musl/shared-demo.c "
+        "header=/usr/include/stdint.h sections=.text,.rodata,.data "
+        "symbols=STT_FUNC,STT_OBJECT "
+        "relocations=R_AARCH64_ADR_PREL_PG_HI21,"
+        "R_AARCH64_ADD_ABS_LO12_NC segments=R-X,R--,RW-NX "
+        "qualification=build-complete-runtime-pending\n");
+}
+
 static void fail(uint64_t status) {
     syscall4(SYS_EXIT, status, 0, 0, 0);
     for (;;) __asm__ volatile("wfe");
@@ -3341,6 +4564,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "/home/user/makos-repo-probe.build";
     static const char nested_manifest_path[] =
         "/home/user/generated-nested.build";
+    static const char shared_manifest_path[] =
+        "/home/user/makos-shared-demo.build";
+    static const char shared_asm_path[] =
+        "/home/user/makos-shared-demo.s";
+    static const char shared_mutable_path[] =
+        "/home/user/makos-shared-mutable.c";
     static const char main_source_path[] = "/home/user/generated.s";
     static const char program_source_path[] = "/home/user/generated-program.c";
     static const char library_source_path[] = "/home/user/generated-library.c";
@@ -3395,6 +4624,12 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         "c /home/user/generated-nested.c /home/user/generated-nested-c.o\n"
         "c /home/user/generated-nested-control.c /home/user/generated-nested-control.o\n"
         "link /home/user/generated-nested.elf _start\n";
+    static const char shared_manifest_source[] =
+        "MAKBUILD1\n"
+        "asm /home/user/makos-shared-demo.s /home/user/makos-shared-demo-main.o\n"
+        "c /usr/src/makos/ports/musl/shared-demo.c /home/user/makos-shared-demo-production.o\n"
+        "c /home/user/makos-shared-mutable.c /home/user/makos-shared-demo-mutable.o\n"
+        "link /home/user/makos-shared-demo.elf _start\n";
     static const char malformed_build_header[] =
         "MAKBUILD0\n"
         "asm /home/user/generated.s /home/user/generated-main.o\n"
@@ -3520,6 +4755,35 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     static const char nested_control_source[] =
         "int nested(int value) { int result = 0; if (value > 0) { if (value > 5) { result = value + 2; } else { result = value - 2; } } else { result = 1; } return result; }\n"
         "int accumulate(int value) { int result = 0; while (value > 0) { if (value > 2) { result = result + 2; } else { result = result + 1; } value = value - 1; } return result; }\n";
+    static const char shared_asm_source[] =
+        "_start:\n"
+        "mov x0, #20\n"
+        "mov x1, #22\n"
+        "bl makos_shared_add\n"
+        "cmp x0, #42\n"
+        "b.ne shared_fail\n"
+        "adrp x3, makos_shared_name\n"
+        "add x3, x3, :lo12:makos_shared_name\n"
+        "ldrb w4, [x3]\n"
+        "cmp x4, #108\n"
+        "b.ne shared_fail\n"
+        "adrp x3, makos_counter\n"
+        "add x3, x3, :lo12:makos_counter\n"
+        "mov x4, #40\n"
+        "str w4, [x3]\n"
+        "mov x0, #2\n"
+        "bl read_counter\n"
+        "cmp x0, #42\n"
+        "b.ne shared_fail\n"
+        "mov x8, #5\n"
+        "svc #0\n"
+        "shared_fail:\n"
+        "mov x0, #86\n"
+        "mov x8, #5\n"
+        "svc #0\n";
+    static const char shared_mutable_source[] =
+        "int makos_counter = 1;\n"
+        "int read_counter(int value) { return makos_counter + value; }\n";
     static const char header_main_source[] =
         "_start:\n"
         "mov x0, #40\n"
@@ -3788,6 +5052,16 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                      sizeof(nested_manifest_path) - 1,
                      (const uint8_t *)nested_manifest_source,
                      sizeof(nested_manifest_source) - 1) ||
+         !write_file(shared_manifest_path,
+                     sizeof(shared_manifest_path) - 1,
+                     (const uint8_t *)shared_manifest_source,
+                     sizeof(shared_manifest_source) - 1) ||
+         !write_file(shared_asm_path, sizeof(shared_asm_path) - 1,
+                     (const uint8_t *)shared_asm_source,
+                     sizeof(shared_asm_source) - 1) ||
+         !write_file(shared_mutable_path, sizeof(shared_mutable_path) - 1,
+                     (const uint8_t *)shared_mutable_source,
+                     sizeof(shared_mutable_source) - 1) ||
          !write_file(repository_asm_path,
                      sizeof(repository_asm_path) - 1,
                      REPOSITORY_SELFHOST_ASM_SOURCE,
@@ -4083,6 +5357,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
             write_build_output_marker(build_manifest_path,
                                       build_manifest_path_length,
                                       linked_bytes, image_bytes);
+        if (same_name(build_manifest_path, build_manifest_path_length,
+                      shared_manifest_path,
+                      sizeof(shared_manifest_path) - 1))
+            write_global_data_marker();
         for (size_t input = 0; input < build.input_count; ++input)
             if (dependencies[input].count)
                 write_header_marker(&build, input, &dependencies[input]);

@@ -67,29 +67,47 @@ static SHMEM_UNLINK_TRACES: AtomicU64 = AtomicU64::new(0);
 struct SystemFile {
     node: u8,
     inode: u64,
+    mode: u32,
     path: &'static [u8],
     data: &'static [u8],
 }
 
 #[cfg(target_arch = "aarch64")]
-static SYSTEM_FILES: [SystemFile; 3] = [
+static SYSTEM_FILES: [SystemFile; 5] = [
     SystemFile {
         node: 248,
         inode: 6,
+        mode: 0o100555,
         path: b"/usr/lib/libc.so",
         data: include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-musl-loader.so")),
     },
     SystemFile {
         node: 249,
         inode: 7,
+        mode: 0o100555,
         path: b"/usr/lib/libmakosdemo.so",
         data: include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-libmakosdemo.so")),
     },
     SystemFile {
         node: 247,
         inode: 8,
+        mode: 0o100555,
         path: b"/usr/bin/makos-exec-target",
         data: include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-musl-exec-target.elf")),
+    },
+    SystemFile {
+        node: 246,
+        inode: 9,
+        mode: 0o100444,
+        path: b"/usr/src/makos/ports/musl/shared-demo.c",
+        data: include_bytes!("../../ports/musl/shared-demo.c"),
+    },
+    SystemFile {
+        node: 245,
+        inode: 10,
+        mode: 0o100444,
+        path: b"/usr/include/stdint.h",
+        data: include_bytes!("../../sdk/selfhost/include/stdint.h"),
     },
 ];
 #[cfg(not(target_arch = "aarch64"))]
@@ -4092,7 +4110,7 @@ fn system_file_by_node(node: u8) -> Option<SystemFile> {
 
 fn system_file_metadata(file: SystemFile) -> Metadata {
     metadata(
-        0o100555,
+        file.mode,
         crate::security::ROOT_UID,
         0,
         KIND_FILE,

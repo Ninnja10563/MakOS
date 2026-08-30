@@ -11,10 +11,13 @@ PROCESS = (ROOT / "kernel/src/aarch64_process.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
 SECURITY = (ROOT / "kernel/src/security.rs").read_text()
 BUILD = (ROOT / "kernel/build.rs").read_text()
+VFS = (ROOT / "kernel/src/vfs.rs").read_text()
 RUNTIME = (ROOT / "scripts/boot_test_aarch64.py").read_text()
 FOCUSED_RUNTIME = (ROOT / "scripts/boot_test_aarch64_selfhost.py").read_text()
 REPOSITORY_C = (ROOT / "user/aarch64_selfhost_probe.c").read_text()
 REPOSITORY_ASM = (ROOT / "user/aarch64_selfhost_probe.S").read_text()
+PRODUCTION_C = (ROOT / "ports/musl/shared-demo.c").read_text()
+SELFHOST_STDINT = (ROOT / "sdk/selfhost/include/stdint.h").read_text()
 
 
 def require(source: str, fragment: str) -> None:
@@ -180,14 +183,14 @@ for fragment in (
     "static int c_if_statement(",
     "static int c_while(",
     "MAX_C_LOCALS = 4",
-    "OBJECT_CAPACITY = 2048",
+    "OBJECT_CAPACITY = 4096",
     "LINKED_CODE_CAPACITY = 1024",
     "DATA_OFFSET = 1536",
     "IMAGE_CAPACITY = 2048",
     "MAX_C_FUNCTIONS = 6",
     "MAX_C_PARAMETERS = 6",
     "MAX_C_BLOCK_DEPTH = 4",
-    "MAX_RELOCATIONS = 8",
+    "MAX_RELOCATIONS = 16",
     "UINT32_C(0x1b007c00)",
     "UINT32_C(0x1ac00c00)",
     "UINT32_C(0x1b008000)",
@@ -370,6 +373,21 @@ for fragment in (
     require(TOOLCHAIN, fragment)
 
 for fragment in (
+    "R_AARCH64_ADR_PREL_PG_HI21",
+    "R_AARCH64_ADD_ABS_LO12_NC",
+    "STT_OBJECT",
+    r'\0.rodata\0',
+    r'\0.data\0',
+    "PF_W",
+    "MAKOS_AARCH64_C_GLOBAL_DATA_OK",
+    'source=/usr/src/makos/ports/musl/shared-demo.c',
+    '"/usr/include/stdint.h"',
+    '"/home/user/makos-shared-demo.build"',
+    "/home/user/makos-shared-demo.elf",
+):
+    require(TOOLCHAIN, fragment)
+
+for fragment in (
     "fn validate_static_process_image",
     "file_end > bytes.len() as u64",
     "segment.flags & 3 == 3",
@@ -419,6 +437,8 @@ require(BUILD, "../user/aarch64_toolchain.c")
 for fragment in (
     "../user/aarch64_selfhost_probe.c",
     "../user/aarch64_selfhost_probe.S",
+    "../ports/musl/shared-demo.c",
+    "../sdk/selfhost/include/stdint.h",
     "generate_aarch64_selfhost_sources(&manifest, &output_dir)",
     "fn generate_aarch64_selfhost_sources(",
     'output_dir.join("aarch64-selfhost-sources.inc")',
@@ -427,6 +447,15 @@ for fragment in (
     "fn fnv1a(",
 ):
     require(BUILD, fragment)
+for fragment in (
+    'path: b"/usr/src/makos/ports/musl/shared-demo.c"',
+    'data: include_bytes!("../../ports/musl/shared-demo.c")',
+    'path: b"/usr/include/stdint.h"',
+    'data: include_bytes!("../../sdk/selfhost/include/stdint.h")',
+    "mode: 0o100444",
+    "if writable",
+):
+    require(VFS, fragment)
 for fragment in (
     '#include "aarch64-selfhost-sources.inc"',
     "REPOSITORY_SELFHOST_C_SOURCE",
@@ -450,6 +479,19 @@ for fragment in (
     require(REPOSITORY_C, fragment)
 for fragment in ("_start:", "bl makos_probe", "mov x8, #5", "svc #0"):
     require(REPOSITORY_ASM, fragment)
+for fragment in (
+    "#include <stdint.h>",
+    '__attribute__((visibility("default"))) const char makos_shared_name[]',
+    '"libmakosdemo.so"',
+    "makos_shared_add(uint64_t left, uint64_t right)",
+    "return left + right;",
+):
+    require(PRODUCTION_C, fragment)
+for fragment in (
+    "#ifndef MAKOS_SELFHOST_STDINT_H",
+    "typedef unsigned long uint64_t;",
+):
+    require(SELFHOST_STDINT, fragment)
 require(TOOLCHAIN, "parameter_pointers")
 require(TOOLCHAIN, "compiler->parameter_pointers[parameter]")
 require(TOOLCHAIN, "static int c_pointer_expression(")
@@ -543,8 +585,13 @@ require(FOCUSED_RUNTIME, "REPOSITORY_COLD_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_WARM_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_RUN_MARKER")
+require(FOCUSED_RUNTIME, "GLOBAL_DATA_MARKER")
+require(FOCUSED_RUNTIME, "GLOBAL_DATA_COLD_MARKER")
+require(FOCUSED_RUNTIME, "GLOBAL_DATA_WARM_MARKER")
+require(FOCUSED_RUNTIME, "GLOBAL_DATA_CLI_REAP_MARKER")
+require(FOCUSED_RUNTIME, "GLOBAL_DATA_RUN_MARKER")
 require(FOCUSED_RUNTIME, "TOOLCHAIN_SMP_MARKER")
-require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 17")
+require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 19")
 require(FOCUSED_RUNTIME, "def validate_toolchain_smp(")
 require(FOCUSED_RUNTIME, "expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements")
 require(FOCUSED_RUNTIME, "toolchain placement was not least-loaded")
@@ -571,12 +618,15 @@ require(FOCUSED_RUNTIME, "makbuild /home/user/generated-nested.build")
 require(FOCUSED_RUNTIME, "run generated-nested.elf")
 require(FOCUSED_RUNTIME, "makbuild /home/user/makos-repo-probe.build")
 require(FOCUSED_RUNTIME, "run makos-repo-probe.elf")
-require(FOCUSED_RUNTIME, "cli_builds=16")
+require(FOCUSED_RUNTIME, "makbuild /home/user/makos-shared-demo.build")
+require(FOCUSED_RUNTIME, "run makos-shared-demo.elf")
+require(FOCUSED_RUNTIME, "cli_builds=18")
 require(FOCUSED_RUNTIME, "toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe")
 require(FOCUSED_RUNTIME, "console_gpu_handoff=ap-defer,cpu0-compose")
 require(FOCUSED_RUNTIME, "owner_composes == 0")
 require(FOCUSED_RUNTIME, "ap_deferrals == 0")
-require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2,3")
+require(FOCUSED_RUNTIME, "runtime_graphs=4,3,2,2,3,3")
+require(FOCUSED_RUNTIME, "global-data-cold:0/3,global-data-warm:3/0")
 require(FOCUSED_RUNTIME, "nested-cold:0/3,nested-warm:3/0")
 require(FOCUSED_RUNTIME, "validate_nested_build_output")
 require(FOCUSED_RUNTIME, "linked_bytes <= 512")
@@ -585,6 +635,10 @@ require(FOCUSED_RUNTIME, "linked_capacity=1024 output_bytes=1583 image_capacity=
 require(FOCUSED_RUNTIME, "validate_gpu_recovery")
 require(FOCUSED_RUNTIME, "gpu_completion=fast-plus-bounded-recovery")
 require(FOCUSED_RUNTIME, "identity=build-generated-exact host_reference=compiled guest_execution=42")
+require(FOCUSED_RUNTIME, "production_source=/usr/src/makos/ports/musl/shared-demo.c")
+require(FOCUSED_RUNTIME, "source_identity=exact-read-only")
+require(FOCUSED_RUNTIME, "header=/usr/include/stdint.h")
+require(FOCUSED_RUNTIME, "global_data=rodata,rwdata segments=R-X,R--,RW-NX execution=42")
 require(FOCUSED_RUNTIME, "invalidations=object,source,state,header")
 require(FOCUSED_RUNTIME, "header_dependency=quoted-absolute-recursive headers=2 max_depth=2 depth_limit=4 preprocessor=bounded-macro-if-expressions macros=6 conditional_depth=2 macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected include_guard=deduplicated fingerprint=expanded-source")
 require(FOCUSED_RUNTIME, "malformed_headers=missing,relative,cycle,overdepth-denied malformed_preprocessor=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap,macro-parameters,macro-arity,macro-recursion,macro-token-op-denied transitive_header_execution=42")

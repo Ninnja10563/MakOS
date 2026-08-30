@@ -1,8 +1,27 @@
 # Implementation status
 
-Last updated: 2026-08-26.
+Last updated: 2026-08-30.
 
 ## Implemented
+
+- 2026-08-30 the bounded guest-native AArch64 compiler/linker adds its first
+  file-scope data path against the exact unchanged production source
+  `ports/musl/shared-demo.c`. The kernel exposes that source read-only at
+  `/usr/src/makos/ports/musl/shared-demo.c` and the bounded self-host
+  `stdint.h` read-only at `/usr/include/stdint.h`; the manifest and outputs stay
+  under `/home/user`. Bounded `STT_OBJECT` definitions, `.rodata`/`.data`,
+  paired `R_AARCH64_ADR_PREL_PG_HI21` + `R_AARCH64_ADD_ABS_LO12_NC` address
+  relocations, cross-object data resolution, and separate R-X/R--/RW-NX load
+  regions are implemented and structurally guarded. The focused gate now
+  requires authenticated cold/warm builds, a relocated read from the production
+  `libmakosdemo.so` string, `makos_shared_add(20,22) == 42`, mutable-data
+  execution. Its new runtime evidence is still pending; it has not been run in
+  this implementation pass. Fail-closed malformed-pair and unresolved,
+  duplicate, or out-of-range object validation paths are structurally checked.
+  This remains bounded and the SDK and
+  self-hosting audit rows remain Partial: it is not a general system-header
+  implementation, arbitrary initializer/aggregate/TLS support, a self-hosted
+  DSO, or a substantial in-guest MakOS build.
 
 - 2026-08-26 implementation baseline
   `7c01848e9098d8c5f44bd51f542ca06da592e7fe` adds a fifth persistent,
