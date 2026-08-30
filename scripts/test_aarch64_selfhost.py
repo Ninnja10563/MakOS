@@ -388,6 +388,9 @@ for fragment in (
     "static int validate_data_object_behavior(",
     "static int validate_final_data_elf(",
     "malformed_relocation_pair",
+    "size_t pair_index = 0",
+    "(pair_index + 1) * RELA_SIZE",
+    "(low_info & UINT64_C(0xffffffff00000000)) | R_AARCH64_CALL26",
     "unresolved_data_symbol",
     "duplicate_data_definition",
     "out_of_range_data_symbol",
@@ -397,6 +400,8 @@ for fragment in (
     "PRODUCTION_SHARED_DEMO_SOURCE_FNV1A",
     "SELFHOST_STDINT_SOURCE_FNV1A",
     "identity=guest-read-exact readonly_write=denied",
+    "path_length, 1, 2",
+    "path_length, 1, 1",
 ):
     require(TOOLCHAIN, fragment)
 

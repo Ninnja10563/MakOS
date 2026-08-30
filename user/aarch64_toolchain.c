@@ -4427,16 +4427,22 @@ static int validate_data_object_behavior(
     if (!parse_object(corrupt, object_lengths[assembly_object],
                       &corrupt_view) || corrupt_view.rela_count < 2)
         return 0;
-    size_t pair = corrupt_view.rela_offset;
-    while (pair < corrupt_view.rela_offset +
-                      corrupt_view.rela_count * RELA_SIZE &&
-           (uint32_t)get64(corrupt, pair + 8) !=
-               R_AARCH64_ADR_PREL_PG_HI21)
-        pair += RELA_SIZE;
-    if (pair + RELA_SIZE >= corrupt_view.rela_offset +
-                                    corrupt_view.rela_count * RELA_SIZE)
+    size_t pair_index = 0;
+    while (pair_index < corrupt_view.rela_count) {
+        size_t entry = corrupt_view.rela_offset + pair_index * RELA_SIZE;
+        if ((uint32_t)get64(corrupt, entry + 8) ==
+            R_AARCH64_ADR_PREL_PG_HI21)
+            break;
+        ++pair_index;
+    }
+    if (pair_index + 1 >= corrupt_view.rela_count)
         return 0;
-    put32(corrupt, pair + RELA_SIZE + 8, R_AARCH64_CALL26);
+    size_t low_entry = corrupt_view.rela_offset +
+                       (pair_index + 1) * RELA_SIZE;
+    uint64_t low_info = get64(corrupt, low_entry + 8);
+    if ((uint32_t)low_info != R_AARCH64_ADD_ABS_LO12_NC) return 0;
+    put64(corrupt, low_entry + 8,
+          (low_info & UINT64_C(0xffffffff00000000)) | R_AARCH64_CALL26);
     struct object_view rejected = {0};
     int malformed_relocation_pair =
         parse_object(corrupt, object_lengths[assembly_object], &rejected) &&
@@ -4758,14 +4764,28 @@ static int exact_read_only_system_file(
         return 0;
     for (size_t index = 0; index < byte_count; ++index)
         if (bytes[index] != expected[index]) return 0;
-    uint64_t writable = syscall4(SYS_OPEN, (uintptr_t)path, path_length, 1, 0);
-    if (writable != UINT64_MAX) {
-        (void)syscall4(SYS_CLOSE, writable, 0, 0, 0);
+    uint64_t writable_preserve = syscall4(
+        SYS_OPEN, (uintptr_t)path, path_length, 1, 2);
+    if (writable_preserve != UINT64_MAX) {
+        (void)syscall4(SYS_CLOSE, writable_preserve, 0, 0, 0);
+        return 0;
+    }
+    uint64_t writable_truncate = syscall4(
+        SYS_OPEN, (uintptr_t)path, path_length, 1, 1);
+    if (writable_truncate != UINT64_MAX) {
+        (void)syscall4(SYS_CLOSE, writable_truncate, 0, 0, 0);
         return 0;
     }
     if (syscall4(SYS_UNLINK, (uintptr_t)path, path_length, 0, 0) == 1 ||
         syscall4(SYS_CREATE, (uintptr_t)path, path_length, 0, 0) == 1)
         return 0;
+    memset(bytes, 0, sizeof(bytes));
+    byte_count = read_file(path, path_length, bytes, sizeof(bytes));
+    if (byte_count != expected_length ||
+        build_hash(bytes, byte_count) != expected_hash)
+        return 0;
+    for (size_t index = 0; index < byte_count; ++index)
+        if (bytes[index] != expected[index]) return 0;
     return 1;
 }
 

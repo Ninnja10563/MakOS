@@ -325,6 +325,11 @@ exposes it read-only as `/usr/src/makos/ports/musl/shared-demo.c` and exposes
 the bounded SDK header `sdk/selfhost/include/stdint.h` read-only as
 `/usr/include/stdint.h`. The manifest remains writable under `/home/user`:
 
+The guest compares both files byte-for-byte and by generated length/FNV identity.
+It separately denies a writable preserving open (`open` mode 2) and a writable
+truncating open (`open` mode 1), denies replacement, then rereads the original
+bytes before reporting the two read-only claims.
+
 ```text
 MAKBUILD1
 asm /home/user/makos-shared-demo.s /home/user/makos-shared-demo-main.o
