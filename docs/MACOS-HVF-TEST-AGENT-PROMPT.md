@@ -12,11 +12,11 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required implementation baseline: 7c01848e9098d8c5f44bd51f542ca06da592e7fe
+Required implementation baseline: d97c4eb85bd16c4d253a2aa5ddb07b8e7cd109fe
 
 Verify that the checked-out `main` contains this exact implementation commit.
-Do not test an older commit. A later documentation-only handoff commit is
-acceptable if this baseline is its ancestor.
+Do not test an older commit. A later documentation- or test-only handoff commit
+is acceptable if this baseline is its ancestor.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, and docs/INTEGRATED-DATA-IMAGE.md.
@@ -149,9 +149,9 @@ acceptable if this baseline is its ancestor.
    Firefox binaries, package them, and create a new content-addressed integrated
    image from a private clone of the intended data image. Never overwrite the
    source data image. Record the new package/image identities and manifest.
-   Require the build/package markers to report 56 patches with exact ordered
+   Require the build/package markers to report 57 patches with exact ordered
    series SHA-256
-   `9cd45fc60a13102f7a52cf6f31b2c33b3f66c501a8d64b3e567a97e6e34aae9c`,
+   `f1c0fb2bfcd40a554a9390abf85556f94d491728a6cfdee50e2f4c13c96a849c`,
    five audited build hashes, and five exact stripped runtime hashes. Do not
    manually create, copy from another build, or edit the provenance record.
    If those prerequisites cannot be built, return the exact blocker and do not
@@ -167,7 +167,7 @@ acceptable if this baseline is its ancestor.
        make test-aarch64-firefox-runtime
 
    Before QEMU, the target must print
-   `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the pinned source, 56-patch series
+   `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the pinned source, 57-patch series
    identity above, `artifacts=build-audited,runtime-sha256-matched`, and
    AArch64 Firefox PIE/libxul validation. Missing provenance, an old patch
    identity, or any packaged-runtime hash mismatch is a preflight refusal, not

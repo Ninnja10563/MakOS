@@ -185,6 +185,18 @@ def main() -> int:
         EXPECTED_PATCH_COUNT,
         EXPECTED_PATCH_SHA256,
     )
+    handoff_prompt = (
+        provenance.ROOT / "docs/MACOS-HVF-TEST-AGENT-PROMPT.md"
+    ).read_text()
+    assert (
+        f"report {current_count} patches with exact ordered" in handoff_prompt
+    ), "macOS/HVF handoff prompt has a stale Firefox patch count"
+    assert (
+        f"pinned source, {current_count}-patch series" in handoff_prompt
+    ), "macOS/HVF preflight requirement has a stale Firefox patch count"
+    assert (
+        current_identity in handoff_prompt
+    ), "macOS/HVF handoff prompt has a stale Firefox patch identity"
     print(
         "MAKOS_FIREFOX_PROVENANCE_TEST_OK "
         f"patches={current_count} patch_series_sha256={current_identity} "
