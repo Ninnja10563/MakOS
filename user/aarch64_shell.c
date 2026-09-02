@@ -25,7 +25,12 @@ enum {
     SYS_TCSETPGRP = 74,
 };
 
-enum { COMMAND_BYTES = 128, HISTORY_SLOTS = 8 };
+enum {
+    COMMAND_BYTES = 128,
+    HISTORY_SLOTS = 8,
+    MAKBUILD_PATH_BYTES = 96,
+    PARALLEL_MAKBUILD_COUNT = 3,
+};
 
 struct spawn_arguments {
     uint32_t version;
@@ -531,9 +536,36 @@ static void run_selfhost_probe(void) {
         write_text("selfhost-aarch64: startup-vector program failed\n");
 }
 
+static uint64_t spawn_makbuild_process(const uint8_t *path,
+                                       size_t path_length) {
+    if (!path || !path_length || path_length > MAKBUILD_PATH_BYTES)
+        return UINT64_MAX;
+    return syscall4(SYS_PROCESS_SPAWN, 16, (uintptr_t)path, path_length, 0);
+}
+
+static uint64_t wait_for_process(uint64_t pid) {
+    if (pid == UINT64_MAX)
+        return UINT64_MAX;
+    uint64_t status;
+    while ((status = syscall4(SYS_PROCESS_WAIT, pid, 0, 0, 0)) == UINT64_MAX)
+        syscall4(SYS_YIELD, 0, 0, 0, 0);
+    return status;
+}
+
+static void report_makbuild_status(const uint8_t *path, size_t path_length,
+                                   uint64_t status) {
+    if (status == 42) {
+        write_text("MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=");
+        write_bytes(path, path_length);
+        write_text(" source=existing-makfs seeded=0 startup=sysv status=42\n");
+    } else {
+        write_text("makbuild: build failed\n");
+    }
+}
+
 static void run_makbuild(const uint8_t *name, size_t name_length) {
     static const char prefix[] = "/home/user/";
-    uint8_t path[97] = {0};
+    uint8_t path[MAKBUILD_PATH_BYTES + 1] = {0};
     size_t path_length = 0;
     int absolute = name_length >= sizeof(prefix) - 1;
     for (size_t index = 0; absolute && index < sizeof(prefix) - 1; ++index)
@@ -557,24 +589,63 @@ static void run_makbuild(const uint8_t *name, size_t name_length) {
             path[sizeof(prefix) - 1 + index] = name[index];
         path_length = sizeof(prefix) - 1 + name_length;
     }
-    uint64_t pid = syscall4(SYS_PROCESS_SPAWN, 16, (uintptr_t)path,
-                            path_length, 0);
+    uint64_t pid = spawn_makbuild_process(path, path_length);
     if (pid == UINT64_MAX) {
         write_text("makbuild: launch failed\n");
         memset(path, 0, sizeof(path));
         return;
     }
-    uint64_t status;
-    while ((status = syscall4(SYS_PROCESS_WAIT, pid, 0, 0, 0)) == UINT64_MAX)
-        syscall4(SYS_YIELD, 0, 0, 0, 0);
-    if (status == 42) {
-        write_text("MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=");
-        write_bytes(path, path_length);
-        write_text(" source=existing-makfs seeded=0 startup=sysv status=42\n");
-    } else {
-        write_text("makbuild: build failed\n");
-    }
+    uint64_t status = wait_for_process(pid);
+    report_makbuild_status(path, path_length, status);
     memset(path, 0, sizeof(path));
+}
+
+static void run_makbuild_parallel(void) {
+    static const char generated_three[] =
+        "/home/user/generated-three.build";
+    static const char generated_header[] =
+        "/home/user/generated-header.build";
+    static const char generated_nested[] =
+        "/home/user/generated-nested.build";
+    static const char *const manifests[] = {
+        generated_three,
+        generated_header,
+        generated_nested,
+    };
+    const size_t manifest_lengths[] = {
+        sizeof(generated_three) - 1,
+        sizeof(generated_header) - 1,
+        sizeof(generated_nested) - 1,
+    };
+    uint64_t pids[PARALLEL_MAKBUILD_COUNT] = {
+        UINT64_MAX, UINT64_MAX, UINT64_MAX};
+    uint64_t statuses[PARALLEL_MAKBUILD_COUNT] = {
+        UINT64_MAX, UINT64_MAX, UINT64_MAX};
+    int launch_ok = 1;
+
+    /* This entire spawn loop must finish before the first wait syscall. */
+    for (size_t index = 0; index < PARALLEL_MAKBUILD_COUNT; ++index) {
+        pids[index] = spawn_makbuild_process(
+            (const uint8_t *)manifests[index], manifest_lengths[index]);
+        if (pids[index] == UINT64_MAX)
+            launch_ok = 0;
+    }
+    for (size_t index = 0; index < PARALLEL_MAKBUILD_COUNT; ++index) {
+        if (pids[index] != UINT64_MAX) {
+            statuses[index] = wait_for_process(pids[index]);
+            report_makbuild_status((const uint8_t *)manifests[index],
+                                   manifest_lengths[index], statuses[index]);
+        }
+    }
+    if (launch_ok && statuses[0] == 42 && statuses[1] == 42 &&
+        statuses[2] == 42) {
+        write_text("MAKOS_AARCH64_MAKBUILD_PARALLEL_OK "
+                   "spawn_before_wait=3 statuses=42,42,42\n");
+    } else if (!launch_ok) {
+        write_text("makbuild-parallel: launch failed\n");
+    } else {
+        write_text("makbuild-parallel: build failed\n");
+    }
 }
 
 static void run_path(const uint8_t *name, size_t name_length) {
@@ -1037,6 +1108,9 @@ __attribute__((noreturn)) void _start(void) {
                     add_user(&command[8], command_length - 8, terminal);
                 } else if (exact(command, command_length, "abi-startup")) {
                     run_startup_probe();
+                } else if (exact(command, command_length,
+                                 "makbuild-parallel")) {
+                    run_makbuild_parallel();
                 } else if (command_length > 9 &&
                            command[0] == 'm' && command[1] == 'a' &&
                            command[2] == 'k' && command[3] == 'b' &&

@@ -264,6 +264,11 @@ NESTED_RUN_MARKER = (
     b"MAKOS_AARCH64_RUN_OK path=/home/user/generated-nested.elf status=42 "
     b"lifecycle=spawn,run,exit,wait,reap"
 )
+PARALLEL_CLI_MARKER = (
+    b"MAKOS_AARCH64_MAKBUILD_PARALLEL_OK "
+    b"spawn_before_wait=3 statuses=42,42,42"
+)
+TOOLCHAIN_PARALLEL_MARKER = b"MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK "
 TOOLCHAIN_SMP_MARKER = b"MAKOS_AARCH64_TOOLCHAIN_SMP_OK "
 TOOLCHAIN_PROCESS_COUNT = 21
 SIX_FUNCTION_MARKER = (
@@ -310,6 +315,155 @@ EXECUTION_MARKER = (
     b"output=elf64-aarch64 kernel_loader=validated abi56=1 abi57=1 "
     b"argv=3 env=1 malformed_startup_denied=3 executed=2 status=42"
 )
+
+
+def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
+    overlaps = list(
+        re.finditer(
+            rb"MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK "
+            rb"pids=(\d+),(\d+),(\d+) group_pids=(\d+),(\d+),(\d+) "
+            rb"cpus=([1-3]),([1-3]),([1-3]) cpu_mask=0x([0-9a-f]+) "
+            rb"roots=0x([0-9a-f]+),0x([0-9a-f]+),0x([0-9a-f]+) "
+            rb"groups=distinct address_spaces=distinct state=running "
+            rb"ownership=singleton evidence=scheduler-lock-snapshot "
+            rb"evidence_emitter=cpu0",
+            output,
+        )
+    )
+    if len(overlaps) != 1:
+        raise AssertionError(
+            f"expected one parallel Toolchain overlap record, observed {len(overlaps)}"
+        )
+    overlap = overlaps[0]
+    pids = [int(value) for value in overlap.groups()[:3]]
+    group_pids = [int(value) for value in overlap.groups()[3:6]]
+    cpus = [int(value) for value in overlap.groups()[6:9]]
+    cpu_mask = int(overlap.group(10), 16)
+    roots = [int(value, 16) for value in overlap.groups()[10:13]]
+    if (
+        len(set(pids)) != 3
+        or set(group_pids) != set(pids)
+        or cpus != [1, 2, 3]
+        or cpu_mask != 0xE
+        or len(set(roots)) != 3
+        or 0 in roots
+    ):
+        raise AssertionError(
+            "invalid parallel Toolchain overlap: "
+            f"pids={pids} group_pids={group_pids} cpus={cpus} "
+            f"cpu_mask={cpu_mask:#x} roots={[hex(root) for root in roots]}"
+        )
+
+    boundary = output.rfind(CLI_REAP_MARKER, 0, overlap.start())
+    if boundary < 0:
+        raise AssertionError("parallel Toolchain overlap lacks prior CLI boundary")
+    boundary += len(CLI_REAP_MARKER)
+    done = output.find(PARALLEL_CLI_MARKER, overlap.end())
+    if done < 0:
+        raise AssertionError("parallel makbuild completion marker is absent")
+    segment = output[boundary : done + len(PARALLEL_CLI_MARKER)]
+
+    process_records: dict[int, tuple[int, int]] = {}
+    process_positions: dict[int, int] = {}
+    for record in re.finditer(
+        rb"MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid=(\d+) parent=(\d+) "
+        rb"elf=1 el=0 entry=0x[0-9a-f]+ ttbr0=0x([0-9a-f]+) "
+        rb"source=guest-file startup=sysv argc=2 mode=build "
+        rb"scheduler=kernel-least-loaded-ap device_mmio_owner=cpu0",
+        output[boundary:done],
+    ):
+        pid = int(record.group(1))
+        if pid in pids:
+            if pid in process_records:
+                raise AssertionError(f"duplicate parallel process record for pid {pid}")
+            process_records[pid] = (int(record.group(2)), int(record.group(3), 16))
+            process_positions[pid] = boundary + record.start()
+    if set(process_records) != set(pids):
+        raise AssertionError(
+            f"parallel process records do not match overlap pids: {process_records}"
+        )
+    parents = {parent for parent, _ in process_records.values()}
+    if len(parents) != 1 or 0 in parents:
+        raise AssertionError(f"parallel builds lack one authenticated parent: {parents}")
+    for pid, root in zip(pids, roots):
+        if process_records[pid][1] != root:
+            raise AssertionError(
+                f"parallel TTBR0 mismatch for pid {pid}: "
+                f"spawn={process_records[pid][1]:#x} overlap={root:#x}"
+            )
+
+    placement_records: dict[int, tuple[int, int]] = {}
+    for record in re.finditer(
+        rb"MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK pid=(\d+) cpu=([1-3]) "
+        rb"affinity=0x([0-9a-f]+) loads=\d+,\d+,\d+ "
+        rb"idle_mask=0x[0-9a-f]+ policy=least-dispatched-idle-ap "
+        rb"caller_selected=0 device_mmio_owner=cpu0",
+        output[boundary:done],
+    ):
+        pid = int(record.group(1))
+        if pid in pids:
+            if pid in placement_records:
+                raise AssertionError(f"duplicate parallel placement for pid {pid}")
+            placement_records[pid] = (int(record.group(2)), int(record.group(3), 16))
+    expected_placements = {pid: cpu for pid, cpu in zip(pids, cpus)}
+    if set(placement_records) != set(pids):
+        raise AssertionError(
+            f"parallel placements do not match overlap pids: {placement_records}"
+        )
+    for pid, expected_cpu in expected_placements.items():
+        cpu, affinity = placement_records[pid]
+        if cpu != expected_cpu or affinity != 1 << cpu:
+            raise AssertionError(
+                f"parallel placement mismatch for pid {pid}: "
+                f"cpu={cpu} expected={expected_cpu} affinity={affinity:#x}"
+            )
+
+    first_summary = output.find(TOOLCHAIN_SMP_MARKER, boundary, done)
+    matching_reaps = [
+        (int(record.group(1)), int(record.group(2)), boundary + record.start())
+        for record in re.finditer(
+            rb"process-reap arch=aarch64 pid=(\d+) status=(\d+) ",
+            output[boundary:done],
+        )
+        if int(record.group(1)) in pids
+    ]
+    reap_records = {
+        pid: (status, position) for pid, status, position in matching_reaps
+    }
+    if len(matching_reaps) != 3 or set(reap_records) != set(pids) or any(
+        status != 42 for status, _ in reap_records.values()
+    ):
+        raise AssertionError(f"parallel reap records are incomplete: {reap_records}")
+    first_reap = min(position for _, position in reap_records.values())
+    first_finish_evidence = min(
+        position for position in (first_summary, first_reap) if position >= 0
+    )
+    if max(process_positions.values()) >= first_finish_evidence:
+        raise AssertionError(
+            "a parallel Toolchain child reached reap/SMP summary before all "
+            "three process spawn records"
+        )
+    if max(position for _, position in reap_records.values()) >= done:
+        raise AssertionError("parallel shell reported success before all children reaped")
+    if segment.count(TOOLCHAIN_SMP_MARKER) != 3:
+        raise AssertionError(
+            "parallel group did not produce exactly three per-process SMP summaries"
+        )
+    for marker in (
+        THREE_INPUT_COLD_MARKER,
+        HEADER_COLD_MARKER,
+        HEADER_DEP_MARKER,
+        NESTED_COLD_MARKER,
+        NESTED_OUTPUT_PREFIX,
+        THREE_CLI_REAP_MARKER,
+        HEADER_CLI_REAP_MARKER,
+        NESTED_CLI_REAP_MARKER,
+    ):
+        if segment.count(marker) != 1:
+            raise AssertionError(
+                f"parallel group marker count is not one: {marker!r}"
+            )
+    return pids, roots
 
 
 def validate_toolchain_smp(
@@ -728,14 +882,12 @@ def main() -> int:
                 common.wait_for_output_count(
                     selector, process, output, CLI_REAP_MARKER, 6, 60
                 )
-                common.send_command(
-                    stream, "makbuild /home/user/generated-three.build"
-                )
+                common.send_command(stream, "makbuild-parallel")
                 common.wait_for_output(
-                    selector, process, output, THREE_INPUT_COLD_MARKER, 60
+                    selector, process, output, PARALLEL_CLI_MARKER, 180
                 )
-                common.wait_for_output(
-                    selector, process, output, THREE_CLI_REAP_MARKER, 60
+                parallel_pids, parallel_roots = validate_parallel_makbuild(
+                    bytes(output)
                 )
                 common.send_command(
                     stream, "makbuild /home/user/generated-three.build"
@@ -745,18 +897,6 @@ def main() -> int:
                 )
                 common.wait_for_output_count(
                     selector, process, output, THREE_CLI_REAP_MARKER, 2, 60
-                )
-                common.send_command(
-                    stream, "makbuild /home/user/generated-header.build"
-                )
-                common.wait_for_output(
-                    selector, process, output, HEADER_COLD_MARKER, 60
-                )
-                common.wait_for_output(
-                    selector, process, output, HEADER_DEP_MARKER, 60
-                )
-                common.wait_for_output(
-                    selector, process, output, HEADER_CLI_REAP_MARKER, 60
                 )
                 common.send_command(
                     stream, "makbuild /home/user/generated-header.build"
@@ -878,18 +1018,6 @@ def main() -> int:
                     stream, "makbuild /home/user/generated-nested.build"
                 )
                 common.wait_for_output(
-                    selector, process, output, NESTED_COLD_MARKER, 60
-                )
-                common.wait_for_output(
-                    selector, process, output, NESTED_OUTPUT_PREFIX, 60
-                )
-                common.wait_for_output(
-                    selector, process, output, NESTED_CLI_REAP_MARKER, 60
-                )
-                common.send_command(
-                    stream, "makbuild /home/user/generated-nested.build"
-                )
-                common.wait_for_output(
                     selector, process, output, NESTED_WARM_MARKER, 60
                 )
                 common.wait_for_output_count(
@@ -937,6 +1065,7 @@ def main() -> int:
         "format=elf64-et-rel linker=guest-native relocations=R_AARCH64_CALL26:3 "
         "symbols=_start,answer,adjust,combine,helper build_driver=makbuild-v1 build_inputs=4 "
         "toolchain_startup=sysv manifest_arg=1 cli_builds=20 seeded_modes=fixture,existing "
+        f"parallel_builds=3 parallel_commands=1 spawn_before_wait=3 command=post-login-fixed-manifests parallel_pids={parallel_pids[0]},{parallel_pids[1]},{parallel_pids[2]} parallel_roots={parallel_roots[0]:#x},{parallel_roots[1]:#x},{parallel_roots[2]:#x} address_spaces=distinct "
         f"toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe placements={toolchain_placements[0]},{toolchain_placements[1]},{toolchain_placements[2]} dispatches={toolchain_dispatches[0]},{toolchain_dispatches[1]},{toolchain_dispatches[2]} processes={TOOLCHAIN_PROCESS_COUNT} migrations={toolchain_migrations} migration_source_mask={toolchain_migration_source_mask:#x} migration_target_mask={toolchain_migration_target_mask:#x} migration_policy=timer-safe-dispatch-imbalance migration_delta=8 migration_evidence_drops=0 caller_selected=0 ownership=exclusive device_mmio_owner=cpu0 console_gpu_handoff=ap-defer,cpu0-compose owner_composes={toolchain_owner_composes} ap_deferrals={toolchain_ap_deferrals} pending=0 "
         "cache=makstate-v2 input_bounds=2..6 runtime_graphs=4,3,2,2,3,2,2,3 invalidations=object,source,state,header "
         "cache_results=cold:0/4,warm:4/0,object:3/1,rewarm:4/0,source:3/1,rewarm:4/0,state:0/4,three-cold:0/3,three-warm:3/0,header-cold:0/2,header-warm:2/0,header-edit:1/1,header-rewarm:2/0,repository-cold:0/2,repository-warm:2/0,global-data-cold:0/3,global-data-warm:3/0,const-only-cold:0/2,mutable-only-cold:0/2,nested-cold:0/3,nested-warm:3/0 "

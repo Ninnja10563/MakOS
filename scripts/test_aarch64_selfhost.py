@@ -549,11 +549,41 @@ require(TOOLCHAIN, "local.pointer_bound = local.array_length")
 require(TOOLCHAIN, '"        return adjust(values + 1, 1);\\n"')
 require(TOOLCHAIN, '"        *(pointer + delta) = pointer[0] + count + 1;\\n"')
 require(SHELL, "MAKOS_AARCH64_SELFHOST_LINK_OK")
+require(SHELL, "static uint64_t spawn_makbuild_process(")
+require(SHELL, "static uint64_t wait_for_process(")
+require(SHELL, "static void report_makbuild_status(")
+require(SHELL, "MAKBUILD_PATH_BYTES = 96")
+require(SHELL, "PARALLEL_MAKBUILD_COUNT = 3")
 require(SHELL, "static void run_makbuild(")
+require(SHELL, "static void run_makbuild_parallel(void)")
 require(SHELL, "static void run_path(")
 require(SHELL, '"makbuild "')
+require(SHELL, '"makbuild-parallel"')
 require(SHELL, '"run "')
 require(SHELL, "MAKOS_AARCH64_MAKBUILD_CLI_OK")
+require(
+    SHELL,
+    "MAKOS_AARCH64_MAKBUILD_PARALLEL_OK \"\n"
+    "                   \"spawn_before_wait=3 statuses=42,42,42",
+)
+for manifest in (
+    "/home/user/generated-three.build",
+    "/home/user/generated-header.build",
+    "/home/user/generated-nested.build",
+):
+    require(SHELL, manifest)
+parallel_shell = SHELL[
+    SHELL.index("static void run_makbuild_parallel(void)") :
+    SHELL.index("static void run_path(")
+]
+if parallel_shell.index("pids[index] = spawn_makbuild_process(") >= parallel_shell.index(
+    "statuses[index] = wait_for_process(pids[index])"
+):
+    raise AssertionError("parallel makbuild waits before completing all spawns")
+require(parallel_shell, "if (pids[index] != UINT64_MAX)")
+require(parallel_shell, "index < PARALLEL_MAKBUILD_COUNT")
+require(parallel_shell, "statuses[0] == 42 && statuses[1] == 42 &&")
+require(parallel_shell, "statuses[2] == 42")
 require(SHELL, "MAKOS_AARCH64_RUN_OK")
 require(SHELL, "source=existing-makfs seeded=0 startup=sysv status=42")
 require(SHELL, "toolchain_startup=sysv manifest_arg=1")
@@ -640,7 +670,16 @@ require(FOCUSED_RUNTIME, "GLOBAL_DATA_WARM_MARKER")
 require(FOCUSED_RUNTIME, "GLOBAL_DATA_CLI_REAP_MARKER")
 require(FOCUSED_RUNTIME, "GLOBAL_DATA_RUN_MARKER")
 require(FOCUSED_RUNTIME, "TOOLCHAIN_SMP_MARKER")
+require(FOCUSED_RUNTIME, "TOOLCHAIN_PARALLEL_MARKER")
 require(FOCUSED_RUNTIME, "TOOLCHAIN_PROCESS_COUNT = 21")
+require(FOCUSED_RUNTIME, "def validate_parallel_makbuild(")
+require(FOCUSED_RUNTIME, "expected one parallel Toolchain overlap record")
+require(FOCUSED_RUNTIME, "set(group_pids) != set(pids)")
+require(FOCUSED_RUNTIME, "len(set(roots)) != 3")
+require(FOCUSED_RUNTIME, "parallel TTBR0 mismatch for pid")
+require(FOCUSED_RUNTIME, "parallel placement mismatch for pid")
+require(FOCUSED_RUNTIME, "parallel Toolchain child reached reap/SMP summary")
+require(FOCUSED_RUNTIME, "segment.count(TOOLCHAIN_SMP_MARKER) != 3")
 require(FOCUSED_RUNTIME, "def validate_toolchain_smp(")
 require(FOCUSED_RUNTIME, "expected {TOOLCHAIN_PROCESS_COUNT} toolchain placements")
 require(FOCUSED_RUNTIME, "toolchain placement was not least-loaded")
@@ -659,6 +698,7 @@ require(FOCUSED_RUNTIME, "cache_hits=0 cache_misses=4")
 require(FOCUSED_RUNTIME, "write generated-library.o corrupt")
 require(FOCUSED_RUNTIME, "write generated-library.c")
 require(FOCUSED_RUNTIME, "write generated.build.state corrupt")
+require(FOCUSED_RUNTIME, 'send_command(stream, "makbuild-parallel")')
 require(FOCUSED_RUNTIME, "makbuild /home/user/generated-three.build")
 require(FOCUSED_RUNTIME, "makbuild /home/user/generated-header.build")
 require(FOCUSED_RUNTIME, "write generated-leaf.h")
@@ -674,6 +714,17 @@ require(FOCUSED_RUNTIME, "run makos-shared-const.elf")
 require(FOCUSED_RUNTIME, "makbuild /home/user/makos-shared-mutable.build")
 require(FOCUSED_RUNTIME, "run makos-shared-mutable.elf")
 require(FOCUSED_RUNTIME, "cli_builds=20")
+require(
+    FOCUSED_RUNTIME,
+    "parallel_builds=3 parallel_commands=1 spawn_before_wait=3 "
+    "command=post-login-fixed-manifests",
+)
+if FOCUSED_RUNTIME.count('"makbuild /home/user/generated-three.build"') != 1:
+    raise AssertionError("generated-three cold build was not replaced exactly once")
+if FOCUSED_RUNTIME.count('"makbuild /home/user/generated-header.build"') != 3:
+    raise AssertionError("generated-header cold build was not replaced exactly once")
+if FOCUSED_RUNTIME.count('"makbuild /home/user/generated-nested.build"') != 1:
+    raise AssertionError("generated-nested cold build was not replaced exactly once")
 require(FOCUSED_RUNTIME, "toolchain_smp=kernel-least-loaded-ap cpu_mask=0xe")
 require(FOCUSED_RUNTIME, "console_gpu_handoff=ap-defer,cpu0-compose")
 require(FOCUSED_RUNTIME, "owner_composes == 0")
