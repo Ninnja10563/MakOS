@@ -344,8 +344,12 @@ def main() -> int:
             "create-runtime-record",
             "--stripped-libxul",
         ),
+        "ports/firefox/audit-binary.sh": (
+            "verify_firefox_build_elf.py",
+        ),
         "scripts/integrate_data_image.py": (
             "verify_firefox_provenance",
+            "verify_firefox_elf_entries",
             '"firefox_build_provenance"',
         ),
         "Makefile": (
@@ -357,6 +361,20 @@ def main() -> int:
         contents = (provenance.ROOT / relative).read_text()
         for token in required:
             assert token in contents, f"Firefox provenance pipeline guard absent: {token}"
+
+    build_script = (provenance.ROOT / "ports/firefox/build-makos.sh").read_text()
+    assert build_script.index('"$port_dir/audit-binary.sh"') < build_script.index(
+        "create-build-stamp"
+    ), "Firefox build stamp can precede the ELF binary audit"
+    makefile = (provenance.ROOT / "Makefile").read_text()
+    firefox_target = makefile.split("test-aarch64-firefox-runtime:", 1)[1].split(
+        "\ntest-aarch64-ipv6-runtime:", 1
+    )[0]
+    assert firefox_target.index(
+        "scripts/verify_firefox_runtime_image.py"
+    ) < firefox_target.index(
+        "scripts/boot_test_aarch64.py"
+    ), "Firefox runtime can start before content-addressed image preflight"
 
     current_count, current_identity = provenance.patch_series_identity()
     assert (current_count, current_identity) == (

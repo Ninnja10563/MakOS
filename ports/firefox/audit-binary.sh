@@ -10,6 +10,11 @@ readelf=${MAKOS_READELF:-/opt/homebrew/opt/llvm/bin/llvm-readelf}
 
 test -x "$readelf" || { echo "llvm-readelf absent: $readelf" >&2; exit 1; }
 
+# Use the same bounded ELF parser as package-image preflight before release
+# provenance can be created. This covers all five stamped artifacts, including
+# libnspr4.so, and keeps executable PT_INTERP distinct from shared objects.
+python3 "$repo_dir/scripts/verify_firefox_build_elf.py" "$bin_dir"
+
 for name in firefox plugin-container xpcshell libxul.so
 do
     path="$bin_dir/$name"

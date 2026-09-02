@@ -25,6 +25,10 @@ CHUNK = 1024 * 1024
 PACKAGE_START = mkpackage.HEADER_LBA * mkpackage.SECTOR
 PROFILE_START = mkpackage.PROFILE_DATA_LBA * mkpackage.SECTOR
 INTERPRETER = b"/lib/ld-musl-aarch64.so.1\0"
+MAX_ELF_PROGRAM_HEADERS = 128
+MAX_ELF_DYNAMIC_BYTES = 64 * 1024
+MAX_ELF_DYNAMIC_STRING_BYTES = 64 * 1024 * 1024
+UINT64_MAX = (1 << 64) - 1
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,24 @@ class Entry:
     size: int
     offset: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class FirefoxElfContract:
+    interpreter: bool
+    dependencies: tuple[str, ...]
+    soname: str | None = None
+
+
+FIREFOX_ELF_CONTRACTS = {
+    "firefox": FirefoxElfContract(True, ("libc.so",)),
+    "plugin-container": FirefoxElfContract(True, ("libc.so", "libxul.so")),
+    "xpcshell": FirefoxElfContract(True, ("libc.so", "libxul.so")),
+    "libxul.so": FirefoxElfContract(
+        False, ("libnss3.so", "libssl3.so"), "libxul.so"
+    ),
+    "libnspr4.so": FirefoxElfContract(False, ("libc.so",), "libnspr4.so"),
+}
 
 
 def sha256_path(path: pathlib.Path) -> str:
@@ -156,32 +178,210 @@ def read_entry_slice(
 
 
 def verify_aarch64_elf(
-    image: pathlib.Path, entry: Entry, require_interpreter: bool
+    image: pathlib.Path,
+    entry: Entry,
+    require_interpreter: bool,
+    required_dependencies: tuple[str, ...] = (),
+    required_soname: str | None = None,
 ) -> None:
     header = read_entry_slice(image, entry, 0, 64)
     if header[:7] != b"\x7fELF\x02\x01\x01":
         raise ValueError(f"not ELF64 little-endian: {entry.path}")
     elf_type, machine = struct.unpack_from("<HH", header, 16)
+    entry_point = struct.unpack_from("<Q", header, 24)[0]
     phoff = struct.unpack_from("<Q", header, 32)[0]
     phentsize, phnum = struct.unpack_from("<HH", header, 54)
-    if elf_type != 3 or machine != 183 or phentsize < 56 or not phnum:
+    if (
+        elf_type != 3
+        or machine != 183
+        or phentsize < 56
+        or not 0 < phnum <= MAX_ELF_PROGRAM_HEADERS
+    ):
         raise ValueError(f"not AArch64 ET_DYN with program headers: {entry.path}")
-    has_load = False
+    if require_interpreter and entry_point == 0:
+        raise ValueError(f"ELF executable entry point is zero: {entry.path}")
+    load_segments: list[tuple[int, int, int, int]] = []
+    dynamic_segments: list[tuple[int, int, int, int]] = []
     interpreter = None
+    interpreter_seen = False
     for index in range(phnum):
         program = read_entry_slice(image, entry, phoff + index * phentsize, 56)
         kind = struct.unpack_from("<I", program, 0)[0]
-        file_offset, file_size = struct.unpack_from("<QQ", program, 8)[0], struct.unpack_from("<Q", program, 32)[0]
+        file_offset, virtual_address = struct.unpack_from("<QQ", program, 8)
+        file_size, memory_size = struct.unpack_from("<QQ", program, 32)
         if kind == 1:
-            has_load = True
+            if file_offset > entry.size or file_size > entry.size - file_offset:
+                raise ValueError(f"ELF PT_LOAD file range invalid: {entry.path}")
+            if file_size > memory_size:
+                raise ValueError(f"ELF PT_LOAD filesz exceeds memsz: {entry.path}")
+            if virtual_address > UINT64_MAX - memory_size:
+                raise ValueError(f"ELF PT_LOAD virtual range overflows: {entry.path}")
+            load_segments.append(
+                (virtual_address, file_offset, file_size, memory_size)
+            )
+        elif kind == 2:
+            if file_offset > entry.size or file_size > entry.size - file_offset:
+                raise ValueError(f"ELF PT_DYNAMIC file range invalid: {entry.path}")
+            if file_size > memory_size:
+                raise ValueError(f"ELF PT_DYNAMIC filesz exceeds memsz: {entry.path}")
+            if virtual_address > UINT64_MAX - memory_size:
+                raise ValueError(f"ELF PT_DYNAMIC virtual range overflows: {entry.path}")
+            dynamic_segments.append(
+                (virtual_address, file_offset, file_size, memory_size)
+            )
         elif kind == 3:
+            if interpreter_seen:
+                raise ValueError(f"ELF has multiple PT_INTERP entries: {entry.path}")
+            interpreter_seen = True
+            if not require_interpreter:
+                raise ValueError(
+                    f"shared library unexpectedly has PT_INTERP: {entry.path}"
+                )
+            if load_segments:
+                raise ValueError(
+                    f"ELF PT_INTERP must precede PT_LOAD: {entry.path}"
+                )
+            if file_size != len(INTERPRETER):
+                raise ValueError(f"ELF PT_INTERP size invalid: {entry.path}")
             interpreter = read_entry_slice(image, entry, file_offset, file_size)
-    if not has_load:
+    if not load_segments:
         raise ValueError(f"ELF has no PT_LOAD: {entry.path}")
     if require_interpreter and interpreter != INTERPRETER:
         raise ValueError(f"wrong/missing MakOS musl PT_INTERP: {entry.path}")
-    if not require_interpreter and interpreter is not None:
-        raise ValueError(f"shared library unexpectedly has PT_INTERP: {entry.path}")
+
+    dependencies: set[str] = set()
+    soname = None
+    if required_dependencies or required_soname is not None:
+        if len(dynamic_segments) != 1:
+            raise ValueError(f"ELF must have one PT_DYNAMIC: {entry.path}")
+        (
+            dynamic_address,
+            dynamic_offset,
+            dynamic_size,
+            dynamic_memory_size,
+        ) = dynamic_segments[0]
+        if (
+            dynamic_size == 0
+            or dynamic_size > MAX_ELF_DYNAMIC_BYTES
+            or dynamic_size % 16
+        ):
+            raise ValueError(f"ELF PT_DYNAMIC size invalid: {entry.path}")
+        dynamic_mapped = False
+        for (
+            load_address,
+            load_offset,
+            load_file_size,
+            load_memory_size,
+        ) in load_segments:
+            if dynamic_offset < load_offset or dynamic_address < load_address:
+                continue
+            file_delta = dynamic_offset - load_offset
+            virtual_delta = dynamic_address - load_address
+            if (
+                file_delta == virtual_delta
+                and file_delta <= load_file_size
+                and dynamic_size <= load_file_size - file_delta
+                and virtual_delta <= load_memory_size
+                and dynamic_memory_size <= load_memory_size - virtual_delta
+            ):
+                dynamic_mapped = True
+                break
+        if not dynamic_mapped:
+            raise ValueError(
+                f"ELF PT_DYNAMIC is not consistently mapped by PT_LOAD: {entry.path}"
+            )
+        needed_offsets: list[int] = []
+        soname_offset = None
+        string_address = None
+        string_size = None
+        terminated = False
+        for offset in range(0, dynamic_size, 16):
+            tag, value = struct.unpack(
+                "<QQ", read_entry_slice(image, entry, dynamic_offset + offset, 16)
+            )
+            if tag == 0:
+                terminated = True
+                break
+            if tag == 1:
+                needed_offsets.append(value)
+            elif tag == 5:
+                if string_address is not None:
+                    raise ValueError(f"ELF has duplicate DT_STRTAB: {entry.path}")
+                string_address = value
+            elif tag == 10:
+                if string_size is not None:
+                    raise ValueError(f"ELF has duplicate DT_STRSZ: {entry.path}")
+                string_size = value
+            elif tag == 14:
+                if soname_offset is not None:
+                    raise ValueError(f"ELF has duplicate DT_SONAME: {entry.path}")
+                soname_offset = value
+        if not terminated:
+            raise ValueError(f"ELF PT_DYNAMIC lacks DT_NULL: {entry.path}")
+        if (
+            string_address is None
+            or string_size is None
+            or not 0 < string_size <= MAX_ELF_DYNAMIC_STRING_BYTES
+        ):
+            raise ValueError(f"ELF dynamic string table absent: {entry.path}")
+        string_offset = None
+        for virtual_address, file_offset, file_size, _ in load_segments:
+            if (
+                virtual_address <= string_address
+                and string_address - virtual_address <= file_size
+                and string_size <= file_size - (string_address - virtual_address)
+            ):
+                string_offset = file_offset + (string_address - virtual_address)
+                break
+        if string_offset is None:
+            raise ValueError(f"ELF dynamic string table is not file-backed: {entry.path}")
+        strings = read_entry_slice(image, entry, string_offset, string_size)
+
+        def dynamic_string(offset: int, kind: str) -> str:
+            if offset >= len(strings):
+                raise ValueError(f"ELF {kind} offset out of bounds: {entry.path}")
+            end = strings.find(b"\0", offset)
+            if end < 0:
+                raise ValueError(f"ELF {kind} is unterminated: {entry.path}")
+            try:
+                return strings[offset:end].decode("ascii")
+            except UnicodeDecodeError as error:
+                raise ValueError(f"ELF {kind} is not ASCII: {entry.path}") from error
+
+        dependencies = {
+            dynamic_string(offset, "DT_NEEDED") for offset in needed_offsets
+        }
+        if soname_offset is not None:
+            soname = dynamic_string(soname_offset, "DT_SONAME")
+
+    missing_dependencies = sorted(set(required_dependencies) - dependencies)
+    if missing_dependencies:
+        raise ValueError(
+            f"ELF required dependencies absent: {entry.path}: "
+            + ", ".join(missing_dependencies)
+        )
+    if required_soname is not None and soname != required_soname:
+        raise ValueError(
+            f"ELF SONAME mismatch: {entry.path}: "
+            f"expected={required_soname} observed={soname}"
+        )
+
+
+def verify_firefox_elf_entries(
+    image: pathlib.Path, entries: dict[str, Entry]
+) -> None:
+    for name, contract in FIREFOX_ELF_CONTRACTS.items():
+        guest = f"/usr/lib/firefox/{name}"
+        entry = entries.get(guest)
+        if entry is None:
+            raise ValueError(f"Firefox runtime ELF absent: {guest}")
+        verify_aarch64_elf(
+            image,
+            entry,
+            contract.interpreter,
+            contract.dependencies,
+            contract.soname,
+        )
 
 
 def expected_sources() -> dict[str, pathlib.Path]:
@@ -263,9 +463,9 @@ def verify_components(
         if entries[guest].sha256 != sha256_path(source):
             raise ValueError(f"packaged payload differs from source artifact: {guest}")
     verify_firefox_provenance(image, entries)
-    for guest in ("/usr/lib/firefox/firefox", "/usr/bin/nano", "/usr/bin/python3"):
+    verify_firefox_elf_entries(image, entries)
+    for guest in ("/usr/bin/nano", "/usr/bin/python3"):
         verify_aarch64_elf(image, entries[guest], True)
-    verify_aarch64_elf(image, entries["/usr/lib/firefox/libxul.so"], False)
     for guest in (
         "/usr/lib/firefox/licenses/LICENSE",
         "/usr/lib/firefox/licenses/license.html",

@@ -12,8 +12,10 @@ import integrate_data_image
 
 
 REQUIRED = (
-    "/usr/lib/firefox/firefox",
-    "/usr/lib/firefox/libxul.so",
+    *(
+        f"/usr/lib/firefox/{name}"
+        for name in integrate_data_image.FIREFOX_ELF_CONTRACTS
+    ),
     firefox_provenance.GUEST_PATH,
 )
 
@@ -23,12 +25,7 @@ def verify(image: pathlib.Path) -> dict:
     missing = sorted(set(REQUIRED) - set(entries))
     if missing:
         raise ValueError(f"Firefox runtime paths absent: {', '.join(missing)}")
-    integrate_data_image.verify_aarch64_elf(
-        image, entries["/usr/lib/firefox/firefox"], True
-    )
-    integrate_data_image.verify_aarch64_elf(
-        image, entries["/usr/lib/firefox/libxul.so"], False
-    )
+    integrate_data_image.verify_firefox_elf_entries(image, entries)
     return integrate_data_image.verify_firefox_provenance(image, entries)
 
 
@@ -46,7 +43,8 @@ def main() -> int:
         f"image={args.image} source={record['source_version']}@{record['source_commit']} "
         f"patches={record['patch_count']} "
         f"patch_series_sha256={record['patch_series_sha256']} "
-        "artifacts=build-audited,runtime-sha256-matched elf=aarch64-pie,libxul"
+        "artifacts=build-audited,runtime-sha256-matched "
+        "elf=aarch64-pie,libxul all_five_elf=aarch64-et-dyn,interp-and-deps-by-kind"
     )
     return 0
 
