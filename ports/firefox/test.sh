@@ -4,15 +4,16 @@
 set -eu
 
 port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-for script in apply-patches.sh audit.sh audit-binary.sh build-makos.sh build-mode.sh clone.sh fetch.sh \
+for script in apply-patches.sh audit.sh audit-binary.sh build-makos.sh build-mode.sh clone.sh fetch.sh host-tools.sh \
     prepare-rust-libc.sh prepare-rust-errno.sh prepare-rust-getrandom.sh prepare-rust-rustix.sh \
     prepare-rust-mtu.sh prepare-rust-nss-gk-api.sh prepare-rust-socket2.sh \
     prepare-rust-libloading.sh \
-    test-build-mode.sh test-nspr.sh test-toolchain.sh test-widget.sh test.sh \
+    test-build-mode.sh test-host-tools.sh test-nspr.sh test-toolchain.sh test-widget.sh test.sh \
     toolchain-audit.sh
 do
     sh -n "$port_dir/$script"
 done
+"$port_dir/test-host-tools.sh" >/dev/null
 python3 "$port_dir/test-print-settings.py"
 "$port_dir/audit.sh" >/dev/null
 "$port_dir/toolchain-audit.sh" | \

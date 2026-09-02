@@ -109,6 +109,13 @@ packaging flow therefore rejects
 developer outputs, and they cannot qualify runtime performance. The
 unset/default mode remains the release build contract.
 
+Before source staging, the build wrapper requires a complete executable host
+C/C++ compiler pair and cbindgen 0.27.0 or newer. It prefers repository-staged
+LLVM 19 and cbindgen on AArch64 Debian, preserves complete explicit
+`MAKOS_HOST_CC`/`MAKOS_HOST_CXX` and `CBINDGEN` overrides, and compiles and runs
+small host probes. Target compilation remains isolated behind the MakOS clang
+drivers; host tools are never routed through the target ABI.
+
 Official musl and LLVM ports supply isolated C/C++ build and shared-runtime
 sysroots. Build and audit them without promoting them into the SDK:
 

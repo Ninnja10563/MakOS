@@ -108,6 +108,13 @@ LLVM/libclang variables at locally staged tools when they are not installed
 system-wide. `ports/firefox/build-makos.sh widget/makos -j1` is a supported
 compile-only prerequisite gate and deliberately defers the final binary audit;
 it does not produce a package or qualify Firefox runtime behavior.
+The supported wrapper selects a complete host C/C++ compiler pair and cbindgen
+before expensive source staging. On the Debian Pi it prefers the repository's
+staged LLVM 19 pair and staged cbindgen 0.27.0. Explicit
+`MAKOS_HOST_CC`/`MAKOS_HOST_CXX` overrides must be supplied together;
+`CBINDGEN` may select another version 0.27.0 or newer. Tiny host C and C++
+executables are compiled and run so missing, unusable, or wrong-architecture
+tools fail before Gecko configure.
 Use this supported `mach build` path, never a bare make/relink against a moved
 object cache. Before building, it parses `config.status` and `.mozconfig.json`;
 if their recorded object directory differs, it runs `mach configure` once and

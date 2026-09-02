@@ -82,6 +82,8 @@ case "$build_python_version" in
         exit 1
         ;;
 esac
+. "$port_dir/host-tools.sh"
+makos_firefox_select_host_tools "$repo_dir" "$build_python"
 find "$bindgen_libdir" -maxdepth 1 \( -name 'libclang.dylib' -o \
     -name 'libclang.so' -o -name 'libclang-*.so.*' \) \
     -print -quit 2>/dev/null | grep -q . || {
