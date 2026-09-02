@@ -120,6 +120,42 @@ for fragment in (
 ):
     assert fragment in ARCH, fragment
 
+paint_verifier = BOOT.index("def verify_firefox_paint_markers(")
+handoff_verifier = BOOT.index("def verify_firefox_input_handoff_markers(")
+paint_call = BOOT.index(
+    "verify_firefox_paint_markers(output, firefox_output_start)",
+    handoff_verifier,
+)
+first_paint = BOOT.index('"MAKOS_FIREFOX_FIRST_PAINT_OK "', paint_call)
+ctrl_a = BOOT.index('send_key(stream, "ctrl-a")', first_paint)
+selection_wait = BOOT.index("wait_for_firefox_selection_output(", ctrl_a)
+latency_capture = BOOT.index("selection_latency_ms = int(", selection_wait)
+handoff_call = BOOT.index(
+    "verify_firefox_input_handoff_markers(", latency_capture
+)
+latency_limit = BOOT.index("selection_latency_limit_ms = int(", handoff_call)
+latency_check = BOOT.index(
+    "if selection_latency_ms >= selection_latency_limit_ms:", latency_limit
+)
+
+assert paint_verifier < handoff_verifier
+assert paint_call < first_paint < ctrl_a
+assert ctrl_a < selection_wait < latency_capture < handoff_call
+assert handoff_call < latency_limit < latency_check
+assert "verify_firefox_probe_markers" not in BOOT
+
+paint_verifier_body = BOOT[paint_verifier:handoff_verifier]
+handoff_verifier_body = BOOT[handoff_verifier:paint_call]
+for fragment in ("MAKOS_JIT_POOL_OK", "MAKOS_FIREFOX_BLIT"):
+    assert fragment in paint_verifier_body, fragment
+for fragment in (
+    "MAKOS_WIDGET_MAIN_HANDOFF_OK source=post-enqueue",
+    "syscall=149",
+    "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_READY_OK",
+):
+    assert fragment not in paint_verifier_body, fragment
+    assert fragment in handoff_verifier_body, fragment
+
 print(
     "MAKOS_AARCH64_FIREFOX_INTERACTION_TEST_OK "
     "clipboard=round-trip mouse=left-link selection=document-drag-copy-paste "

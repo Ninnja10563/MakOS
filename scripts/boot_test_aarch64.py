@@ -446,13 +446,22 @@ def ppm_pixels(path: pathlib.Path) -> tuple[int, int, bytes]:
     return width, height, pixels
 
 
-def verify_firefox_probe_markers(output: bytearray, start: int) -> None:
+def verify_firefox_paint_markers(output: bytearray, start: int) -> None:
+    firefox_output = output[start:]
+    missing = [
+        marker
+        for marker in (b"MAKOS_JIT_POOL_OK", b"MAKOS_FIREFOX_BLIT")
+        if marker not in firefox_output
+    ]
+    if missing:
+        raise AssertionError(f"missing Firefox paint markers: {missing!r}")
+
+
+def verify_firefox_input_handoff_markers(output: bytearray, start: int) -> None:
     firefox_output = output[start:]
     missing = [
         marker
         for marker, source in (
-            (b"MAKOS_JIT_POOL_OK", firefox_output),
-            (b"MAKOS_FIREFOX_BLIT", firefox_output),
             (
                 b"MAKOS_WIDGET_MAIN_HANDOFF_OK source=post-enqueue "
                 b"syscall=149",
@@ -466,7 +475,7 @@ def verify_firefox_probe_markers(output: bytearray, start: int) -> None:
         if marker not in source
     ]
     if missing:
-        raise AssertionError(f"missing Firefox probe markers: {missing!r}")
+        raise AssertionError(f"missing Firefox input handoff markers: {missing!r}")
 
 
 def verify_firefox_client_ppm(path: pathlib.Path) -> None:
@@ -1159,7 +1168,7 @@ def main() -> int:
                         raise AssertionError(
                             "Firefox did not paint browser chrome within probe window"
                         )
-                    verify_firefox_probe_markers(output, firefox_output_start)
+                    verify_firefox_paint_markers(output, firefox_output_start)
                     response = qmp_command(
                         stream,
                         "screendump",
@@ -1215,6 +1224,10 @@ def main() -> int:
                         )
                         selection_latency_ms = int(
                             (time.monotonic() - selection_started) * 1000
+                        )
+                        verify_firefox_input_handoff_markers(
+                            output,
+                            firefox_output_start,
                         )
                         selection_latency_limit_ms = int(
                             os.environ.get(
