@@ -18,6 +18,8 @@ test -s "$port_dir/mozconfig.makos"
 test -s "$port_dir/patches/0001-makos-target-recognition.patch"
 test -s "$port_dir/patches/0002-makos-widget-surface-abi.patch"
 test -s "$port_dir/patches/0003-nspr-makos-platform.patch"
+test -s "$port_dir/patches/0058-makos-pdf-print-settings.patch"
+test -s "$port_dir/patches/0059-rust-errno-makos-accessor.patch"
 test -s "$port_dir/toolchain-probe.c"
 toolchain_status=$("$port_dir/toolchain-audit.sh")
 

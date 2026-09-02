@@ -186,6 +186,7 @@ if test "${MAKOS_PATCHES_APPLIED:-0}" != 1; then
     "$port_dir/apply-patches.sh"
 fi
 "$port_dir/prepare-rust-libc.sh"
+"$port_dir/prepare-rust-errno.sh"
 "$port_dir/prepare-rust-getrandom.sh"
 "$port_dir/prepare-rust-rustix.sh"
 "$port_dir/prepare-rust-mtu.sh"
@@ -208,6 +209,23 @@ fi
 # Override for release packaging when a different reproducible build ID is
 # required.
 export MOZ_BUILD_DATE=${MOZ_BUILD_DATE:-20260818193048}
+obj_check="$repo_dir/scripts/firefox_objdir.py"
+obj_state=0
+"$build_python" "$obj_check" needs-configure "$obj" --source-dir "$source_dir" || obj_state=$?
+case "$obj_state" in
+    0) ;;
+    10)
+        echo "Firefox MakOS: preserved object directory moved; regenerating with mach configure."
+        "$build_python" "$source_dir/mach" configure
+        ;;
+    *)
+        echo "Firefox MakOS build blocked: object-directory metadata is unreadable." >&2
+        exit 1
+        ;;
+esac
+if test "$obj_state" = 10 || test -f "$obj/config.status"; then
+    "$build_python" "$obj_check" verify "$obj" --source-dir "$source_dir"
+fi
 "$build_python" "$source_dir/mach" build "$@"
 if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1; then
     # A partial or complete successful mach invocation must not leave a staged

@@ -50,6 +50,19 @@ grep -Fq '"MakOS": "__makos__"' \
     "$source_dir/python/mozbuild/mozbuild/configure/constants.py"
 grep -Fq 'return ("cairo-makos",)' "$source_dir/toolkit/moz.configure"
 grep -Fq 'elif toolkit == "makos":' "$source_dir/widget/moz.build"
+grep -Fq '"nsPrintSettingsMakOS.cpp",' \
+    "$source_dir/widget/makos/moz.build"
+grep -Fq 'already_AddRefed<nsIPrintSettings> CreatePlatformPrintSettings(' \
+    "$source_dir/widget/makos/nsPrintSettingsMakOS.cpp"
+grep -Fq 'settings->InitWithInitializer(aSettings);' \
+    "$source_dir/widget/makos/nsPrintSettingsMakOS.cpp"
+grep -Fq 'settings->SetOutputFormat(nsIPrintSettings::kOutputFormatPDF);' \
+    "$source_dir/widget/makos/nsPrintSettingsMakOS.cpp"
+if grep -Eq 'PDF printer|kOutputFormatNative' \
+    "$source_dir/widget/makos/nsPrintSettingsMakOS.cpp"; then
+    echo "MakOS print settings falsely claim a native printer" >&2
+    exit 1
+fi
 mkdir -p "$out_dir"
 PYTHONPYCACHEPREFIX="$out_dir/pycache" python3 -m py_compile \
     "$source_dir/python/mozbuild/mozbuild/configure/constants.py" \
@@ -100,5 +113,6 @@ grep -Fq 'NS_DispatchToMainThread(NS_NewRunnableFunction' \
 grep -Fq 'pthread_join(mEventWatcher' \
     "$source_dir/widget/makos/MakOSWindow.cpp"
 git -C "$source_dir" diff --check
+python3 "$port_dir/test-print-settings.py"
 
-echo "MAKOS_FIREFOX_WIDGET_ABI_OK toolkit=makos arch=aarch64 svc=surface,event,yield,main-handoff nsIWidget=blocked input_wake=blocking-watcher queue=ordered,bounded main_dispatch=gecko-runnable,post-enqueue-ack teardown=wake,join"
+echo "MAKOS_FIREFOX_WIDGET_ABI_OK toolkit=makos arch=aarch64 svc=surface,event,yield,main-handoff nsIWidget=blocked input_wake=blocking-watcher queue=ordered,bounded main_dispatch=gecko-runnable,post-enqueue-ack teardown=wake,join printing=pdf-settings,no-native-printer-claim"

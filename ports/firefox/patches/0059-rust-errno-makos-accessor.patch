@@ -1,0 +1,27 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] rust: stage errno crate with MakOS musl TLS accessor
+
+Cargo verifies vendored crate checksums. Route errno through a separately
+staged copy that selects musl's __errno_location TLS accessor for MakOS.
+
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1886,8 +1886,6 @@ dependencies = [
+ [[package]]
+ name = "errno"
+ version = "0.3.8"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a258e46cdc063eb8519c00b9fc845fc47bcfca4130e2f08e88665ceda8474245"
+ dependencies = [
+  "libc",
+  "windows-sys",
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -115,4 +115,5 @@ libc = { path = "../libc-makos" }
+ # code and will fail the build in unwanted cases.
+ cmake = { path = "build/rust/cmake" }
+ vcpkg = { path = "build/rust/vcpkg" }
++errno = { path = "../errno-makos" }
+ getrandom_0_3 = { package = "getrandom", path = "../getrandom-makos" }

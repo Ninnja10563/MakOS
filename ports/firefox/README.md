@@ -35,6 +35,15 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
+The latest release build reached the final `libxul.so` link before exposing a
+Rust `errno` 0.3.8 target-selection defect: its unknown-Unix fallback requested
+`errno_location`, but MakOS's upstream-musl libc correctly exports the
+thread-local `__errno_location`. The staged checksum-safe errno crate now
+selects the real musl accessor for MakOS. Focused source/Cargo staging and exact
+AArch64 object/runtime-libc symbol checks pass; a fresh complete link, package,
+and guest runtime are still pending. Patch `0059` carries the Cargo routing so
+the independent print-settings patch remains `0058` in the combined series.
+
 Ordered patches recognize MakOS without Linux masquerading; add
 `cairo-makos`/`MOZ_WIDGET_MAKOS`; provide a retained-surface `nsIWidget`,
 software Cairo/Skia/FreeType path, event bridge, POSIX platform services,
@@ -47,6 +56,29 @@ accelerator shortcuts, and per-user MakOS plain-text clipboard data. These
 latest widget changes await constrained compile/guest verification. IME,
 accessibility, GPU acceleration, audio, and production multiprocess compositor
 integration remain target runtime work.
+
+Patch `0058` supplies the platform print-settings factory required by Gecko's
+generic printer code when `NS_PRINTING` is enabled. MakOS uses Gecko's complete
+platform-neutral settings with PDF output and a real default PDF filename; it
+does not invent a native printer, driver, or printer-service ABI. The focused
+AArch64/MakOS object compile defines the exact hidden factory symbol required
+by `Unified_cpp_widget3.o`. A fresh full `libxul.so` link, package, and guest
+print-preview/PDF runtime proof remain pending.
+
+`test-print-settings.py` reports structural-only coverage explicitly by
+default. To reproduce the object/symbol evidence against an existing generated
+Firefox configuration without writing into that source or object tree, run:
+
+```sh
+MAKOS_FIREFOX_PRINT_COMPILE_EVIDENCE=1 \
+MAKOS_FIREFOX_SOURCE_DIR=/path/to/firefox/source \
+MAKOS_FIREFOX_OBJ_DIR=/path/to/obj-aarch64-makos-developer \
+python3 ports/firefox/test-print-settings.py
+```
+
+Requested compile-evidence mode fails closed if the generated headers, MakOS
+configuration, compiler, AArch64 symbol tools, or exact `GLOBAL HIDDEN`
+factory definition are absent.
 
 `patches/0001-makos-target-recognition.patch` adds a distinct `MakOS` OS/kernel
 identity to Gecko's triplet parser and GNU `config.sub`. It does not alias

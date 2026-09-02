@@ -1,0 +1,47 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] widget: provide MakOS PDF print settings
+
+MakOS enables Gecko's printing and print-preview code, so the generic printer
+implementation requires the platform print-settings factory even though MakOS
+does not yet expose a native printer service.  Provide the factory using
+Gecko's complete platform-neutral settings object and select PDF output, which
+is the only printing format MakOS can currently represent honestly.  Do not
+invent a system printer or report native printer support.
+
+diff --git a/widget/makos/moz.build b/widget/makos/moz.build
+--- a/widget/makos/moz.build
++++ b/widget/makos/moz.build
+@@ -16,6 +16,7 @@ SOURCES += [
+     "MakOSWindow.cpp",
+     "MediaKeysEventSourceFactory.cpp",
+     "nsAppShell.cpp",
+     "nsLookAndFeel.cpp",
++    "nsPrintSettingsMakOS.cpp",
+     "nsWidgetFactory.cpp",
+ ]
+diff --git a/widget/makos/nsPrintSettingsMakOS.cpp b/widget/makos/nsPrintSettingsMakOS.cpp
+new file mode 100644
+--- /dev/null
++++ b/widget/makos/nsPrintSettingsMakOS.cpp
+@@ -0,0 +1,21 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsPrintSettingsImpl.h"
++
++#include "mozilla/RefPtr.h"
++
++already_AddRefed<nsIPrintSettings> CreatePlatformPrintSettings(
++    const mozilla::PrintSettingsInitializer& aSettings) {
++  // MakOS does not expose a native printer driver/service ABI yet.  Gecko's
++  // platform-neutral settings are complete for print preview and PDF output;
++  // selecting PDF here avoids falsely treating those settings as a native
++  // printer format.
++  RefPtr<nsPrintSettings> settings = new nsPrintSettings();
++  settings->InitWithInitializer(aSettings);
++  settings->SetOutputFormat(nsIPrintSettings::kOutputFormatPDF);
++  settings->SetDefaultFileName();
++  return settings.forget();
++}
