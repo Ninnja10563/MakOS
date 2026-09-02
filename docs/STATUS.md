@@ -1,8 +1,22 @@
 # Implementation status
 
-Last updated: 2026-08-30.
+Last updated: 2026-09-02.
 
 ## Implemented
+
+- 2026-09-02 the next official Firefox ESR release link exposed one exact Rust
+  target-ABI defect: vendored `errno` 0.3.8 treated the distinct MakOS Unix
+  target as an unknown fallback and emitted an undefined `errno_location`,
+  while the upstream-musl MakOS runtime correctly exports the thread-local
+  accessor `__errno_location`. The checksum-safe staged crate now selects that
+  real musl ABI for `target_os = "makos"`; every stage is reconstructed from
+  exact upstream bytes with checksum comparison and deletion of stale/`.orig`
+  files. Focused tests apply the Cargo override, reject the wrong crate version,
+  refresh changed upstream bytes, and inspect a genuine AArch64 Rust object
+  importing `__errno_location` plus the real runtime `libc.so` export. The
+  source-routing patch is numbered `0059` after the integrated PDF
+  print-settings patch `0058`. A fresh complete `libxul.so` link,
+  package, and Firefox runtime remain pending; this is not a browser pass.
 
 - 2026-08-30 the bounded guest-native AArch64 compiler/linker adds its first
   file-scope data path against the exact unchanged production source
@@ -52,9 +66,9 @@ Last updated: 2026-08-30.
   1.2 GiB swap used). No threshold changed. This remains Pi functional
   evidence only; a fresh patch-0057 Firefox package and unchanged strict
   idle-macOS/HVF qualification remain the Firefox priority.
-  A fresh sole visible-login QEMU from this implementation remains active as
-  PID 987728 under `makos-visible-selfhost-large-output-final.service`, with
-  private session
+  The visible-login QEMU evidence was captured from PID 987728 under
+  `makos-visible-selfhost-large-output-final.service`; that process was stopped,
+  and no QEMU was running at the 2026-09-02 handoff. Its private session was
   `build/makos-pi-visible-selfhost-large-output-final-swOyc3aZ`, read-only
   `boot.img`, fresh sparse `data.img`, private `vars.fd`, `qmp.sock`,
   `serial.log`, and `qemu.pid`. QMP reports `running`; serial contains

@@ -27,6 +27,22 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+The latest official Firefox ESR release build reached the final `libxul.so`
+link and failed on the Rust `errno` 0.3.8 fallback symbol `errno_location`.
+MakOS's real upstream-musl runtime exports TLS accessor `__errno_location`, so
+the port now stages an exact checksum-safe errno crate whose MakOS cfg selects
+that ABI. Behavioral staging/Cargo tests and direct AArch64 object/runtime-libc
+symbol inspection pass. Patch `0059` is reserved for this Cargo routing after
+the independent print-settings patch `0058`. Do not claim the blocker cleared
+until an unchanged full Firefox link succeeds; packaging and runtime remain
+pending and no QEMU evidence was produced by this fix.
+The preserved developer object directory was moved after its interrupted build,
+and its generated metadata still records the old release path and omits the
+print source. The supported build now detects this state and runs `mach
+configure`, then validates the selected object/source identities and generated
+widget backend. Do not invoke bare make or describe the next build as a cheap
+relink; full link evidence remains pending.
+
 The staged 2026-08-30 self-host increment adds bounded file-scope data and an
 exact production-source graph. It reads the unchanged
 `ports/musl/shared-demo.c` through the read-only guest path
@@ -57,18 +73,20 @@ until those unchanged gates actually complete; SDK/self-hosting remain Partial.
   its 60-second final marker under Pi pressure. No threshold changed. This is
   Pi functional evidence only. The fresh patch-0057 package and unchanged
   strict idle-macOS/HVF Firefox gate remain first priority.
-  A fresh sole visible-login QEMU remains active as PID 987728 under user
-  service `makos-visible-selfhost-large-output-final.service`, using private
+  The visible-login QEMU evidence was captured from PID 987728 under user
+  service `makos-visible-selfhost-large-output-final.service`; it was stopped,
+  and no QEMU was running at the 2026-09-02 handoff. It used private
   session `build/makos-pi-visible-selfhost-large-output-final-swOyc3aZ` with
   read-only `boot.img`, fresh sparse `data.img`, private `vars.fd`, `qmp.sock`,
-  `serial.log`, `qemu.pid`, and captured `login.ppm`/`login.png`. QMP reports
-  `running`; the guest reached `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
+  `serial.log`, `qemu.pid`, and captured `login.ppm`/`login.png`. At capture,
+  QMP reported `running`; the guest reached `MAKOS_LOGIN_UI_OK framebuffer=800x600` and
   `MAKOS_AARCH64_BOOT_OK ... desktop=login`. Boot clone SHA-256 is
   `7575e9b6982600d6bae739ec5aa6b5309ec3909111b340e0fdfaf5043ec619a1`;
   inspected PPM/PNG hashes are
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`
   and `133b58664eaaeffb0a255ddb580ad09384db6334edc8612d2e6e3691bcd5ff4f`.
-  Stop it through QMP before any focused runtime; never run concurrent QEMU.
+  Preserve those historical artifacts. Before any future focused runtime,
+  verify the current process list and never run concurrent QEMU.
 - The guest-native AArch64 C seed now supports nested assignment/control bodies
   to an explicit maximum depth of four. Branches and loops may recursively
   contain assignments, `if`/`else`, and `while`; a fifth level and branch-local
@@ -174,7 +192,8 @@ until those unchanged gates actually complete; SDK/self-hosting remain Partial.
   PPM/PNG SHA-256 values are
   `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382` and
   `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
-  Stop it through QMP before any runtime gate; never run concurrent QEMU.
+  Preserve those historical artifacts. Before any future runtime gate, verify
+  the current process list and never run concurrent QEMU.
 - Bounded-macro implementation baseline:
   `ffbce4f6179a7fef03c5cd2b32341ffa7498a7a0`.
 - The AArch64 guest-native preprocessor now expands bounded object-text and
@@ -1191,6 +1210,19 @@ until those unchanged gates actually complete; SDK/self-hosting remain Partial.
 
 ## Important files
 
+- 2026-09-02 Firefox final-link evidence: the protected developer build reached
+  the genuine final `libxul.so` link and exposed two independent missing target
+  bindings: the C++
+  `CreatePlatformPrintSettings(mozilla::PrintSettingsInitializer const&)`
+  factory and Rust errno 0.3.8's unprefixed `errno_location`. Print-only patch
+  `0058` now adds the MakOS factory with platform-neutral PDF settings and no
+  invented native printer service. Earlier focused compilation proved the exact
+  factory ABI, but the strengthened gate now also requires the actual patched
+  source and regenerated backend selection; the preserved stale backend blocks
+  that final evidence until supported mach reconfiguration. The integrated
+  errno correction and 59-patch identity still require a full `libxul.so`
+  relink, package, integrated image, and unchanged idle-macOS/HVF runtime.
+
 - 2026-08-26 clean-source Firefox prerequisite increment: on the Debian
   Raspberry Pi, a pristine pinned ESR checkout proved that the historical
   series lacked the invalidation/paint implementation assumed by patch 0047.
@@ -1213,8 +1245,11 @@ until those unchanged gates actually complete; SDK/self-hosting remain Partial.
 
 ## Next actions
 
-1. On the intended macOS/HVF host, first build/package Firefox with patch 0057
-   and create a new provenance-validated integrated image; the historical
+1. Rerun the genuine final `libxul.so` link with integrated print patch 0058,
+   Rust errno patch 0059, and the exact 59-patch provenance. Then, on the
+   intended macOS/HVF host,
+   build/package that combined source and create a new provenance-validated
+   integrated image; the historical
    `a9c604254f094de2` image is not valid for this increment. When no visible
    QEMU runs and host load/memory pressure is low, run unchanged
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A

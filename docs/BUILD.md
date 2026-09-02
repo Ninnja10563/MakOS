@@ -108,6 +108,30 @@ LLVM/libclang variables at locally staged tools when they are not installed
 system-wide. `ports/firefox/build-makos.sh widget/makos -j1` is a supported
 compile-only prerequisite gate and deliberately defers the final binary audit;
 it does not produce a package or qualify Firefox runtime behavior.
+Use this supported `mach build` path, never a bare make/relink against a moved
+object cache. Before building, it parses `config.status` and `.mozconfig.json`;
+if their recorded object directory differs, it runs `mach configure` once and
+then requires regenerated autoconf/backend metadata selecting
+`nsPrintSettingsMakOS.cpp`. Missing, malformed, still-stale, or incomplete
+metadata fails closed without textual substitution. The preserved Pi cache is
+known to need this regeneration, so a cheap incremental relink is not assumed.
+The Rust `errno` crate is staged separately because Cargo verifies vendored
+checksums. `prepare-rust-errno.sh` accepts only version 0.3.8, reconstructs the
+stage from exact source bytes on every invocation, and applies the MakOS cfg
+that selects upstream musl's thread-local `__errno_location`. The focused gate
+is:
+
+```sh
+python3 scripts/test_firefox_errno.py
+```
+
+It always runs behavioral temporary-source/stage and Cargo-patch fixtures and
+prints whether optional real libc/object symbol checks were performed or
+skipped. Set `MAKOS_FIREFOX_ERRNO_SOURCE_DIR`, `MAKOS_FIREFOX_ERRNO_LIBC`, and
+`MAKOS_FIREFOX_ERRNO_OBJECT`, plus
+`MAKOS_FIREFOX_ERRNO_REQUIRE_FIXTURES=1`, to make all three repository evidence
+checks mandatory. This corrects the observed final-link input ABI; it does not
+claim a successful fresh `libxul.so` link or Firefox runtime.
 The selected Clang installation must include its matching AArch64 intrinsic
 resource headers (`arm_neon.h`; Debian LLVM 19 packages this in
 `libclang-common-19-dev`). `ports/firefox/test-toolchain.sh` compiles a real
