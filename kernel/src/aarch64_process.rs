@@ -243,6 +243,8 @@ struct SchedulerState {
     toolchain_migration_records: [ComputeMigration; MAX_TOOLCHAIN_MIGRATIONS],
     toolchain_migration_count: usize,
     toolchain_migration_reported: usize,
+    toolchain_parallel_snapshot: Option<ToolchainParallelSnapshot>,
+    toolchain_parallel_reported: bool,
     application_migration_records: [ComputeMigration; MAX_APPLICATION_MIGRATIONS],
     application_migration_count: usize,
     spawned_roots: [u64; MAX_PROCESSES],
@@ -268,6 +270,8 @@ impl SchedulerState {
             toolchain_migration_records: [ComputeMigration::EMPTY; MAX_TOOLCHAIN_MIGRATIONS],
             toolchain_migration_count: 0,
             toolchain_migration_reported: 0,
+            toolchain_parallel_snapshot: None,
+            toolchain_parallel_reported: false,
             application_migration_records: [ComputeMigration::EMPTY; MAX_APPLICATION_MIGRATIONS],
             application_migration_count: 0,
             spawned_roots: [0; MAX_PROCESSES],
@@ -351,6 +355,13 @@ impl SchedulerState {
                     }
                 }
             }
+        }
+        if selected.is_some_and(|info| {
+            self.contexts
+                .iter()
+                .any(|slot| slot.pid == info.pid && slot.role == ProcessRole::Toolchain)
+        }) {
+            self.capture_toolchain_parallel_snapshot();
         }
         selected
     }
@@ -451,6 +462,16 @@ impl SchedulerState {
             return None;
         }
         let placement = self.least_loaded_compute_ap();
+        // A running Toolchain leader is made Ready/unowned only after this
+        // policy decision. With all eligible APs occupied, dispatch counters
+        // alone must never redirect it to a second busy AP and evict that AP's
+        // current task. Requiring the selected target bit also ties the choice
+        // to the same scheduler-lock-protected ownership snapshot.
+        if placement.idle_mask == 0
+            || placement.idle_mask & (1u8 << placement.cpu) == 0
+        {
+            return None;
+        }
         let source_load = placement.loads[cpu - 1];
         let target_load = placement.loads[placement.cpu - 1];
         if placement.cpu == cpu
@@ -479,6 +500,60 @@ impl SchedulerState {
         TOOLCHAIN_MIGRATION_SOURCE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
         TOOLCHAIN_MIGRATION_TARGET_MASK.fetch_or(1u64 << placement.cpu, Ordering::AcqRel);
         Some(migration)
+    }
+
+    fn capture_toolchain_parallel_snapshot(&mut self) {
+        if self.toolchain_parallel_snapshot.is_some() {
+            return;
+        }
+        let mut pids = [0u64; 3];
+        let mut roots = [0u64; 3];
+        for cpu in 1..4 {
+            let Some(pid) = self.table.current_pid_on(cpu) else {
+                return;
+            };
+            let Some(info) = self.table.get(pid) else {
+                crate::fatal("AArch64 Toolchain parallel owner absent from process table");
+            };
+            let Some(slot) = self.contexts.iter().find(|slot| slot.pid == pid) else {
+                crate::fatal("AArch64 Toolchain parallel owner absent from context table");
+            };
+            if info.state != makos_process_table::ProcessState::Running
+                || slot.role != ProcessRole::Toolchain
+                || slot.pid != slot.group_pid
+            {
+                return;
+            }
+            if slot.affinity_mask != 1u8 << cpu
+                || self.table.running_cpu(pid) != Some(cpu)
+                || (0..4)
+                    .filter(|candidate| self.table.current_pid_on(*candidate) == Some(pid))
+                    .count()
+                    != 1
+            {
+                crate::fatal("AArch64 Toolchain parallel owner was not singleton");
+            }
+            if info.resource == 0 || info.resource != slot.context.ttbr0 {
+                crate::fatal("AArch64 Toolchain parallel address-space ownership invalid");
+            }
+            pids[cpu - 1] = pid;
+            roots[cpu - 1] = info.resource;
+        }
+        if pids[0] == pids[1]
+            || pids[0] == pids[2]
+            || pids[1] == pids[2]
+            || roots[0] == roots[1]
+            || roots[0] == roots[2]
+            || roots[1] == roots[2]
+        {
+            crate::fatal("AArch64 Toolchain parallel groups or address spaces not distinct");
+        }
+        self.toolchain_parallel_snapshot = Some(ToolchainParallelSnapshot {
+            pids,
+            group_pids: pids,
+            roots,
+            cpu_mask: 0xe,
+        });
     }
 
     fn rebalance_application_on_timer(
@@ -551,6 +626,14 @@ struct ComputeMigration {
     target_cpu: usize,
     loads: [u64; 3],
     idle_mask: u8,
+}
+
+#[derive(Clone, Copy)]
+struct ToolchainParallelSnapshot {
+    pids: [u64; 3],
+    group_pids: [u64; 3],
+    roots: [u64; 3],
+    cpu_mask: u8,
 }
 
 impl ComputeMigration {
@@ -4312,7 +4395,20 @@ fn reset_toolchain_smp_evidence() {
     with_state(|state| {
         state.toolchain_migration_count = 0;
         state.toolchain_migration_reported = 0;
+        state.toolchain_parallel_snapshot = None;
+        state.toolchain_parallel_reported = false;
     });
+}
+
+fn take_toolchain_parallel_snapshot() -> Option<ToolchainParallelSnapshot> {
+    with_state(|state| {
+        if state.toolchain_parallel_reported {
+            return None;
+        }
+        let snapshot = state.toolchain_parallel_snapshot?;
+        state.toolchain_parallel_reported = true;
+        Some(snapshot)
+    })
 }
 
 fn take_unreported_toolchain_migrations(
@@ -5953,6 +6049,21 @@ pub fn wait(pid: u64) -> Option<u64> {
             crate::fatal("AArch64 toolchain parent wait escaped CPU0");
         }
         crate::graphics::service_deferred_actions();
+        if let Some(snapshot) = take_toolchain_parallel_snapshot() {
+            crate::serial_println!(
+                "MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK pids={},{},{} group_pids={},{},{} cpus=1,2,3 cpu_mask={:#x} roots={:#x},{:#x},{:#x} groups=distinct address_spaces=distinct state=running ownership=singleton evidence=scheduler-lock-snapshot evidence_emitter=cpu0",
+                snapshot.pids[0],
+                snapshot.pids[1],
+                snapshot.pids[2],
+                snapshot.group_pids[0],
+                snapshot.group_pids[1],
+                snapshot.group_pids[2],
+                snapshot.cpu_mask,
+                snapshot.roots[0],
+                snapshot.roots[1],
+                snapshot.roots[2],
+            );
+        }
         let observed_dispatches = TOOLCHAIN_REPORTED_MASK.load(Ordering::Acquire);
         let emitted_dispatches = TOOLCHAIN_DISPATCH_EMITTED_MASK.load(Ordering::Acquire);
         let new_dispatches = observed_dispatches & !emitted_dispatches;

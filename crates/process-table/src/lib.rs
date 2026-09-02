@@ -491,6 +491,50 @@ mod tests {
     }
 
     #[test]
+    fn three_independent_address_spaces_run_on_distinct_aps_with_singleton_ownership() {
+        let mut table = ProcessTable::<4>::new();
+        let pids = [
+            table.spawn(1, 0x11_000).unwrap(),
+            table.spawn(1, 0x22_000).unwrap(),
+            table.spawn(1, 0x33_000).unwrap(),
+        ];
+
+        for (index, pid) in pids.iter().copied().enumerate() {
+            let cpu = index + 1;
+            table.activate_on(cpu, pid).unwrap();
+            assert_eq!(table.current_pid_on(cpu), Some(pid));
+            assert_eq!(table.running_cpu(pid), Some(cpu));
+        }
+
+        let resources = pids.map(|pid| {
+            let info = table.get(pid).unwrap();
+            assert_eq!(info.state, ProcessState::Running);
+            assert_eq!(
+                (0..4)
+                    .filter(|cpu| table.current_pid_on(*cpu) == Some(pid))
+                    .count(),
+                1
+            );
+            info.resource
+        });
+        assert_eq!(
+            pids.iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(
+            resources
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            3
+        );
+    }
+
+    #[test]
     fn affinity_selection_leaves_rejected_tasks_ready_and_unowned() {
         let mut table = ProcessTable::<4>::new();
         let ui = table.spawn(0, 1).unwrap();

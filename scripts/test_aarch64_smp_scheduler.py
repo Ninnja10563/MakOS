@@ -248,6 +248,19 @@ for token in (
     "compute_placement_cursor: u8",
     "fn least_loaded_compute_ap(&mut self) -> ComputePlacement",
     "fn rebalance_toolchain_on_timer(",
+    "if placement.idle_mask == 0",
+    "placement.idle_mask & (1u8 << placement.cpu) == 0",
+    "fn capture_toolchain_parallel_snapshot(&mut self)",
+    "self.capture_toolchain_parallel_snapshot();",
+    "info.state != makos_process_table::ProcessState::Running",
+    "slot.pid != slot.group_pid",
+    "self.table.running_cpu(pid) != Some(cpu)",
+    "AArch64 Toolchain parallel owner was not singleton",
+    "info.resource != slot.context.ttbr0",
+    "AArch64 Toolchain parallel groups or address spaces not distinct",
+    "fn take_toolchain_parallel_snapshot() -> Option<ToolchainParallelSnapshot>",
+    "toolchain_parallel_reported: bool",
+    "state.toolchain_parallel_reported = true;",
     "TOOLCHAIN_REBALANCE_DISPATCH_DELTA",
     "TOOLCHAIN_CPU_MASK",
     "TOOLCHAIN_PLACEMENTS",
@@ -265,6 +278,10 @@ for token in (
     "MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK",
     "evidence_emitter=cpu0",
     "MAKOS_AARCH64_TOOLCHAIN_SMP_OK",
+    "MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK",
+    "group_pids={},{},{} cpus=1,2,3 cpu_mask={:#x}",
+    "groups=distinct address_spaces=distinct state=running ownership=singleton",
+    "evidence=scheduler-lock-snapshot evidence_emitter=cpu0",
     "console_gpu_handoff=ap-defer,cpu0-compose",
     "crate::graphics::service_deferred_actions()",
     "AArch64 toolchain escaped kernel-selected AP affinity",
@@ -383,6 +400,16 @@ for token in (
     'asm!("dsb ish", "sev", options(nostack))',
 ):
     assert token in PROCESS, token
+
+parallel_capture = PROCESS.split("fn capture_toolchain_parallel_snapshot(&mut self)", 1)[1]
+parallel_capture = parallel_capture.split("fn rebalance_application_on_timer(", 1)[0]
+assert "serial_print" not in parallel_capture
+toolchain_wait = PROCESS.split(
+    "if pid == group_pid && role == ProcessRole::Toolchain {", 1
+)[1].split("if pid == group_pid && tracked_production_worker", 1)[0]
+assert toolchain_wait.index("if scheduler_cpu() != 0 {") < toolchain_wait.index(
+    "MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK"
+)
 
 exit_path = PROCESS.split("pub(crate) fn exit_from_exception(", 1)[1].split(
     "/// Linux/POSIX exit_group", 1
