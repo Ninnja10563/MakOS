@@ -127,11 +127,31 @@ self-host `/usr/include/stdint.h`, `STT_OBJECT`, `.rodata`/`.data`, paired
 AArch64 ADRP+ADD relocations, cross-object data resolution, and final
 R-X/R--/RW-NX regions are implemented. ET_REL construction uses a 4 KiB
 in-memory work buffer but persistent files remain bounded by MakFS's 2 KiB
-limit. The extended focused gate requires eight
-graphs, 20 CLI builds, and 21 Toolchain processes before new runtime evidence
-is recorded. General globals/initializers, aggregates, common objects, TLS,
-general system headers, a self-hosted DSO, and substantial in-guest builds
-remain missing, so both rows stay Partial.
+limit.
+
+Staged qualification note (2026-09-02): implementation through
+`eed30306d1abeaf9a375df82f210b51d54a93ec1` adds a fixed authenticated
+`makbuild-parallel` phase for three disjoint cold graphs. The shell performs all
+three spawns before any wait, safely distinguishes Pending from NoChild, drains
+launched siblings after partial spawn failure, requires three status-42 reaps,
+and emits its success record only afterward. The scheduler captures a locked,
+one-shot proof that distinct singleton Toolchain leaders with unique TTBR0
+roots simultaneously own AP1-3, emits that proof later on CPU0, and restricts
+migration destinations to idle APs. The harness correlates exact process,
+placement, reap, group, root, and ordered migration evidence while permitting
+nondeterministic child output and legal pre/post-snapshot migration. Focused
+non-QEMU tests pass with combined-log SHA-256
+`9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
+No QEMU runtime proof exists for this staged behavior. The extended unchanged
+gate requires eight graphs, 20 CLI builds, and 21 Toolchain processes,
+including three simultaneous cold graphs, before new runtime evidence is
+recorded. General globals/initializers, aggregates, common objects, TLS,
+general system headers, a self-hosted DSO, arbitrary build graphs, and
+substantial in-guest builds remain missing, so the Scheduling, SDK/developer
+tools, and Self-hosting rows stay Partial.
+The older row-gap shorthand `arbitrary/parallel build graphs` is therefore
+superseded only for this fixed three-graph command; arbitrary graphs and
+general parallel build scheduling remain missing.
 
 1. Requalify strict Firefox Gate 3 on an idle host, then widen upstream apps.
 2. Add package repositories, key rotation, richer dependency solving, and

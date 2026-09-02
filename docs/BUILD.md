@@ -359,6 +359,54 @@ Run the focused gate with:
 make test-aarch64-selfhost-runtime
 ```
 
+The unchanged gate now stages one bounded parallel-build phase. After login,
+the authenticated fixed command `makbuild-parallel` launches the existing
+disjoint cold manifests `/home/user/generated-three.build`,
+`/home/user/generated-header.build`, and
+`/home/user/generated-nested.build`. All three spawn syscalls occur before the
+first wait. The shell then waits for and reaps every successfully launched
+child, requires status 42 from each, writes each complete per-build success
+record atomically, and finally emits:
+
+```text
+MAKOS_AARCH64_MAKBUILD_PARALLEL_OK spawn_before_wait=3 statuses=42,42,42
+```
+
+Syscall 126 returns a consumed exit status plus one, zero for Pending, and -10
+for NoChild, so the shell cannot confuse a still-running process with a missing
+child. A partial spawn failure still drains every launched sibling and cannot
+emit the parallel-success marker. Toolchain spawning remains restricted to the
+authenticated Shell role and manifests under `/home/user/`; failed session
+registration terminates, reaps, and discards the unregistered child.
+
+The scheduler selects idle AP1-3 for the distinct singleton Toolchain leaders.
+While holding its scheduler lock it captures a one-shot overlap snapshot only
+when all three APs own running leaders with exact affinity, unique PID and
+TTBR0, matching process-group leadership, and singleton ownership. CPU0 later
+emits the snapshot outside the lock as
+`MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK`; timer rebalancing may migrate a leader
+only to an actually idle AP. The focused harness therefore validates each
+ordered migration chain and requires the immutable snapshot CPU to occur in
+that child's visited CPU history, rather than incorrectly requiring it to be
+the final endpoint after a legal post-snapshot migration. It also accepts
+nondeterministic child-build marker order while requiring all three placement
+and process records before the first reap/SMP summary, exact positional
+PID/group/root correlation, three status-42 reaps, and the preserved cold,
+warm, output, and execution checks.
+
+This implementation is staged through
+`eed30306d1abeaf9a375df82f210b51d54a93ec1`. Focused process-table,
+scheduler/self-host structural, synthetic parallel-evidence, Python syntax,
+and strict AArch64 shell compilation checks pass; the combined focused log has
+SHA-256
+`9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
+No QEMU runtime was run for this increment. The next unchanged runtime gate
+expects eight graphs, 20 authenticated CLI builds, and 21 Toolchain processes,
+including these three simultaneous cold graphs; this is an expectation, not a
+pass. The authoritative prior Pi/QEMU TCG result remains five graphs, 16 CLI
+builds, and 17 Toolchain processes. Scheduling, SDK, and self-hosting remain
+Partial.
+
 The focused gate also proves a repository-source path that is distinct from
 the synthetic language fixtures. `kernel/build.rs` reads the exact bytes of
 `user/aarch64_selfhost_probe.c` and `user/aarch64_selfhost_probe.S`, compiles

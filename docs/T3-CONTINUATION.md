@@ -54,6 +54,29 @@ processes and from 16 to 20 CLI builds for authenticated cold/warm production,
 const-only and mutable-only builds plus ordinary-loader execution. Do not record Pi or macOS runtime evidence
 until those unchanged gates actually complete; SDK/self-hosting remain Partial.
 
+The staged AArch64 parallel self-host/SMP increment through
+`eed30306d1abeaf9a375df82f210b51d54a93ec1` adds the fixed authenticated
+`makbuild-parallel` command for the disjoint cold `generated-three.build`,
+`generated-header.build`, and `generated-nested.build` graphs. It performs all
+three spawns before any wait, uses wait-status syscall 126 to distinguish
+Pending from NoChild, drains every launched sibling on partial failure, and
+requires three status-42 reaps before emitting
+`MAKOS_AARCH64_MAKBUILD_PARALLEL_OK`. Under the scheduler lock, the kernel
+captures a one-shot overlap proof for three running singleton Toolchain leaders
+on AP1-3 with exact group ownership and unique TTBR0 roots; CPU0 emits
+`MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK` later outside the lock. Migration targets
+must be idle. The harness permits arbitrary child-output order, validates each
+ordered migration chain, and requires the locked snapshot CPU to be visited so
+both legal pre- and post-snapshot migration are covered. Focused process-table,
+structural, synthetic evidence, Python syntax, and strict AArch64 shell compile
+checks pass; combined-log SHA-256 is
+`9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
+No QEMU runtime was run for this staged increment. The next unchanged gate
+expects eight graphs, 20 CLI builds, and 21 Toolchain processes, with three
+simultaneous cold graphs; do not claim those counts passed. The authoritative
+Pi/TCG result remains five graphs, 16 CLI builds, and 17 Toolchain processes,
+and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
+
 - Implementation baseline `7c01848e9098d8c5f44bd51f542ca06da592e7fe`
   adds a fifth persistent authenticated `MAKBUILD1` graph: one assembly plus
   two C objects are cold-built `0/3`, warm-reused `3/0`, linked to 564 code
@@ -1279,7 +1302,7 @@ until those unchanged gates actually complete; SDK/self-hosting remain Partial.
    object support, lift the bounded transitive-header/macro/conditional limits
    and add general function-like/expression/system-header preprocessing beyond
    the bounded self-host `stdint.h`,
-   arbitrary/parallel
+   arbitrary parallel scheduling beyond the fixed three-graph command and
    input graphs beyond the six-input bound, and broader command-line build
    control before a substantial
    in-guest build. Preserve real implementation

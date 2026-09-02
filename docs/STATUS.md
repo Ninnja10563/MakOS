@@ -4,6 +4,33 @@ Last updated: 2026-09-02.
 
 ## Implemented
 
+- 2026-09-02 the staged AArch64 self-host/SMP increment through
+  `eed30306d1abeaf9a375df82f210b51d54a93ec1` adds the fixed authenticated
+  `makbuild-parallel` command. It spawns the existing disjoint cold
+  `generated-three.build`, `generated-header.build`, and
+  `generated-nested.build` graphs before performing any wait, reaps every
+  successfully launched child, requires three status-42 results, and only then
+  emits `MAKOS_AARCH64_MAKBUILD_PARALLEL_OK spawn_before_wait=3
+  statuses=42,42,42`. Wait-status syscall 126 distinguishes Pending from
+  NoChild; a partial spawn failure still drains launched siblings and cannot
+  report success. The scheduler places the three singleton Toolchain leaders on
+  idle AP1-3, captures their distinct PIDs, groups, TTBR0 roots, affinities, and
+  ownership under its lock, and emits the one-shot
+  `MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK` snapshot later from CPU0. Migration is
+  limited to an actually idle destination AP. The harness accepts arbitrary
+  child-output order, validates complete migration histories, and requires the
+  locked snapshot CPU to appear in each child's visited CPUs because a legal
+  migration may occur before or after the snapshot. Focused process-table,
+  scheduler/self-host structural, synthetic evidence, Python syntax, and strict
+  AArch64 shell compile checks pass; their combined log SHA-256 is
+  `9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
+  No QEMU runtime was run for this staged increment. The unchanged next gate
+  expects eight graphs, 20 CLI builds, and 21 Toolchain processes, including
+  three simultaneous cold graphs; those counts have not passed yet. The last
+  qualified Pi/TCG evidence remains five graphs, 16 CLI builds, and 17
+  Toolchain processes, and the scheduling, SDK, and self-hosting audit rows
+  remain Partial.
+
 - 2026-09-02 the next official Firefox ESR release link exposed one exact Rust
   target-ABI defect: vendored `errno` 0.3.8 treated the distinct MakOS Unix
   target as an unknown fallback and emitted an undefined `errno_location`,
