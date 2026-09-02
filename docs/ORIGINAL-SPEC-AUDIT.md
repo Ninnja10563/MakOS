@@ -130,7 +130,7 @@ in-memory work buffer but persistent files remain bounded by MakFS's 2 KiB
 limit.
 
 Staged qualification note (2026-09-02): implementation through
-`eed30306d1abeaf9a375df82f210b51d54a93ec1` adds a fixed authenticated
+`5db7e3588227a97e878c989fab3e1361ddff8ed5` adds a fixed authenticated
 `makbuild-parallel` phase for three disjoint cold graphs. The shell performs all
 three spawns before any wait, safely distinguishes Pending from NoChild, drains
 launched siblings after partial spawn failure, requires three status-42 reaps,

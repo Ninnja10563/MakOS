@@ -5,7 +5,7 @@ Last updated: 2026-09-02.
 ## Implemented
 
 - 2026-09-02 the staged AArch64 self-host/SMP increment through
-  `eed30306d1abeaf9a375df82f210b51d54a93ec1` adds the fixed authenticated
+  `5db7e3588227a97e878c989fab3e1361ddff8ed5` adds the fixed authenticated
   `makbuild-parallel` command. It spawns the existing disjoint cold
   `generated-three.build`, `generated-header.build`, and
   `generated-nested.build` graphs before performing any wait, reaps every

@@ -55,7 +55,7 @@ const-only and mutable-only builds plus ordinary-loader execution. Do not record
 until those unchanged gates actually complete; SDK/self-hosting remain Partial.
 
 The staged AArch64 parallel self-host/SMP increment through
-`eed30306d1abeaf9a375df82f210b51d54a93ec1` adds the fixed authenticated
+`5db7e3588227a97e878c989fab3e1361ddff8ed5` adds the fixed authenticated
 `makbuild-parallel` command for the disjoint cold `generated-three.build`,
 `generated-header.build`, and `generated-nested.build` graphs. It performs all
 three spawns before any wait, uses wait-status syscall 126 to distinguish

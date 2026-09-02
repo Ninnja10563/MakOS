@@ -395,7 +395,7 @@ PID/group/root correlation, three status-42 reaps, and the preserved cold,
 warm, output, and execution checks.
 
 This implementation is staged through
-`eed30306d1abeaf9a375df82f210b51d54a93ec1`. Focused process-table,
+`5db7e3588227a97e878c989fab3e1361ddff8ed5`. Focused process-table,
 scheduler/self-host structural, synthetic parallel-evidence, Python syntax,
 and strict AArch64 shell compilation checks pass; the combined focused log is
 `build/logs/parallel-combined-focused-20260902.log`, with SHA-256
