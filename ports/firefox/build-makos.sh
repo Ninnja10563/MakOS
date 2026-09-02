@@ -218,6 +218,7 @@ case "$obj_state" in
     0) ;;
     10)
         echo "Firefox MakOS: preserved object directory moved; regenerating with mach configure."
+        "$build_python" "$obj_check" quarantine-moved-cargo "$obj" --source-dir "$source_dir"
         "$build_python" "$source_dir/mach" configure
         ;;
     *)

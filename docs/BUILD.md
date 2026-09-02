@@ -122,6 +122,28 @@ then requires regenerated autoconf/backend metadata selecting
 `nsPrintSettingsMakOS.cpp`. Missing, malformed, still-stale, or incomplete
 metadata fails closed without textual substitution. The preserved Pi cache is
 known to need this regeneration, so a cheap incremental relink is not assumed.
+Before reconfiguration of a release cache preserved under the developer objdir,
+the wrapper recoverably moves only the host `release` and target
+`aarch64-unknown-makos/release` Cargo trees into
+`makos-moved-cargo-quarantine`. Cargo dep-info embeds absolute paths, so those
+two trees cannot be reused after the move. C/C++ objects remain in place;
+unexpected roots, symlinks, files, or destination collisions fail closed, and
+the quarantine is retained for inspection or recovery rather than deleted. A
+canonical `migration.json` binds the exact selected/old identities and both
+source-to-destination mappings. It is atomically installed and fsynced before
+the first rename; destination-only retries are accepted only with that exact
+journal. Every retry fsyncs each existing source parent and the quarantine
+destination parent even when no rename remains; a source parent for a Cargo
+tree that never existed is not fabricated. The journal is accepted only from one no-follow
+file descriptor whose metadata and raw bytes match the canonical encoding;
+semantically equivalent whitespace is rejected. A crash after
+the exact temporary journal is fsynced but before it is linked is recoverable
+only when that temp remains a regular owner-matching mode-0600 single-link file
+with exact canonical bytes. A crash after linking but before unlinking the temp
+is recoverable only when temp and journal are exact two-link names for the same
+inode; recovery unlinks the temp, fsyncs the directory, and revalidates the
+journal as single-link. Required directory fsync is tested on supported hosts
+and fails closed with the path and OS error where unavailable.
 The Rust `errno` crate is staged separately because Cargo verifies vendored
 checksums. `prepare-rust-errno.sh` accepts only version 0.3.8, reconstructs the
 stage from exact source bytes on every invocation, and applies the MakOS cfg

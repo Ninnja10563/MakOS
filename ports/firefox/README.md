@@ -116,6 +116,25 @@ LLVM 19 and cbindgen on AArch64 Debian, preserves complete explicit
 small host probes. Target compilation remains isolated behind the MakOS clang
 drivers; host tools are never routed through the target ABI.
 
+Moved release-to-developer object caches retain their C/C++ artifacts, but not
+Cargo output containing absolute old-object paths. Immediately before supported
+`mach configure`, the wrapper moves the exact host and AArch64 target Cargo
+`release` directories into an objdir-local `makos-moved-cargo-quarantine`.
+The operation is recoverable and idempotent; unsafe roots, symlinks, non-directory
+caches, and collisions are rejected without broad deletion. Before any rename,
+an atomically installed and fsynced `migration.json` records the exact old and
+selected objdirs plus both mappings. A destination-only partial/completed retry
+is trusted only when that journal's exact canonical bytes and metadata validate
+through one no-follow descriptor; whitespace variants are rejected. Every
+retry fsyncs each existing source parent and the quarantine destination parent
+before the success marker, including destination-only retries; absent parents
+for Cargo trees that never existed remain absent. An exact owner/mode/content-validated
+temporary journal is recoverable after a pre-link crash. Post-link recovery is
+limited to exact temp and journal names that are the same two-link inode; it
+unlinks the temp, fsyncs, and revalidates the journal as single-link. Malformed
+or symlink paths are rejected. Platforms that cannot fsync the required
+directories fail closed rather than claiming a durable migration.
+
 Official musl and LLVM ports supply isolated C/C++ build and shared-runtime
 sysroots. Build and audit them without promoting them into the SDK:
 
