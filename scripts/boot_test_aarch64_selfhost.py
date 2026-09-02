@@ -342,7 +342,7 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
     roots = [int(value, 16) for value in overlap.groups()[10:13]]
     if (
         len(set(pids)) != 3
-        or set(group_pids) != set(pids)
+        or group_pids != pids
         or cpus != [1, 2, 3]
         or cpu_mask != 0xE
         or len(set(roots)) != 3
@@ -393,6 +393,7 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
             )
 
     placement_records: dict[int, tuple[int, int]] = {}
+    placement_positions: dict[int, int] = {}
     for record in re.finditer(
         rb"MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK pid=(\d+) cpu=([1-3]) "
         rb"affinity=0x([0-9a-f]+) loads=\d+,\d+,\d+ "
@@ -405,18 +406,68 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
             if pid in placement_records:
                 raise AssertionError(f"duplicate parallel placement for pid {pid}")
             placement_records[pid] = (int(record.group(2)), int(record.group(3), 16))
-    expected_placements = {pid: cpu for pid, cpu in zip(pids, cpus)}
+            placement_positions[pid] = boundary + record.start()
     if set(placement_records) != set(pids):
         raise AssertionError(
             f"parallel placements do not match overlap pids: {placement_records}"
         )
-    for pid, expected_cpu in expected_placements.items():
+    derived_cpus: dict[int, int] = {}
+    for pid in pids:
         cpu, affinity = placement_records[pid]
-        if cpu != expected_cpu or affinity != 1 << cpu:
+        if affinity != 1 << cpu:
             raise AssertionError(
-                f"parallel placement mismatch for pid {pid}: "
-                f"cpu={cpu} expected={expected_cpu} affinity={affinity:#x}"
+                f"parallel initial placement affinity mismatch for pid {pid}: "
+                f"cpu={cpu} affinity={affinity:#x}"
             )
+        derived_cpus[pid] = cpu
+
+    for migration in re.finditer(
+        rb"MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK pid=(\d+) "
+        rb"source_cpu=([1-3]) target_cpu=([1-3]) "
+        rb"old_affinity=0x([0-9a-f]+) new_affinity=0x([0-9a-f]+) "
+        rb"loads=(\d+),(\d+),(\d+) idle_mask=0x([0-9a-f]+) "
+        rb"policy=timer-safe-dispatch-imbalance delta=(\d+) "
+        rb"context=gpr,sp,tls,simd ownership=ready-unowned "
+        rb"evidence_emitter=cpu0 device_mmio_owner=cpu0 caller_selected=0",
+        output[boundary:done],
+    ):
+        pid = int(migration.group(1))
+        if pid not in derived_cpus:
+            continue
+        source_cpu = int(migration.group(2))
+        target_cpu = int(migration.group(3))
+        old_affinity = int(migration.group(4), 16)
+        new_affinity = int(migration.group(5), 16)
+        loads = [int(migration.group(index)) for index in (6, 7, 8)]
+        idle_mask = int(migration.group(9), 16)
+        delta = int(migration.group(10))
+        if derived_cpus[pid] != source_cpu:
+            raise AssertionError(
+                f"parallel migration chain source mismatch for pid {pid}: "
+                f"derived={derived_cpus[pid]} source={source_cpu}"
+            )
+        if (
+            source_cpu == target_cpu
+            or old_affinity != 1 << source_cpu
+            or new_affinity != 1 << target_cpu
+            or idle_mask & (1 << target_cpu) == 0
+            or idle_mask & (1 << source_cpu) != 0
+            or loads[source_cpu - 1] < loads[target_cpu - 1] + delta
+            or delta != 8
+        ):
+            raise AssertionError(
+                f"invalid parallel migration hop for pid {pid}: "
+                f"source={source_cpu} target={target_cpu} loads={loads} "
+                f"idle_mask={idle_mask:#x} delta={delta}"
+            )
+        derived_cpus[pid] = target_cpu
+
+    snapshot_cpus = {pid: cpu for pid, cpu in zip(pids, cpus)}
+    if derived_cpus != snapshot_cpus:
+        raise AssertionError(
+            "parallel snapshot CPUs do not match derived migration state: "
+            f"derived={derived_cpus} snapshot={snapshot_cpus}"
+        )
 
     first_summary = output.find(TOOLCHAIN_SMP_MARKER, boundary, done)
     matching_reaps = [
@@ -438,10 +489,13 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
     first_finish_evidence = min(
         position for position in (first_summary, first_reap) if position >= 0
     )
-    if max(process_positions.values()) >= first_finish_evidence:
+    latest_spawn_record = max(
+        (*process_positions.values(), *placement_positions.values())
+    )
+    if latest_spawn_record >= first_finish_evidence:
         raise AssertionError(
             "a parallel Toolchain child reached reap/SMP summary before all "
-            "three process spawn records"
+            "three placement/process spawn records"
         )
     if max(position for _, position in reap_records.values()) >= done:
         raise AssertionError("parallel shell reported success before all children reaped")
