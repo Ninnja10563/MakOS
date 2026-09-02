@@ -412,6 +412,7 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
             f"parallel placements do not match overlap pids: {placement_records}"
         )
     derived_cpus: dict[int, int] = {}
+    visited_cpus: dict[int, set[int]] = {}
     for pid in pids:
         cpu, affinity = placement_records[pid]
         if affinity != 1 << cpu:
@@ -420,6 +421,7 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
                 f"cpu={cpu} affinity={affinity:#x}"
             )
         derived_cpus[pid] = cpu
+        visited_cpus[pid] = {cpu}
 
     for migration in re.finditer(
         rb"MAKOS_AARCH64_TOOLCHAIN_MIGRATION_OK pid=(\d+) "
@@ -461,12 +463,18 @@ def validate_parallel_makbuild(output: bytes) -> tuple[list[int], list[int]]:
                 f"idle_mask={idle_mask:#x} delta={delta}"
             )
         derived_cpus[pid] = target_cpu
+        visited_cpus[pid].add(target_cpu)
 
     snapshot_cpus = {pid: cpu for pid, cpu in zip(pids, cpus)}
-    if derived_cpus != snapshot_cpus:
+    unvisited_snapshot_cpus = {
+        pid: cpu
+        for pid, cpu in snapshot_cpus.items()
+        if cpu not in visited_cpus[pid]
+    }
+    if unvisited_snapshot_cpus:
         raise AssertionError(
-            "parallel snapshot CPUs do not match derived migration state: "
-            f"derived={derived_cpus} snapshot={snapshot_cpus}"
+            "parallel snapshot CPUs were never present in migration history: "
+            f"unvisited={unvisited_snapshot_cpus} history={visited_cpus}"
         )
 
     first_summary = output.find(TOOLCHAIN_SMP_MARKER, boundary, done)

@@ -118,6 +118,17 @@ early_migration = migration_record(201, 2, 1, (0, 8, 0), 0x2)
 migrated_serial = transcript(markers, (2, 2, 3), (early_migration,))
 runtime.validate_parallel_makbuild(migrated_serial)
 
+# The immutable snapshot may precede a later migration: after one peer exits,
+# its AP becomes idle while CPU0 is still waiting to drain migration records.
+post_snapshot_migration = migration_record(201, 1, 3, (8, 0, 0), 0x8)
+runtime.validate_parallel_makbuild(
+    transcript(
+        markers,
+        (2, 2, 3),
+        (early_migration, post_snapshot_migration),
+    )
+)
+
 third_spawn = process_record(PIDS[2], ROOTS[2])
 early_summary = runtime.TOOLCHAIN_SMP_MARKER + b"status=42\n"
 expect_failure(
@@ -141,7 +152,7 @@ expect_failure(
 )
 expect_failure(
     serial.replace(b"pid=202 cpu=2 affinity=0x4", b"pid=202 cpu=3 affinity=0x8"),
-    "parallel snapshot CPUs do not match derived migration state",
+    "parallel snapshot CPUs were never present in migration history",
 )
 expect_failure(
     serial.replace(b"pid=202 parent=17 elf=1 el=0 entry=0x400000 ttbr0=0x52000", b"pid=202 parent=17 elf=1 el=0 entry=0x400000 ttbr0=0x72000"),
@@ -165,7 +176,7 @@ expect_failure(
         b"pids=202,201,203 group_pids=202,201,203 cpus=1,2,3 "
         b"cpu_mask=0xe roots=0x52000,0x41000,0x63000",
     ),
-    "parallel snapshot CPUs do not match derived migration state",
+    "parallel snapshot CPUs were never present in migration history",
 )
 expect_failure(
     serial.replace(b"group_pids=201,202,203", b"group_pids=203,201,202"),
