@@ -130,9 +130,10 @@ two trees cannot be reused after the move. C/C++ objects remain in place;
 unexpected roots, symlinks, files, or destination collisions fail closed, and
 the quarantine is retained for inspection or recovery rather than deleted. A
 canonical `migration.json` binds the exact selected/old identities and both
-source-to-destination mappings. It is atomically installed and fsynced before
-the first rename; destination-only retries are accepted only with that exact
-journal. Every retry fsyncs each existing source parent and the quarantine
+source-to-destination mappings. It is atomically installed and fsynced, then
+the selected objdir itself is fsynced to make the quarantine name durable,
+before the first rename; destination-only retries are accepted only with that
+exact journal. Every retry fsyncs each existing source parent and the quarantine
 destination parent even when no rename remains; a source parent for a Cargo
 tree that never existed is not fabricated. The journal is accepted only from one no-follow
 file descriptor whose metadata and raw bytes match the canonical encoding;

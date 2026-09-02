@@ -279,6 +279,10 @@ def quarantine_moved_cargo(obj: pathlib.Path, source: pathlib.Path) -> int:
                 os.close(descriptor)
             install_exact_journal_temp(temporary, journal, quarantine, payload)
             journal_valid = True
+        # Persist the quarantine directory entry in the selected objdir before
+        # any Cargo tree can move underneath it. Fsyncing only the quarantine
+        # itself does not make its name durable in the parent directory.
+        fsync_directory(obj)
         for source_path, destination in candidates:
             if source_path.is_dir():
                 source_path.rename(destination)

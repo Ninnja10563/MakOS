@@ -319,6 +319,12 @@ evidence = {
 record.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
 if any("error" in item for item in (capabilities, status, capture)):
     raise SystemExit("QMP visible-login evidence failed")
+status_result = status.get("return")
+if (
+    not isinstance(status_result, dict)
+    or status_result.get("status") != "running"
+):
+    raise SystemExit("QMP visible-login status is not running")
 PY
 
    Require QMP status `running`. Record the absolute session path, PID, private `boot.img`,

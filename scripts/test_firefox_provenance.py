@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import pathlib
@@ -374,6 +375,22 @@ def main() -> int:
     assert (
         current_identity in handoff_prompt
     ), "macOS/HVF handoff prompt has a stale Firefox patch identity"
+    qmp_heredoc = (
+        '       python3 - "$SESSION/qmp.sock" "$SESSION/login.ppm" '
+        '"$SESSION/qmp-status.json" <<\'PY\'\n'
+    )
+    assert handoff_prompt.count(qmp_heredoc) == 1, (
+        "macOS/HVF handoff prompt lacks one exact visible-login QMP snippet"
+    )
+    qmp_code = handoff_prompt.split(qmp_heredoc, 1)[1].split("\nPY", 1)[0]
+    ast.parse(qmp_code, filename="MACOS-HVF-TEST-AGENT-PROMPT.md:qmp")
+    assert qmp_code.count('status_result = status.get("return")') == 1
+    assert qmp_code.count(
+        'status_result.get("status") != "running"'
+    ) == 1
+    assert qmp_code.count(
+        'raise SystemExit("QMP visible-login status is not running")'
+    ) == 1
     print(
         "MAKOS_FIREFOX_PROVENANCE_TEST_OK "
         f"patches={current_count} patch_series_sha256={current_identity} "

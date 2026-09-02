@@ -337,6 +337,66 @@ with tempfile.TemporaryDirectory() as directory:
     os.link(nlink_journal, nlink_quarantine / "unexpected-link")
     assert invoke("quarantine-moved-cargo", nlink_obj).returncode == 2
 
+    parent_barrier_parent = root / "parent barrier crash parent"
+    parent_barrier_obj = parent_barrier_parent / "obj-aarch64-makos-developer"
+    parent_barrier_old = parent_barrier_parent / "obj-aarch64-makos"
+    parent_barrier_source = parent_barrier_parent / "source"
+    write_moved_identity(
+        parent_barrier_obj, parent_barrier_old, parent_barrier_source
+    )
+    parent_barrier_host = parent_barrier_obj / "release"
+    parent_barrier_target = (
+        parent_barrier_obj / "aarch64-unknown-makos" / "release"
+    )
+    parent_barrier_host.mkdir()
+    parent_barrier_target.mkdir(parents=True)
+    (parent_barrier_host / "host.rlib").write_text("host before barrier\n")
+    (parent_barrier_target / "target.rlib").write_text("target before barrier\n")
+    parent_barrier_quarantine = (
+        parent_barrier_obj / "makos-moved-cargo-quarantine"
+    )
+    real_fsync_directory = objdir_module.fsync_directory
+    parent_barrier_calls: list[pathlib.Path] = []
+
+    def fail_parent_barrier(path: pathlib.Path) -> None:
+        parent_barrier_calls.append(path)
+        if path == parent_barrier_obj.resolve():
+            raise OSError("injected objdir parent barrier failure")
+        real_fsync_directory(path)
+
+    objdir_module.fsync_directory = fail_parent_barrier
+    try:
+        assert (
+            objdir_module.quarantine_moved_cargo(
+                parent_barrier_obj.resolve(), parent_barrier_source.resolve()
+            )
+            == 2
+        )
+    finally:
+        objdir_module.fsync_directory = real_fsync_directory
+    assert parent_barrier_calls == [
+        parent_barrier_quarantine,
+        parent_barrier_obj.resolve(),
+    ]
+    assert (parent_barrier_quarantine / "migration.json").is_file()
+    assert (
+        parent_barrier_host / "host.rlib"
+    ).read_text() == "host before barrier\n"
+    assert (
+        parent_barrier_target / "target.rlib"
+    ).read_text() == "target before barrier\n"
+    assert not (parent_barrier_quarantine / "host-release").exists()
+    assert not (parent_barrier_quarantine / "target-release").exists()
+    parent_barrier_retry = invoke("quarantine-moved-cargo", parent_barrier_obj)
+    assert parent_barrier_retry.returncode == 0, parent_barrier_retry.stderr
+    assert "moved=2" in parent_barrier_retry.stdout
+    assert (
+        parent_barrier_quarantine / "host-release" / "host.rlib"
+    ).read_text() == "host before barrier\n"
+    assert (
+        parent_barrier_quarantine / "target-release" / "target.rlib"
+    ).read_text() == "target before barrier\n"
+
     sync_parent = root / "destination-only fsync parent"
     sync_obj = sync_parent / "obj-aarch64-makos-developer"
     sync_old = sync_parent / "obj-aarch64-makos"
@@ -419,4 +479,4 @@ with tempfile.TemporaryDirectory() as directory:
     empty.mkdir()
     assert run("needs-configure", empty) == 0
     assert run("verify", empty) == 1
-print("MAKOS_FIREFOX_OBJDIR_TEST_OK moved=configure-required,cargo-journaled,host-only current=accepted,no-op,zero-cargo partial,temp-crash,post-link-crash=completed journal=canonical-fd-only,retry-fsync collision,symlink=denied cxx=preserved")
+print("MAKOS_FIREFOX_OBJDIR_TEST_OK moved=configure-required,cargo-journaled,host-only current=accepted,no-op,zero-cargo partial,temp-crash,post-link-crash=completed journal=canonical-fd-only,parent-before-rename,retry-fsync collision,symlink=denied cxx=preserved")

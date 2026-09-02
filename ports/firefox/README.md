@@ -123,9 +123,11 @@ Cargo output containing absolute old-object paths. Immediately before supported
 The operation is recoverable and idempotent; unsafe roots, symlinks, non-directory
 caches, and collisions are rejected without broad deletion. Before any rename,
 an atomically installed and fsynced `migration.json` records the exact old and
-selected objdirs plus both mappings. A destination-only partial/completed retry
-is trusted only when that journal's exact canonical bytes and metadata validate
-through one no-follow descriptor; whitespace variants are rejected. Every
+selected objdirs plus both mappings, and the selected objdir itself is fsynced
+before any source rename makes the quarantine name durability-critical. A
+destination-only partial/completed retry is trusted only when that journal's
+exact canonical bytes and metadata validate through one no-follow descriptor;
+whitespace variants are rejected. Every
 retry fsyncs each existing source parent and the quarantine destination parent
 before the success marker, including destination-only retries; absent parents
 for Cargo trees that never existed remain absent. An exact owner/mode/content-validated
