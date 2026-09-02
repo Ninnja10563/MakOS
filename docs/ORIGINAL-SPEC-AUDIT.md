@@ -140,7 +140,8 @@ roots simultaneously own AP1-3, emits that proof later on CPU0, and restricts
 migration destinations to idle APs. The harness correlates exact process,
 placement, reap, group, root, and ordered migration evidence while permitting
 nondeterministic child output and legal pre/post-snapshot migration. Focused
-non-QEMU tests pass with combined-log SHA-256
+non-QEMU tests pass; the combined log is
+`build/logs/parallel-combined-focused-20260902.log`, with SHA-256
 `9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
 No QEMU runtime proof exists for this staged behavior. The extended unchanged
 gate requires eight graphs, 20 CLI builds, and 21 Toolchain processes,

@@ -22,7 +22,8 @@ Last updated: 2026-09-02.
   locked snapshot CPU to appear in each child's visited CPUs because a legal
   migration may occur before or after the snapshot. Focused process-table,
   scheduler/self-host structural, synthetic evidence, Python syntax, and strict
-  AArch64 shell compile checks pass; their combined log SHA-256 is
+  AArch64 shell compile checks pass; their combined log is
+  `build/logs/parallel-combined-focused-20260902.log`, with SHA-256
   `9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
   No QEMU runtime was run for this staged increment. The unchanged next gate
   expects eight graphs, 20 CLI builds, and 21 Toolchain processes, including

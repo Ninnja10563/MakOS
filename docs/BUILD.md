@@ -397,8 +397,8 @@ warm, output, and execution checks.
 This implementation is staged through
 `eed30306d1abeaf9a375df82f210b51d54a93ec1`. Focused process-table,
 scheduler/self-host structural, synthetic parallel-evidence, Python syntax,
-and strict AArch64 shell compilation checks pass; the combined focused log has
-SHA-256
+and strict AArch64 shell compilation checks pass; the combined focused log is
+`build/logs/parallel-combined-focused-20260902.log`, with SHA-256
 `9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
 No QEMU runtime was run for this increment. The next unchanged runtime gate
 expects eight graphs, 20 authenticated CLI builds, and 21 Toolchain processes,

@@ -69,7 +69,8 @@ must be idle. The harness permits arbitrary child-output order, validates each
 ordered migration chain, and requires the locked snapshot CPU to be visited so
 both legal pre- and post-snapshot migration are covered. Focused process-table,
 structural, synthetic evidence, Python syntax, and strict AArch64 shell compile
-checks pass; combined-log SHA-256 is
+checks pass; the combined log is
+`build/logs/parallel-combined-focused-20260902.log`, with SHA-256
 `9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
 No QEMU runtime was run for this staged increment. The next unchanged gate
 expects eight graphs, 20 CLI builds, and 21 Toolchain processes, with three
