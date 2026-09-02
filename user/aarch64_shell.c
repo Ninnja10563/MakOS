@@ -14,6 +14,7 @@ enum {
     SYS_CLOSE = 13,
     SYS_PROCESS_SPAWN = 14,
     SYS_PROCESS_WAIT = 15,
+    SYS_PROCESS_WAIT_STATUS = 126,
     SYS_PROCESS_SPAWN_PATH = 56,
     SYS_PROCESS_SPAWN_PATH_ARGS = 57,
     SYS_PACKAGE_INSTALL = 18,
@@ -546,18 +547,34 @@ static uint64_t spawn_makbuild_process(const uint8_t *path,
 static uint64_t wait_for_process(uint64_t pid) {
     if (pid == UINT64_MAX)
         return UINT64_MAX;
-    uint64_t status;
-    while ((status = syscall4(SYS_PROCESS_WAIT, pid, 0, 0, 0)) == UINT64_MAX)
+    for (;;) {
+        uint64_t result = syscall4(SYS_PROCESS_WAIT_STATUS, pid, 1, 0, 0);
+        if (result == (uint64_t)(int64_t)-10)
+            return UINT64_MAX;
+        if (result != 0)
+            return result - 1;
         syscall4(SYS_YIELD, 0, 0, 0, 0);
-    return status;
+    }
 }
 
 static void report_makbuild_status(const uint8_t *path, size_t path_length,
                                    uint64_t status) {
     if (status == 42) {
-        write_text("MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=");
-        write_bytes(path, path_length);
-        write_text(" source=existing-makfs seeded=0 startup=sysv status=42\n");
+        static const char prefix[] =
+            "MAKOS_AARCH64_MAKBUILD_CLI_OK manifest=";
+        static const char suffix[] =
+            " source=existing-makfs seeded=0 startup=sysv status=42\n";
+        uint8_t record[sizeof(prefix) - 1 + MAKBUILD_PATH_BYTES
+                       + sizeof(suffix) - 1];
+        size_t used = 0;
+        for (size_t index = 0; index < sizeof(prefix) - 1; ++index)
+            record[used++] = (uint8_t)prefix[index];
+        for (size_t index = 0; index < path_length; ++index)
+            record[used++] = path[index];
+        for (size_t index = 0; index < sizeof(suffix) - 1; ++index)
+            record[used++] = (uint8_t)suffix[index];
+        write_bytes(record, used);
+        memset(record, 0, sizeof(record));
     } else {
         write_text("makbuild: build failed\n");
     }
@@ -633,10 +650,13 @@ static void run_makbuild_parallel(void) {
     for (size_t index = 0; index < PARALLEL_MAKBUILD_COUNT; ++index) {
         if (pids[index] != UINT64_MAX) {
             statuses[index] = wait_for_process(pids[index]);
-            report_makbuild_status((const uint8_t *)manifests[index],
-                                   manifest_lengths[index], statuses[index]);
         }
     }
+    /* No Toolchain child can interleave output with these CLI records now. */
+    for (size_t index = 0; index < PARALLEL_MAKBUILD_COUNT; ++index)
+        if (pids[index] != UINT64_MAX)
+            report_makbuild_status((const uint8_t *)manifests[index],
+                                   manifest_lengths[index], statuses[index]);
     if (launch_ok && statuses[0] == 42 && statuses[1] == 42 &&
         statuses[2] == 42) {
         write_text("MAKOS_AARCH64_MAKBUILD_PARALLEL_OK "

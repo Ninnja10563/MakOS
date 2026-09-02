@@ -426,11 +426,14 @@ for fragment in (
     "startup.argv_offsets[argc..].iter().any",
     '"sysv-v1"',
     "pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool)",
+    "current_app_role() != ProcessRole::Shell",
     'manifest_path.starts_with(b"/home/user/")',
     'b"MODE=fixture"',
     'b"MODE=build"',
     'b"/system/aarch64-toolchain", manifest_path',
     "ProcessRole::Toolchain",
+    "crate::security::SessionProcessRole::Toolchain",
+    "discard_spawned(pid);",
     "reset_toolchain_smp_evidence()",
     "state.least_loaded_compute_ap()",
     ".rebalance_toolchain_on_timer(cpu, prior_pid)",
@@ -448,6 +451,18 @@ for fragment in (
 ):
     require(PROCESS, fragment)
 
+toolchain_spawn = PROCESS[
+    PROCESS.index("pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool)") :
+    PROCESS.index("pub fn spawn_path(path: &[u8])")
+]
+for fragment in (
+    "current_app_role() != ProcessRole::Shell",
+    "crate::security::register_session_process(",
+    "crate::security::SessionProcessRole::Toolchain",
+    "discard_spawned(pid);",
+):
+    require(toolchain_spawn, fragment)
+
 for fragment in (
     "const SYS_PROCESS_SPAWN_PATH: u64 = 56;",
     "const SYS_PROCESS_SPAWN_PATH_ARGS: u64 = 57;",
@@ -459,6 +474,10 @@ for fragment in (
     "16 if crate::aarch64_process::process_control_allowed()",
     "fixture > 1",
     "crate::aarch64_process::spawn_toolchain(path, fixture == 1)",
+    "SYS_PROCESS_WAIT_STATUS =>",
+    "ChildWaitStatus::NoChild => (-10i64) as u64",
+    "ChildWaitStatus::Pending => 0",
+    "status.saturating_add(1)",
 ):
     require(ARCH, fragment)
 
@@ -551,6 +570,9 @@ require(TOOLCHAIN, '"        *(pointer + delta) = pointer[0] + count + 1;\\n"')
 require(SHELL, "MAKOS_AARCH64_SELFHOST_LINK_OK")
 require(SHELL, "static uint64_t spawn_makbuild_process(")
 require(SHELL, "static uint64_t wait_for_process(")
+require(SHELL, "SYS_PROCESS_WAIT_STATUS = 126")
+require(SHELL, "syscall4(SYS_PROCESS_WAIT_STATUS, pid, 1, 0, 0)")
+require(SHELL, "result == (uint64_t)(int64_t)-10")
 require(SHELL, "static void report_makbuild_status(")
 require(SHELL, "MAKBUILD_PATH_BYTES = 96")
 require(SHELL, "PARALLEL_MAKBUILD_COUNT = 3")
@@ -580,10 +602,21 @@ if parallel_shell.index("pids[index] = spawn_makbuild_process(") >= parallel_she
     "statuses[index] = wait_for_process(pids[index])"
 ):
     raise AssertionError("parallel makbuild waits before completing all spawns")
+if parallel_shell.index("statuses[index] = wait_for_process(pids[index])") >= parallel_shell.index(
+    "No Toolchain child can interleave output"
+):
+    raise AssertionError("parallel makbuild reports before completing all waits")
 require(parallel_shell, "if (pids[index] != UINT64_MAX)")
+require(parallel_shell, "No Toolchain child can interleave output")
 require(parallel_shell, "index < PARALLEL_MAKBUILD_COUNT")
 require(parallel_shell, "statuses[0] == 42 && statuses[1] == 42 &&")
 require(parallel_shell, "statuses[2] == 42")
+status_report = SHELL[
+    SHELL.index("static void report_makbuild_status(") :
+    SHELL.index("static void run_makbuild(")
+]
+if status_report.count("write_bytes(record, used)") != 1:
+    raise AssertionError("makbuild CLI record is not one atomic write")
 require(SHELL, "MAKOS_AARCH64_RUN_OK")
 require(SHELL, "source=existing-makfs seeded=0 startup=sysv status=42")
 require(SHELL, "toolchain_startup=sysv manifest_arg=1")
