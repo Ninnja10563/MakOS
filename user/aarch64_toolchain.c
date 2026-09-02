@@ -50,6 +50,13 @@ void *memset(void *destination, int value, size_t count) {
     return destination;
 }
 
+void *memcpy(void *destination, const void *source, size_t count) {
+    volatile uint8_t *output = destination;
+    const volatile uint8_t *input = source;
+    for (size_t index = 0; index < count; ++index) output[index] = input[index];
+    return destination;
+}
+
 static uint64_t syscall4(uint64_t number, uint64_t first, uint64_t second,
                          uint64_t third, uint64_t fourth) {
     register uint64_t x0 __asm__("x0") = first;

@@ -228,6 +228,7 @@ fn build_aarch64_init() {
             "-flavor",
             "gnu",
             "--build-id=none",
+            "--no-undefined",
             "-z",
             "max-page-size=4096",
             "-T",

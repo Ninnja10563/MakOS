@@ -27,6 +27,17 @@ def require(source: str, fragment: str) -> None:
 
 
 for fragment in (
+    "void *memcpy(void *destination, const void *source, size_t count)",
+    "volatile uint8_t *output = destination;",
+    "const volatile uint8_t *input = source;",
+    "output[index] = input[index]",
+    "return destination;",
+):
+    require(TOOLCHAIN, fragment)
+require(BUILD, '"--no-undefined"')
+
+
+for fragment in (
     '"_start:\\n"',
     '"cmp x0, #1\\n"',
     '"b.eq success\\n"',

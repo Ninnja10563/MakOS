@@ -257,6 +257,7 @@ unit:
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
 	python3 scripts/test_aarch64_selfhost.py
+	python3 scripts/test_aarch64_toolchain_freestanding.py
 	cargo test -p makos-pe64
 	python3 scripts/test_mkpackage.py
 	python3 scripts/test_package_store_integration.py
@@ -314,6 +315,7 @@ check:
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
 	python3 scripts/test_aarch64_selfhost.py
+	python3 scripts/test_aarch64_toolchain_freestanding.py
 	cargo test -p makos-pe64
 	python3 scripts/test_mkpackage.py
 	python3 scripts/test_package_store_integration.py
