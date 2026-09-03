@@ -73,6 +73,19 @@ if makos_cpython_select_readelf "$staged_repo" >"$temporary/missing.out" \
 fi
 grep -Fq 'MAKOS_READELF is not executable LLVM readelf' "$temporary/missing.err"
 
+unset MAKOS_READELF
+mkdir -p "$temporary/no-tools"
+PATH=$temporary/no-tools
+if makos_cpython_select_readelf "$empty_repo" >"$temporary/automatic-missing.out" \
+    2>"$temporary/automatic-missing.err"; then
+    PATH=$saved_path
+    echo "CPython host-tool test accepted an absent discovered readelf" >&2
+    exit 1
+fi
+PATH=$saved_path
+grep -Fq 'executable LLVM readelf missing' \
+    "$temporary/automatic-missing.err"
+
 grep -Fq '. "$port_dir/host-tools.sh"' "$port_dir/build-makos.sh"
 grep -Fq 'makos_cpython_select_readelf "$repo_dir"' "$port_dir/build-makos.sh"
 grep -Fq '"$MAKOS_READELF" -h -l -d python.exe' "$port_dir/build-makos.sh"
