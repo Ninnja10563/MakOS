@@ -366,6 +366,39 @@ def main() -> int:
     assert build_script.index('"$port_dir/audit-binary.sh"') < build_script.index(
         "create-build-stamp"
     ), "Firefox build stamp can precede the ELF binary audit"
+    package_script = (
+        provenance.ROOT / "ports/firefox/package-makos.sh"
+    ).read_text()
+    stamped_assignment = next(
+        line for line in package_script.splitlines()
+        if line.startswith("STAMPED_ARTIFACTS=")
+    )
+    stamped_artifacts = tuple(
+        shlex.split(stamped_assignment.partition("=")[2])[0].split()
+    )
+    assert stamped_artifacts == provenance.BUILD_ARTIFACTS, (
+        "Firefox package snapshot set differs from stamped build artifacts"
+    )
+    assert package_script.count("verify-build-stamp") == 4, (
+        "Firefox package does not bracket snapshot, staging, and image creation"
+    )
+    assert (
+        'cmp -s "$artifact_snapshot/$artifact" "$package_root/$artifact"'
+        in package_script
+    )
+    assert 'PLACEHOLDER_IMAGE "$package_root"' in package_script
+    assert 'set -- "$package_script" "$image_tmp" "$@"' in package_script
+    assert 'verify_firefox_runtime_image.py" "$image_tmp"' in package_script
+    assert 'mv "$image_tmp" "$IMAGE"' in package_script
+    assert package_script.index('verify_firefox_runtime_image.py" "$image_tmp"') < (
+        package_script.index('mv "$image_tmp" "$IMAGE"')
+    )
+    assert 'require_literal_canonical_path "$RELEASE_DIST"' in package_script
+    assert "validate_output_paths" in package_script
+    assert '"$RELEASE_OBJ"/*' in package_script
+    assert 'paths_alias "$output" "$protected"' in package_script
+    assert '"$OBJ" != "$RELEASE_OBJ"' in package_script
+    assert '"$BIN" != "$RELEASE_BIN"' in package_script
     makefile = (provenance.ROOT / "Makefile").read_text()
     firefox_target = makefile.split("test-aarch64-firefox-runtime:", 1)[1].split(
         "\ntest-aarch64-ipv6-runtime:", 1

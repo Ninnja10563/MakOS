@@ -8,7 +8,7 @@ for script in apply-patches.sh audit.sh audit-binary.sh build-makos.sh build-mod
     prepare-rust-libc.sh prepare-rust-errno.sh prepare-rust-getrandom.sh prepare-rust-rustix.sh \
     prepare-rust-mtu.sh prepare-rust-nss-gk-api.sh prepare-rust-socket2.sh \
     prepare-rust-libloading.sh \
-    test-build-mode.sh test-host-tools.sh test-nspr.sh test-toolchain.sh test-widget.sh test.sh \
+    test-build-mode.sh test-host-tools.sh test-nspr.sh test-package-coherence.sh test-toolchain.sh test-widget.sh test.sh \
     toolchain-audit.sh
 do
     sh -n "$port_dir/$script"
@@ -20,6 +20,7 @@ python3 "$port_dir/test-print-settings.py"
     grep -Eq '^MAKOS_FIREFOX_TOOLCHAIN_(OK|BLOCKED) '
 "$port_dir/test-toolchain.sh" >/dev/null
 "$port_dir/test-build-mode.sh" >/dev/null
+"$port_dir/test-package-coherence.sh" >/dev/null
 grep -Fq 'ac_add_options --enable-default-toolkit=cairo-makos' \
     "$port_dir/mozconfig.makos"
 grep -Fq 'if test "${MAKOS_FIREFOX_DEVELOPER_BUILD:-0}" = 1' \

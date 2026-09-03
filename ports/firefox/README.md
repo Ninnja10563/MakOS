@@ -186,8 +186,20 @@ real source index or object store. The stamp binds that source
 tree identity plus SHA-256 of `firefox`, `plugin-container`, `xpcshell`,
 `libxul.so`, and
 `libnspr4.so`; after stripping it emits a runtime record with hashes of those
-exact five packaged payloads. Integrated-image and strict-runtime preflights
-reject a missing/stale record or any package hash mismatch before QEMU.
+exact five packaged payloads. Packaging snapshots the five stamp-authorized
+`dist/bin` inputs before `stage-package`, independently strips those snapshots,
+and requires direct byte equality with staged copies. A mode-0700 private copy
+of the complete staged tree then takes all five final payloads directly from
+the snapshots, so image construction does not read mutable `dist/firefox`.
+Packaging verifies a same-directory temporary image with both package and
+Firefox preflights, rechecks canonical release paths and BIN, atomically
+replaces each integration source, and moves the image last. The auxiliary
+source set is not a transaction: an interrupted publication may leave a mix of
+complete old and candidate files and requires an unchanged rerun. The old
+image remains authoritative until every source is published and rechecked.
+Packaging rejects developer, redirected, symlinked, or output-aliased release
+inputs. Integrated-image and strict-runtime preflights reject a missing/stale
+record or any package hash mismatch before QEMU.
 MakOS VFS now mounts its checksummed package manifest and streams arbitrary
 offset reads directly from virtio-blk/ATA, avoiding fixed in-kernel file
 buffers. Guest Firefox now launches genuine packaged binaries through
