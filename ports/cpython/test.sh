@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Python-2.0
 set -eu
 port_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-for script in fetch.sh apply-patches.sh build-makos.sh stage-makos.sh package-makos.sh test.sh; do
+for script in fetch.sh apply-patches.sh build-makos.sh host-tools.sh \
+    stage-makos.sh package-makos.sh test-host-tools.sh test.sh
+do
 	sh -n "$port_dir/$script"
 done
+sh "$port_dir/test-host-tools.sh"
 "$port_dir/fetch.sh" --check
 "$port_dir/apply-patches.sh"
 if test -x "$port_dir/../../build/ports/cpython/makos/python.exe"; then

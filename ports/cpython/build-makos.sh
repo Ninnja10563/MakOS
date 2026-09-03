@@ -16,6 +16,9 @@ ranlib_tool=${MAKOS_RANLIB:-/opt/homebrew/opt/llvm/bin/llvm-ranlib}
 builtins=${MAKOS_BUILTINS:-"$repo_dir/build/ports/libcxx/sysroot/usr/lib/makos/libclang_rt.builtins-aarch64.a"}
 jobs=${CPYTHON_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 
+. "$port_dir/host-tools.sh"
+makos_cpython_select_readelf "$repo_dir"
+
 "$port_dir/fetch.sh" >/dev/null
 "$port_dir/apply-patches.sh" >/dev/null
 test -x "$build_python" || {
@@ -74,7 +77,7 @@ fi
 MAKOS_DYNAMIC_RUNTIME=1 make -j"$jobs" python.exe
 test -x python.exe
 file python.exe | grep -q 'ELF 64-bit LSB pie executable, ARM aarch64'
-/opt/homebrew/opt/llvm/bin/llvm-readelf -h -l -d python.exe >elf-audit.txt
+"$MAKOS_READELF" -h -l -d python.exe >elf-audit.txt
 grep -q 'Type:.*DYN' elf-audit.txt
 grep -q 'Requesting program interpreter: /lib/ld-musl-aarch64.so.1' elf-audit.txt
 grep -q 'Shared library: \[libc.so\]' elf-audit.txt
