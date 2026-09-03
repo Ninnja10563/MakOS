@@ -4,6 +4,30 @@ Last updated: 2026-09-03.
 
 ## Implemented
 
+- 2026-09-03 reviewed Firefox package-coherence code baseline
+  `817602513ccae985f1ca1d1159587520dfba7529` retains the byte-identical tree
+  from reviewed commit `f8a0ebf3932de5a5e77ffd21f6e87341f6cc0129` and closes
+  the build-to-package byte-authority gap. Packaging copies all five
+  stamp-authorized `dist/bin` inputs into an invocation-private mode-0700
+  snapshot, independently strips those copies, compares all five directly
+  with the privately staged runtime tree, and overwrites the candidate tree
+  from the authorized snapshots. It builds a same-directory temporary image
+  and runs both the actual package preflight and Firefox preflight, including
+  the all-five ELF audit, before publication. Canonical-path, symlink,
+  redirected-input, developer-mode, and output-alias checks prevent image or
+  stripped-output destinations from overlapping protected release inputs.
+  Adversarial coverage interrupts after each of the six individually atomic
+  auxiliary moves (`firefox`, `plugin-container`, `xpcshell`, `libnspr4.so`,
+  the runtime provenance record, and stripped `libxul.so`), requires every
+  published file to be a complete old or candidate value, and proves an
+  unchanged rerun recovers. The auxiliary set is explicitly not
+  transactional: interruption may leave a mixed old/candidate set and
+  requires that rerun. The fully preflighted image is moved last, so the prior
+  image remains authoritative through every earlier failure. This is reviewed
+  code and focused adversarial evidence only; no new provenance-bearing
+  release build, package, integrated image, QEMU/browser runtime, or macOS/HVF
+  evidence exists, and every affected original-spec row remains Partial.
+
 - 2026-09-03 the protected developer Firefox build from MakOS base HEAD
   `5827f228744c936b4091de93323d277fb4b4dcda` completed the full
   Firefox 140.13.0esr compile and link in `881:10`. It used pinned source

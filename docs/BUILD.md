@@ -100,6 +100,35 @@ five exact stripped runtime artifacts. Package CRCs, AArch64 PIE/shared-object
 shape, and runtime hashes are checked before QEMU creation; a historical,
 unprovenanced, stale-patch, or mismatched-payload image is rejected. The
 successful preflight marker is `MAKOS_FIREFOX_RUNTIME_IMAGE_OK`.
+
+Firefox package-coherence baseline
+`817602513ccae985f1ca1d1159587520dfba7529` has the same reviewed tree as
+`f8a0ebf3932de5a5e77ffd21f6e87341f6cc0129`. The packager copies the five
+stamp-authorized build inputs into an invocation-private mode-0700 root before
+`stage-package`, independently strips the snapshots, directly compares all
+five against the private staged tree, and replaces the five candidate runtime
+payloads from those authorized copies. Image construction reads that private
+tree, not mutable `dist/firefox`. It constructs the candidate beside the
+destination image and runs both `verify_package.py` and
+`verify_firefox_runtime_image.py`, including the all-five ELF audit, against
+that actual candidate. Release object/source/DIST/BIN/stamp paths must be
+canonical, non-symlinked defaults, developer or redirected inputs are denied,
+and `IMAGE`/`STRIPPED` destinations may not alias protected inputs through
+literal, normalized, parent-relative, or symlink-resolved paths.
+
+The integration-source publications are individually atomic but are not one
+transaction. There are six per-file interruption points, after publishing
+`firefox`, `plugin-container`, `xpcshell`, `libnspr4.so`, the runtime
+`makos-build-provenance.json`, and stripped `libxul.so`. At each point every
+visible auxiliary file is a complete old or candidate file, but the set may
+be mixed; an interruption requires an unchanged packaging rerun. Do not repair
+or bless the auxiliary set manually. The packager rechecks all six published
+files and the release inputs, then moves the fully preflighted temporary image
+last. Therefore the prior destination image, if present, remains the sole
+authoritative image through any earlier failure. This code evidence does not
+mean that a current release package or image exists and does not authorize a
+QEMU/runtime or macOS/HVF claim.
+
 For a clean Firefox source build, run `ports/firefox/clone.sh`,
 `ports/rust/build-std.sh`, then `ports/firefox/build-makos.sh`. The scripts
 support Apple Silicon/macOS and AArch64 Debian build hosts: set

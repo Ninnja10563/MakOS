@@ -12,7 +12,7 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required qualification baseline: dfbf3ebe047875d96a0e4a959ed053f4cc8af3ec
+Required qualification code baseline: 817602513ccae985f1ca1d1159587520dfba7529
 
 Verify that the checked-out `main` contains this exact baseline commit.
 Do not test an older commit. A later documentation- or test-only handoff commit
@@ -218,6 +218,14 @@ is acceptable if this baseline is its ancestor.
    exact stripped runtime hashes, and package/image semantic identity. If any
    release, package, or integration prerequisite fails, return the exact
    blocker and do not run the historical image.
+   The packager must use its five stamp-authorized private snapshots, mode-0700
+   package root, actual package plus Firefox/all-five-ELF candidate preflight,
+   canonical/alias rejection, and image-last publication. Its six auxiliary
+   files are individually atomic but explicitly not a transaction. If the
+   command is interrupted between those publications, retain the prior image
+   as authoritative and rerun the exact unchanged packaging command; do not
+   copy, edit, or manually reconcile the possibly mixed old/candidate
+   auxiliary set.
 
 5. Run the strict real-Firefox gate only against that newly generated image,
    only when `uptime`, `vm_stat`, `sysctl vm.swapusage`, and `memory_pressure`

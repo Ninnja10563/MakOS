@@ -67,6 +67,25 @@ pending and the applicable original-spec audit rows remain Partial. Use the
 supported release wrapper for the next build; never package these developer
 outputs or invoke a bare object-directory make/relink.
 
+The current Firefox qualification code baseline is
+`817602513ccae985f1ca1d1159587520dfba7529`, whose tree is byte-identical to
+reviewed `f8a0ebf3932de5a5e77ffd21f6e87341f6cc0129`. Its package path snapshots
+all five stamp-authorized build inputs in a private mode-0700 root, directly
+compares and supplies all five candidate runtime payloads from those
+snapshots, and runs the actual package and Firefox preflights, including the
+all-five ELF audit, on a same-directory temporary image. It rejects
+noncanonical, symlinked, redirected, developer, and aliased input/output
+paths. Focused interruption coverage stops after each of the six auxiliary
+file publications (`firefox`, `plugin-container`, `xpcshell`, `libnspr4.so`,
+runtime provenance, and stripped `libxul.so`): each file is individually
+atomic and remains a complete old or candidate value, but the six-file set is
+explicitly not transactional. A stopped publication can leave a mix and must
+be recovered by an unchanged rerun. Only after every auxiliary file and
+release input is rechecked is the fully preflighted image moved last; until
+then, the prior image remains authoritative. No actual release package or
+integrated image has been produced from this code, and no QEMU/runtime or
+macOS/HVF result is implied.
+
 The isolated Firefox qualification increment through
 `dfbf3ebe047875d96a0e4a959ed053f4cc8af3ec` fixes an impossible strict-gate
 ordering: patch 0057 can emit its post-enqueue syscall-149 markers only after a
@@ -1309,9 +1328,13 @@ and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
 
 1. Run the supported default release build with integrated print patch 0058,
    Rust errno patch 0059, and the exact 59-patch provenance; do not package or
-   reuse the completed developer outputs. Then, on the intended macOS/HVF
-   host, package that release build and create a new provenance-validated
-   integrated image; the historical
+   reuse the completed developer outputs. Require qualification code baseline
+   `817602513ccae985f1ca1d1159587520dfba7529`, then package that release build
+   and create a new provenance-validated integrated image on the intended
+   macOS/HVF host. If any of the six auxiliary publications is interrupted,
+   keep the prior image authoritative and rerun the unchanged command; do not
+   treat a mixed old/candidate auxiliary set as a transaction or repair it by
+   hand. The historical
    `a9c604254f094de2` image is not valid for this increment. When no visible
    QEMU runs and host load/memory pressure is low, run unchanged
    `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A

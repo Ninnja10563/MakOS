@@ -113,6 +113,24 @@ absent, and this evidence cannot authorize a release build stamp, package,
 integrated image, QEMU/browser runtime, or macOS/HVF result. All affected rows
 below therefore remain Partial.
 
+Firefox package-coherence qualification note (2026-09-03): reviewed code
+commit `817602513ccae985f1ca1d1159587520dfba7529` preserves the exact tree of
+reviewed `f8a0ebf3932de5a5e77ffd21f6e87341f6cc0129`. Five stamp-authorized build
+inputs are isolated in a private mode-0700 snapshot, independently stripped,
+directly compared with the private staged tree, and used as the authority for
+all five candidate runtime payloads. A same-directory temporary image passes
+the actual package and Firefox preflights, including all-five ELF parsing,
+before publication. Canonical-path and alias rejection protects source,
+object, DIST, BIN, stamp, and output paths. Adversarial coverage interrupts
+after each of six individually atomic auxiliary publications: `firefox`,
+`plugin-container`, `xpcshell`, `libnspr4.so`, runtime provenance, and stripped
+`libxul.so`. The auxiliary set is deliberately nontransactional and may be a
+mix of complete old and candidate files until an unchanged rerun completes.
+The candidate image moves last, leaving the prior image authoritative across
+all earlier failures. This is code/focused-test evidence, not evidence of a
+new release package, integrated image, QEMU/browser runtime, or macOS/HVF
+qualification. No Partial or Missing label is upgraded by this increment.
+
 | Requirement group | Status | Current evidence | Missing proof/work |
 |---|---|---|---|
 | Real OS, no host fallback | Implemented | UEFI loader, freestanding kernels, EL0/ring-3 userspace, own drivers; `scripts/boot_test.py`, `scripts/boot_test_aarch64.py` | Real-hardware qualification |
