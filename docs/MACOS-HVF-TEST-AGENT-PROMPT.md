@@ -12,7 +12,7 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required qualification baseline: 0d6b4289771438ce6ed819b1e8d4152ad27bce72
+Required qualification baseline: dfbf3ebe047875d96a0e4a959ed053f4cc8af3ec
 
 Verify that the checked-out `main` contains this exact baseline commit.
 Do not test an older commit. A later documentation- or test-only handoff commit
@@ -191,6 +191,10 @@ is acceptable if this baseline is its ancestor.
    Cargo or C++ caches.
 
    The full release must print
+   `MAKOS_FIREFOX_BUILD_ELF_OK
+   artifacts=firefox,plugin-container,xpcshell,libxul.so,libnspr4.so
+   identity=elf64,aarch64,et-dyn interp=executables-only
+   dependencies=artifact-specific`,
    `MAKOS_FIREFOX_BINARY_OK target=aarch64-unknown-makos
    elf=firefox,plugin-container,xpcshell,libxul gecko=linked nss=linked
    runtime=shared-musl interp=/lib/ld-musl-aarch64.so.1` and
@@ -235,7 +239,9 @@ is acceptable if this baseline is its ancestor.
    Before QEMU, the target must print `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the
    pinned source, 59-patch series identity above,
    `artifacts=build-audited,runtime-sha256-matched`, and
-   `elf=aarch64-pie,libxul`. Missing provenance, an old patch identity, or any
+   `elf=aarch64-pie,libxul
+   all_five_elf=aarch64-et-dyn,interp-and-deps-by-kind`. Missing provenance,
+   a malformed ELF, an old patch identity, or any
    packaged-runtime hash mismatch is a preflight refusal, not permission to
    bypass the check.
 
@@ -245,6 +251,10 @@ is acceptable if this baseline is its ancestor.
    `MAKOS_FIREFOX_SUSTAINED_INTERACTION_OK`,
    `MAKOS_FIREFOX_SMP_OVERLAP_OK`, `MAKOS_FIREFOX_SMP_AUTOBALANCE_OK`, and
    `MAKOS_FIREFOX_GUEST_PROBE_OK`. Fallback-only handoff is a failure. The
+   first-paint phase proves JIT/blit and client pixels before the first Firefox
+   key; the post-enqueue syscall-149 markers are required only after the timed
+   Ctrl-A produces raw 132. Do not move them back ahead of the event that
+   creates them or move them after the latency decision. The
    overlap must belong to the launched Firefox PID, contain at least two
    distinct nonzero TIDs concurrently owning different APs, and retain
    exclusive ownership. Default placements must cover AP1/AP2/AP3. The same

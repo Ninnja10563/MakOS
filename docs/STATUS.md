@@ -4,6 +4,22 @@ Last updated: 2026-09-02.
 
 ## Implemented
 
+- 2026-09-02 Firefox qualification ordering and packaged-ELF preflight are
+  hardened through `ed6bb52e092d4f521e3939e61cedbaa203cd1f2c` and
+  `dfbf3ebe047875d96a0e4a959ed053f4cc8af3ec`. First paint still requires JIT,
+  blit, and real client pixels, while the post-enqueue syscall-149 markers are
+  now required immediately after the first timed Ctrl-A/raw-132 completion,
+  the event that can actually create them; latency is captured first and the
+  unchanged strictly-less-than-10,000-ms rejection remains. Release audit and
+  pre-QEMU image verification now parse all five exact Firefox artifacts as
+  bounded ELF64 little-endian AArch64 ET_DYN images, require executable entry
+  points and correctly ordered exact musl interpreters, reject interpreters on
+  DSOs, validate load/dynamic mappings, require per-artifact dependencies, and
+  require exact libxul/libnspr SONAMEs. Self-hashed malformed runtime fixtures
+  fail before QEMU. Focused interaction, provenance, integrated-image,
+  build-mode, syntax, and diff gates pass. No new full link, release package,
+  QEMU runtime, or macOS/HVF result is claimed; Firefox remains Partial.
+
 - 2026-09-02 the staged AArch64 self-host/SMP increment through
   `5db7e3588227a97e878c989fab3e1361ddff8ed5` adds the fixed authenticated
   `makbuild-parallel` command. It spawns the existing disjoint cold

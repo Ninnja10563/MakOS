@@ -186,6 +186,22 @@ packaging flow rejects them because this mode withholds release provenance;
 they also cannot be used as Firefox runtime, latency, or macOS/HVF
 qualification evidence. Run the default build in `obj-aarch64-makos` to
 produce release artifacts and a provenance stamp.
+Release binary audit additionally emits `MAKOS_FIREFOX_BUILD_ELF_OK` only after
+bounded parsing of all five exact artifacts: `firefox`, `plugin-container`,
+`xpcshell`, `libxul.so`, and `libnspr4.so`. The three executables require a
+nonzero entry and exact MakOS musl `PT_INTERP` before `PT_LOAD`; both DSOs reject
+an interpreter. Load/dynamic file and virtual ranges, artifact-specific
+dependencies, and exact libxul/libnspr SONAMEs are fail-closed. The same parser
+runs directly over package-image ranges before QEMU, after runtime hashes are
+bound by provenance. Self-hashed corrupt, wrong-machine/type/range/entry,
+interpreter, dependency, and SONAME fixtures are rejected.
+
+The strict interaction harness proves JIT/blit/client pixels at first paint.
+Patch 0057's post-enqueue syscall-149 proof is input-dependent, so its widget
+and kernel markers are required immediately after the timed Ctrl-A returns raw
+132, not before the first Firefox key. The elapsed Ctrl-A interval is captured
+before marker verification and the existing strictly-less-than-10,000-ms gate
+is unchanged.
 The runtime then requires
 strict paint/input/TLS/exact-URI/page-pixel proof, then copies the selected URL
 through the MakOS system clipboard, clears the URL bar, pastes, and requires a

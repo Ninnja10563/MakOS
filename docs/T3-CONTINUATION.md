@@ -43,6 +43,19 @@ configure`, then validates the selected object/source identities and generated
 widget backend. Do not invoke bare make or describe the next build as a cheap
 relink; full link evidence remains pending.
 
+The isolated Firefox qualification increment through
+`dfbf3ebe047875d96a0e4a959ed053f4cc8af3ec` fixes an impossible strict-gate
+ordering: patch 0057 can emit its post-enqueue syscall-149 markers only after a
+Firefox key, so first paint now verifies JIT/blit/client pixels and the handoff
+markers are required immediately after the timed Ctrl-A/raw-132 wait. The
+latency is captured before that verification and the unchanged strict
+10,000-ms bound remains. The same increment adds a bounded all-five ELF parser
+before release stamping and before QEMU, covering executable entry/interpreter
+rules, DSO interpreter rejection, load/dynamic mapping, artifact-specific
+dependencies, and exact libxul/libnspr SONAMEs. Focused interaction,
+provenance, integrated-image, build-mode, syntax, adversarial malformed-image,
+and diff checks pass. No new link, package, or runtime result is implied.
+
 The staged 2026-08-30 self-host increment adds bounded file-scope data and an
 exact production-source graph. It reads the unchanged
 `ports/musl/shared-demo.c` through the read-only guest path
