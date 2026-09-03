@@ -164,6 +164,9 @@ static const uint8_t leaf_bytes[] =
     "#define INCLUDED_VALUE 2\\n"
     "int included_answer = INCLUDED_VALUE;\\n";
 static const uint8_t stdint_bytes[] = "typedef unsigned long uint64_t;\\n";
+static uint8_t written_record[OUTPUT_RECORD_CAPACITY];
+static size_t written_length;
+static size_t write_calls;
 
 uint64_t makos_aarch64_toolchain_host_syscall(
     uint64_t number, uint64_t first, uint64_t second, uint64_t third,
@@ -188,7 +191,14 @@ uint64_t makos_aarch64_toolchain_host_syscall(
         return length;
     }}
     if (number == SYS_CLOSE) return first >= 3 && first <= 5;
-    if (number == SYS_WRITE) return second;
+    if (number == SYS_WRITE) {{
+        ++write_calls;
+        if ((size_t)second > sizeof(written_record)) return UINT64_MAX;
+        copy_bytes(written_record, (const uint8_t *)(uintptr_t)first,
+                   (size_t)second);
+        written_length = (size_t)second;
+        return second;
+    }}
     return UINT64_MAX;
 }}
 
@@ -197,6 +207,19 @@ static int bytes_equal(const uint8_t *first, const uint8_t *second,
     for (size_t index = 0; index < length; ++index)
         if (first[index] != second[index]) return 0;
     return 1;
+}}
+
+static void reset_writes(void) {{
+    memset(written_record, 0, sizeof(written_record));
+    written_length = 0;
+    write_calls = 0;
+}}
+
+static int exact_record(const char *expected) {{
+    size_t expected_length = length(expected);
+    return write_calls == 1 && written_length == expected_length &&
+           bytes_equal(written_record, (const uint8_t *)expected,
+                       expected_length);
 }}
 
 int main(void) {{
@@ -239,6 +262,64 @@ int main(void) {{
     if (length != sizeof(stdint_bytes) - 1 || dependencies.count != 1 ||
         dependencies.max_depth != 1 ||
         !bytes_equal(output, stdint_bytes, length)) return 2;
+
+    static const char build_expected[] =
+        "MAKOS_AARCH64_MAKBUILD_OK mode=build "
+        "manifest=/home/user/generated-three.build startup=sysv argc=2 envc=1 "
+        "seeded=0 cache=makstate-v2 build_inputs=3 cache_hits=0 cache_misses=3 "
+        "state_committed=1 status=42\\n";
+    reset_writes();
+    if (!write_build_marker("build", "/home/user/generated-three.build",
+                            sizeof("/home/user/generated-three.build") - 1,
+                            0, 3, 0, 3) ||
+        !exact_record(build_expected)) return 3;
+
+    static const char output_expected[] =
+        "MAKOS_AARCH64_MAKBUILD_OUTPUT_OK "
+        "manifest=/home/user/generated-nested.build linked_bytes=500 "
+        "output_bytes=1583 linked_capacity=1024 image_capacity=2048 "
+        "data_offset=1536\\n";
+    reset_writes();
+    if (!write_build_output_marker(
+            "/home/user/generated-nested.build",
+            sizeof("/home/user/generated-nested.build") - 1, 500, 1583) ||
+        !exact_record(output_expected)) return 4;
+
+    static const char header_expected[] =
+        "MAKOS_AARCH64_C_HEADER_DEP_OK "
+        "source=/home/user/generated-header.c "
+        "root=/home/user/generated-inline.h "
+        "leaf=/home/user/generated-leaf.h headers=2 max_depth=2 "
+        "resolver=quoted-absolute-recursive depth_limit=4 "
+        "preprocessor=bounded-macro-if-expressions macros=6 "
+        "conditional_depth=2 macro_expansion=text,function-like parameters=4 "
+        "expansion_depth=8 "
+        "if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,"
+        "not,and,or,short-circuit,conditional elif=selected "
+        "include_guard=deduplicated fingerprint=expanded-source\\n";
+    build.inputs[1].source_path = "/home/user/generated-header.c";
+    build.inputs[1].source_path_length =
+        sizeof("/home/user/generated-header.c") - 1;
+    memset(&dependencies, 0, sizeof(dependencies));
+    dependencies.count = 2;
+    dependencies.max_depth = 2;
+    dependencies.macro_count = 6;
+    dependencies.max_conditional_depth = 2;
+    dependencies.path_lengths[0] = sizeof(inline_path) - 1;
+    copy_bytes((uint8_t *)dependencies.paths[0],
+               (const uint8_t *)inline_path, sizeof(inline_path) - 1);
+    dependencies.path_lengths[1] = sizeof(leaf_path) - 1;
+    copy_bytes((uint8_t *)dependencies.paths[1],
+               (const uint8_t *)leaf_path, sizeof(leaf_path) - 1);
+    reset_writes();
+    if (!write_header_marker(&build, 1, &dependencies) ||
+        !exact_record(header_expected)) return 5;
+
+    uint8_t oversized_path[OUTPUT_RECORD_CAPACITY] = {{0}};
+    reset_writes();
+    if (write_build_marker("build", (const char *)oversized_path,
+                           sizeof(oversized_path), 0, 3, 0, 3) ||
+        write_calls != 0 || written_length != 0) return 6;
     return 0;
 }}
 '''
@@ -249,4 +330,4 @@ int main(void) {{
     )
     subprocess.run([str(host_binary)], check=True)
 
-print("MAKOS_AARCH64_TOOLCHAIN_FREESTANDING_OK memcpy=defined-exact nonrecursive=1 undefined=0 link=aarch64-et_exec include=self-generated-exact include_parser=quoted-absolute-recursive-guard,angle-stdint")
+print("MAKOS_AARCH64_TOOLCHAIN_FREESTANDING_OK memcpy=defined-exact nonrecursive=1 undefined=0 link=aarch64-et_exec include=self-generated-exact include_parser=quoted-absolute-recursive-guard,angle-stdint records=build,output,header sys_write=one-each overflow=fail-closed")

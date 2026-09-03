@@ -117,6 +117,12 @@ for fragment in (
     'write_generated_header_failure(path, path_length, "content")',
     "MAKOS_AARCH64_GENERATED_HEADERS_OK",
     "identity=guest-readback-exact",
+    "OUTPUT_RECORD_CAPACITY = 768",
+    "struct output_record",
+    "static int record_append_bytes(",
+    "static int record_append_text(",
+    "static int record_append_decimal(",
+    "static int write_record(",
     "MAKOS_AARCH64_C_HEADER_DEP_OK",
     "MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK",
     "fingerprint=expanded-source",
@@ -424,6 +430,24 @@ readback = TOOLCHAIN.index("!verify_generated_header(", seed_end)
 repository_marker = TOOLCHAIN.index("write_repository_source_marker();", readback)
 if not seed_end < readback < repository_marker:
     raise AssertionError("generated-header readback is not immediate after seeding")
+
+for function, following in (
+    ("static int write_build_marker(", "static int write_build_output_marker("),
+    ("static int write_build_output_marker(", "static int write_header_marker("),
+    ("static int write_header_marker(", "static void write_repository_source_marker("),
+):
+    body = TOOLCHAIN[TOOLCHAIN.index(function) : TOOLCHAIN.index(following)]
+    if body.count("write_record(&record)") != 1:
+        raise AssertionError(f"{function} does not emit exactly one record")
+    if "write_text(" in body or "write_bytes(" in body:
+        raise AssertionError(f"{function} retains fragmented SYS_WRITE output")
+for fragment in (
+    'if (!write_build_marker("build", build_manifest_path,',
+    "if (!write_build_output_marker(build_manifest_path,",
+    "!write_header_marker(&build, input, &dependencies[input])",
+    'if (!write_build_marker("fixture", build_manifest_path,',
+):
+    require(TOOLCHAIN, fragment)
 
 for fragment in (
     "R_AARCH64_ADR_PREL_PG_HI21",

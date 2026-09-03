@@ -40,6 +40,7 @@ enum {
     STT_OBJECT = 1,
     STT_FUNC = 2,
     PF_W = 2,
+    OUTPUT_RECORD_CAPACITY = 768,
 };
 
 static const uint64_t USER_BASE = UINT64_C(0x10000000);
@@ -125,6 +126,50 @@ static int range_ok(size_t offset, size_t count, size_t capacity) {
 static void copy_bytes(volatile uint8_t *destination, const uint8_t *source,
                        size_t count) {
     for (size_t index = 0; index < count; ++index) destination[index] = source[index];
+}
+
+struct output_record {
+    uint8_t bytes[OUTPUT_RECORD_CAPACITY];
+    size_t length;
+    int valid;
+};
+
+static int record_append_bytes(struct output_record *record,
+                               const void *bytes, size_t count) {
+    if (!record || !record->valid || !bytes ||
+        record->length > sizeof(record->bytes) ||
+        count > sizeof(record->bytes) - record->length) {
+        if (record) record->valid = 0;
+        return 0;
+    }
+    copy_bytes(record->bytes + record->length, bytes, count);
+    record->length += count;
+    return 1;
+}
+
+static int record_append_text(struct output_record *record,
+                              const char *text) {
+    return text && record_append_bytes(record, text, length(text));
+}
+
+static int record_append_decimal(struct output_record *record, size_t value) {
+    char digits[20];
+    size_t count = 0;
+    do {
+        digits[count++] = (char)('0' + value % 10);
+        value /= 10;
+    } while (value && count < sizeof(digits));
+    while (count)
+        if (!record_append_bytes(record, &digits[--count], 1)) return 0;
+    return 1;
+}
+
+static int write_record(struct output_record *record) {
+    if (!record || !record->valid || !record->length ||
+        record->bytes[record->length - 1] != '\n')
+        return 0;
+    return syscall4(SYS_WRITE, (uintptr_t)record->bytes, record->length, 0,
+                    0) == record->length;
 }
 
 static uint16_t get16(const uint8_t *input, size_t offset) {
@@ -4823,72 +4868,94 @@ static int incremental_build(
     return 1;
 }
 
-static void write_build_marker(const char *mode, const char *manifest_path,
-                               size_t manifest_path_length, int seeded,
-                               size_t input_count, size_t cache_hits,
-                               size_t cache_misses) {
+static int write_build_marker(const char *mode, const char *manifest_path,
+                              size_t manifest_path_length, int seeded,
+                              size_t input_count, size_t cache_hits,
+                              size_t cache_misses) {
     char inputs = (char)('0' + input_count);
     char hit = (char)('0' + cache_hits);
     char miss = (char)('0' + cache_misses);
-    write_text("MAKOS_AARCH64_MAKBUILD_OK mode=");
-    write_text(mode);
-    write_text(" manifest=");
-    write_bytes(manifest_path, manifest_path_length);
-    write_text(" startup=sysv argc=2 envc=1 seeded=");
-    write_text(seeded ? "1" : "0");
-    write_text(" cache=makstate-v2 build_inputs=");
-    write_bytes(&inputs, 1);
-    write_text(" cache_hits=");
-    write_bytes(&hit, 1);
-    write_text(" cache_misses=");
-    write_bytes(&miss, 1);
-    write_text(" state_committed=1 status=42\n");
+    struct output_record record = {.valid = 1};
+    if (!record_append_text(&record, "MAKOS_AARCH64_MAKBUILD_OK mode=") ||
+        !record_append_text(&record, mode) ||
+        !record_append_text(&record, " manifest=") ||
+        !record_append_bytes(&record, manifest_path, manifest_path_length) ||
+        !record_append_text(&record, " startup=sysv argc=2 envc=1 seeded=") ||
+        !record_append_text(&record, seeded ? "1" : "0") ||
+        !record_append_text(&record, " cache=makstate-v2 build_inputs=") ||
+        !record_append_bytes(&record, &inputs, 1) ||
+        !record_append_text(&record, " cache_hits=") ||
+        !record_append_bytes(&record, &hit, 1) ||
+        !record_append_text(&record, " cache_misses=") ||
+        !record_append_bytes(&record, &miss, 1) ||
+        !record_append_text(&record, " state_committed=1 status=42\n"))
+        return 0;
+    return write_record(&record);
 }
 
-static void write_build_output_marker(const char *manifest_path,
-                                      size_t manifest_path_length,
-                                      size_t linked_bytes,
-                                      size_t image_bytes) {
-    write_text("MAKOS_AARCH64_MAKBUILD_OUTPUT_OK manifest=");
-    write_bytes(manifest_path, manifest_path_length);
-    write_text(" linked_bytes=");
-    write_size_decimal(linked_bytes);
-    write_text(" output_bytes=");
-    write_size_decimal(image_bytes);
-    write_text(" linked_capacity=1024 image_capacity=2048 data_offset=1536\n");
+static int write_build_output_marker(const char *manifest_path,
+                                     size_t manifest_path_length,
+                                     size_t linked_bytes,
+                                     size_t image_bytes) {
+    struct output_record record = {.valid = 1};
+    if (!record_append_text(
+            &record, "MAKOS_AARCH64_MAKBUILD_OUTPUT_OK manifest=") ||
+        !record_append_bytes(&record, manifest_path, manifest_path_length) ||
+        !record_append_text(&record, " linked_bytes=") ||
+        !record_append_decimal(&record, linked_bytes) ||
+        !record_append_text(&record, " output_bytes=") ||
+        !record_append_decimal(&record, image_bytes) ||
+        !record_append_text(
+            &record,
+            " linked_capacity=1024 image_capacity=2048 data_offset=1536\n"))
+        return 0;
+    return write_record(&record);
 }
 
-static void write_header_marker(const struct build_manifest *build,
-                                size_t input,
-                                const struct build_dependencies *dependencies) {
+static int write_header_marker(const struct build_manifest *build,
+                               size_t input,
+                               const struct build_dependencies *dependencies) {
+    if (!build || input >= build->input_count || !dependencies ||
+        !dependencies->count)
+        return 0;
     char count = (char)('0' + dependencies->count);
     char depth = (char)('0' + dependencies->max_depth);
     char macros = (char)('0' + dependencies->macro_count);
     char conditional_depth =
         (char)('0' + dependencies->max_conditional_depth);
-    write_text("MAKOS_AARCH64_C_HEADER_DEP_OK source=");
-    write_bytes(build->inputs[input].source_path,
-                build->inputs[input].source_path_length);
-    write_text(" root=");
-    write_bytes(dependencies->paths[0], dependencies->path_lengths[0]);
-    write_text(" leaf=");
-    write_bytes(dependencies->paths[dependencies->count - 1],
-                dependencies->path_lengths[dependencies->count - 1]);
-    write_text(" headers=");
-    write_bytes(&count, 1);
-    write_text(" max_depth=");
-    write_bytes(&depth, 1);
-    write_text(" resolver=quoted-absolute-recursive depth_limit=4 "
-               "preprocessor=bounded-macro-if-expressions macros=");
-    write_bytes(&macros, 1);
-    write_text(" conditional_depth=");
-    write_bytes(&conditional_depth, 1);
-    write_text(" macro_expansion=text,function-like parameters=4 "
-               "expansion_depth=8 "
-               "if_expression=defined,numeric,arithmetic,shift,comparison,"
-               "bitwise,not,and,or,short-circuit,conditional "
-               "elif=selected include_guard=deduplicated "
-               "fingerprint=expanded-source\n");
+    struct output_record record = {.valid = 1};
+    if (!record_append_text(&record,
+                            "MAKOS_AARCH64_C_HEADER_DEP_OK source=") ||
+        !record_append_bytes(&record, build->inputs[input].source_path,
+                             build->inputs[input].source_path_length) ||
+        !record_append_text(&record, " root=") ||
+        !record_append_bytes(&record, dependencies->paths[0],
+                             dependencies->path_lengths[0]) ||
+        !record_append_text(&record, " leaf=") ||
+        !record_append_bytes(
+            &record, dependencies->paths[dependencies->count - 1],
+            dependencies->path_lengths[dependencies->count - 1]) ||
+        !record_append_text(&record, " headers=") ||
+        !record_append_bytes(&record, &count, 1) ||
+        !record_append_text(&record, " max_depth=") ||
+        !record_append_bytes(&record, &depth, 1) ||
+        !record_append_text(
+            &record,
+            " resolver=quoted-absolute-recursive depth_limit=4 "
+            "preprocessor=bounded-macro-if-expressions macros=") ||
+        !record_append_bytes(&record, &macros, 1) ||
+        !record_append_text(&record, " conditional_depth=") ||
+        !record_append_bytes(&record, &conditional_depth, 1) ||
+        !record_append_text(
+            &record,
+            " macro_expansion=text,function-like parameters=4 "
+            "expansion_depth=8 "
+            "if_expression=defined,numeric,arithmetic,shift,comparison,"
+            "bitwise,not,and,or,short-circuit,conditional "
+            "elif=selected include_guard=deduplicated "
+            "fingerprint=expanded-source\n"))
+        return 0;
+    return write_record(&record);
 }
 
 static void write_repository_source_marker(void) {
@@ -5870,24 +5937,28 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                                &data_evidence) ||
             cache_hits + cache_misses != build.input_count)
             fail(91);
-        write_build_marker("build", build_manifest_path,
-                           build_manifest_path_length, 0, build.input_count,
-                           cache_hits, cache_misses);
+        if (!write_build_marker("build", build_manifest_path,
+                                build_manifest_path_length, 0,
+                                build.input_count, cache_hits, cache_misses))
+            fail(91);
         if (same_name(build_manifest_path, build_manifest_path_length,
                       nested_manifest_path,
                       sizeof(nested_manifest_path) - 1))
-            write_build_output_marker(build_manifest_path,
-                                      build_manifest_path_length,
-                                      linked_bytes, image_bytes);
+            if (!write_build_output_marker(build_manifest_path,
+                                           build_manifest_path_length,
+                                           linked_bytes, image_bytes))
+                fail(91);
         if (same_name(build_manifest_path, build_manifest_path_length,
                       shared_manifest_path,
                       sizeof(shared_manifest_path) - 1)) {
             if (!data_evidence) fail(88);
             if (!write_global_data_marker()) fail(88);
         }
-        for (size_t input = 0; input < build.input_count; ++input)
-            if (dependencies[input].count)
-                write_header_marker(&build, input, &dependencies[input]);
+        for (size_t input = 0; input < build.input_count; ++input) {
+            if (dependencies[input].count &&
+                !write_header_marker(&build, input, &dependencies[input]))
+                fail(91);
+        }
         syscall4(SYS_EXIT, 42, 0, 0, 0);
         __builtin_unreachable();
     }
@@ -6757,8 +6828,10 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                            build.input_count, build_sources,
                            build_source_lengths, objects, object_lengths))
         fail(90);
-    write_build_marker("fixture", build_manifest_path,
-                       build_manifest_path_length, 1, build.input_count, 0, 4);
+    if (!write_build_marker("fixture", build_manifest_path,
+                            build_manifest_path_length, 1,
+                            build.input_count, 0, 4))
+        fail(90);
     write_bytes(marker, sizeof(marker) - 1);
     syscall4(SYS_EXIT, 42, 0, 0, 0);
     __builtin_unreachable();
