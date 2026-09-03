@@ -30,10 +30,11 @@ makos_cpython_select_readelf() {
         }
     else
         makos_cpython_readelf_source=
+        makos_cpython_homebrew_readelf=${_MAKOS_CPYTHON_HOMEBREW_READELF-/opt/homebrew/opt/llvm/bin/llvm-readelf}
         for makos_cpython_readelf_candidate in \
             "$makos_cpython_host_repo/build/host-tools/llvm19/usr/bin/llvm-readelf-19" \
             llvm-readelf-19 llvm-readelf \
-            /opt/homebrew/opt/llvm/bin/llvm-readelf
+            "$makos_cpython_homebrew_readelf"
         do
             makos_cpython_readelf_path=$(command -v \
                 "$makos_cpython_readelf_candidate" 2>/dev/null || true)
@@ -44,7 +45,7 @@ makos_cpython_select_readelf() {
                     "$makos_cpython_host_repo"/*)
                         makos_cpython_readelf_source=staged-llvm19
                         ;;
-                    /opt/homebrew/*)
+                    "$makos_cpython_homebrew_readelf")
                         makos_cpython_readelf_source=homebrew-llvm
                         ;;
                     *)

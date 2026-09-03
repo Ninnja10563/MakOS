@@ -76,6 +76,8 @@ grep -Fq 'MAKOS_READELF is not executable LLVM readelf' "$temporary/missing.err"
 unset MAKOS_READELF
 mkdir -p "$temporary/no-tools"
 PATH=$temporary/no-tools
+_MAKOS_CPYTHON_HOMEBREW_READELF=$temporary/no-tools/homebrew-readelf
+export _MAKOS_CPYTHON_HOMEBREW_READELF
 if makos_cpython_select_readelf "$empty_repo" >"$temporary/automatic-missing.out" \
     2>"$temporary/automatic-missing.err"; then
     PATH=$saved_path
@@ -83,6 +85,7 @@ if makos_cpython_select_readelf "$empty_repo" >"$temporary/automatic-missing.out
     exit 1
 fi
 PATH=$saved_path
+unset _MAKOS_CPYTHON_HOMEBREW_READELF
 grep -Fq 'executable LLVM readelf missing' \
     "$temporary/automatic-missing.err"
 
