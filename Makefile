@@ -245,6 +245,7 @@ unit:
 	ports/firefox/test-toolchain.sh
 	ports/firefox/test-build-mode.sh
 	ports/firefox/test-host-tools.sh
+	ports/cpython/test-host-tools.sh
 	python3 scripts/test_aarch64_stack_protector.py
 	python3 scripts/test_aarch64_package_probe.py
 	python3 scripts/test_aarch64_symlink_timestamps.py
@@ -305,6 +306,7 @@ check:
 	ports/firefox/test-toolchain.sh
 	ports/firefox/test-build-mode.sh
 	ports/firefox/test-host-tools.sh
+	ports/cpython/test-host-tools.sh
 	python3 scripts/test_aarch64_stack_protector.py
 	python3 scripts/test_aarch64_package_probe.py
 	python3 scripts/test_aarch64_symlink_timestamps.py
