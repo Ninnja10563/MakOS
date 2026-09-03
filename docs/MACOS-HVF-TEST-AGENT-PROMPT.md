@@ -12,12 +12,19 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required qualification code baseline: 5a49af108452983bf4809c12a2a8307582fa5955
+Required qualification implementation baseline: a20e2c205b481a24824633fe4bb8260f4433bcbf
 
 Verify that the checked-out `main` contains this exact baseline commit.
-Do not test an older commit. A later handoff commit is acceptable if this
-baseline is its ancestor; record the exact tested HEAD and the scope of every
-later commit.
+Do not test an older implementation or an arbitrary future descendant. The
+only expected commits between self-host qualification baseline
+`5a49af108452983bf4809c12a2a8307582fa5955` and the required implementation
+baseline are `00d486fd7db97c213971148d477eb762375a39b0`,
+`c502eff70a158fc72063fdf7f63b7e5513319ca3`, and
+`7c906e943706ceb8ca278c2df8dd1bc92797cd96`, and
+`a20e2c205b481a24824633fe4bb8260f4433bcbf`. A later handoff commit is
+acceptable only when its diff after `a20e2c2` is documentation-only. Require
+the checked-out HEAD, local `main`, `origin/main`, and remote `main` to match;
+record that exact tested HEAD and every later documentation commit.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, and docs/INTEGRATED-DATA-IMAGE.md.
@@ -39,7 +46,10 @@ later commit.
        make test-aarch64-production-smp-runtime
        make test-aarch64-cursor-runtime
 
-   Before the self-host run, record SHA-256 of the exact boot image. Preserve
+   Record the boot-image SHA-256 both before and immediately after the
+   self-host run, because its phony image prerequisite rebuilds that file;
+   require equality and treat the post-run hash as the identity of the bytes
+   used by the harness. Preserve
    the complete harness output and `build/makos-selfhost-focused-serial.log`;
    record each path, byte size, SHA-256, command exit status, QEMU version, and
    accelerator. From the final host marker record exact graph/CLI/process
@@ -216,6 +226,12 @@ later commit.
    allow only the wrapper's journaled, recoverable
    `makos-moved-cargo-quarantine` operation. Do not delete or manually move
    Cargo or C++ caches.
+
+   The later integrated-image packaging path also stages CPython 3.14.7. It
+   requires a matching host Python 3.14 and a validated LLVM readelf. Set
+   `MAKOS_READELF` only when an explicit tool is needed; otherwise the build
+   selects repository-staged LLVM 19, `PATH`, or Homebrew. Do not substitute
+   Python 3.11/3.12 for CPython's matching-version cross-build prerequisite.
 
    The full release must print
    `MAKOS_FIREFOX_BUILD_ELF_OK

@@ -201,9 +201,10 @@ macOS/HVF or a Firefox browser. The 12,408-byte harness log is
 `32ef4df36570702594cd15237247e61efe8e934ea93b1b24e24f2992293394da` and the
 75,738-byte serial log is `build/makos-selfhost-focused-serial.log`, SHA-256
 `118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
-Full unchanged `make unit check` also passes; its 79,717-byte log is
-`build/logs/full-unit-check-20260903-atomic-final.log`, SHA-256
-`23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+Full unchanged `make unit check` also passes; the final rerun includes the
+CPython host-tool gate in both targets. Its 79,808-byte log is
+`build/logs/full-unit-check-20260903-cpython-final.log`, SHA-256
+`1878ec27c01ecd21178e6d68ed598eed5cf639e1f1a3c6cda4326d8c602fc76e`.
 General globals/initializers, aggregates, common objects, TLS,
 general system headers, a self-hosted DSO, arbitrary build graphs, and
 substantial in-guest builds remain missing, so the Scheduling, SDK/developer

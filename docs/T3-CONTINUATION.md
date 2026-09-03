@@ -158,9 +158,10 @@ the 75,738-byte serial log is `build/makos-selfhost-focused-serial.log`,
 SHA-256
 `118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
 Full unchanged `make unit check` passes with the extracted LLVM 19 toolchain on
-`PATH`; `build/logs/full-unit-check-20260903-atomic-final.log` is 79,717 bytes,
+`PATH`; the final rerun includes the CPython host-tool gate in both targets.
+`build/logs/full-unit-check-20260903-cpython-final.log` is 79,808 bytes,
 SHA-256
-`23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+`1878ec27c01ecd21178e6d68ed598eed5cf639e1f1a3c6cda4326d8c602fc76e`.
 Separate Pi/TCG gates pass Native dispatches `6855,7066,10391`, placements
 `13,3,2`, two migrations; Python-role dispatches `7136,10934,6846`, placements
 `1,1,1`, one migration; production Firefox-role dispatches
@@ -183,7 +184,8 @@ private session
 `/home/friend/MakOS/build/makos-pi-visible-smp-atomic-ngRmkLhJ`. The session
 contains a private read-only `boot.img`, SHA-256
 `cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`; a
-blank sparse 1 GiB `data.img`, SHA-256
+private sparse 1 GiB `data.img`, created blank and then initialized by the
+guest, SHA-256
 `6e1cab146df006d2d39559d8d89b48d239238a09a49840d29725c13e24325262`;
 private UEFI vars, SHA-256
 `8bf6243965b943cf708b93a89c0eb3bcb065889cbdcd401e0b69dba43c282107`;
@@ -207,6 +209,15 @@ build/makos-integrated-firefox-handoff149.img`. The 7,629-byte log is
 This is a fail-closed missing release package, not a browser runtime failure or
 pass; no QEMU launched, no macOS/HVF evidence exists, and thresholds remain
 unchanged.
+
+CPython packaging host-tool portability through
+`a20e2c205b481a24824633fe4bb8260f4433bcbf` replaces its unconditional
+Homebrew `llvm-readelf` invocation with validated explicit, repository-staged
+LLVM 19, `PATH`, and Homebrew selection. Missing or non-LLVM tools fail closed,
+including a hermetic automatic-discovery test that also runs from `make unit`
+and `make check`. Upstream CPython 3.14.7 still requires a matching host Python
+3.14 for cross-building; the Pi currently has only Python 3.12, so no CPython
+stage, integrated Firefox image, or browser runtime is implied.
 
 - Implementation baseline `7c01848e9098d8c5f44bd51f542ca06da592e7fe`
   adds a fifth persistent authenticated `MAKBUILD1` graph: one assembly plus

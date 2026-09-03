@@ -126,9 +126,10 @@ Last updated: 2026-09-03.
   SHA-256
   `118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
   Full unchanged `make unit check` also passes with the extracted LLVM 19
-  toolchain on `PATH`; its 79,717-byte log is
-  `build/logs/full-unit-check-20260903-atomic-final.log`, SHA-256
-  `23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+  toolchain on `PATH`; the final current-implementation rerun includes the
+  CPython host-tool gate in both targets. Its 79,808-byte log is
+  `build/logs/full-unit-check-20260903-cpython-final.log`, SHA-256
+  `1878ec27c01ecd21178e6d68ed598eed5cf639e1f1a3c6cda4326d8c602fc76e`.
   Separate unchanged Pi/TCG gates also pass: Native dispatches
   `6855,7066,10391`, placements `13,3,2`, two migrations; Python-role
   dispatches `7136,10934,6846`, placements `1,1,1`, one migration; production
@@ -147,7 +148,8 @@ Last updated: 2026-09-03.
   `/home/friend/MakOS/build/makos-pi-visible-smp-atomic-ngRmkLhJ`. The session
   contains the private read-only `boot.img`, SHA-256
   `cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`; a
-  blank sparse 1 GiB `data.img`, SHA-256
+  private sparse 1 GiB `data.img`, created blank and then initialized by the
+  guest, SHA-256
   `6e1cab146df006d2d39559d8d89b48d239238a09a49840d29725c13e24325262`;
   private UEFI vars, SHA-256
   `8bf6243965b943cf708b93a89c0eb3bcb065889cbdcd401e0b69dba43c282107`;
@@ -172,6 +174,19 @@ Last updated: 2026-09-03.
   This is the intended fail-closed missing-release-package result, not a
   Firefox browser runtime failure or pass. No QEMU launched, no macOS/HVF
   evidence exists, and all strict thresholds remain unchanged.
+
+- 2026-09-03 CPython packaging host-tool portability through
+  `a20e2c205b481a24824633fe4bb8260f4433bcbf` removes the unconditional
+  Homebrew `llvm-readelf` invocation. The final target-ELF audit now selects a
+  validated LLVM readelf from explicit `MAKOS_READELF`, the repository-staged
+  LLVM 19 bundle, `PATH`, or the unchanged Homebrew fallback. Bad explicit
+  tools and complete discovery failure are denied; the latter test is
+  hermetic even on a Mac that has Homebrew LLVM. The focused host-tool gate is
+  wired into both `make unit` and `make check` and passes on this Pi. CPython
+  3.14.7 still genuinely requires a matching host Python 3.14 for its upstream
+  cross-build, which this Pi does not currently provide. Therefore this closes
+  one package portability blocker but does not produce a CPython or Firefox
+  package, integrated image, or browser result.
 
 - 2026-09-02 the then-current official Firefox ESR release link exposed one exact Rust
   target-ABI defect: vendored `errno` 0.3.8 treated the distinct MakOS Unix

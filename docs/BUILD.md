@@ -307,6 +307,16 @@ to `PATH` and set `MAKOS_NM`, `MAKOS_REAL_CLANG`, `MAKOS_REAL_CLANGXX`, and
 `MAKOS_LLD` to the matching pinned tools. The Firefox driver test scopes its
 own `MAKOS_CC` wrapper to the Firefox audit, so it cannot replace the bare-metal
 compiler used by MicroPython during the same `make unit check` run.
+The CPython target ELF audit uses the same portability principle. Set
+`MAKOS_READELF` to an executable LLVM readelf when an explicit tool is needed;
+otherwise `ports/cpython/host-tools.sh` prefers the repository-staged LLVM 19
+tool, then `llvm-readelf-19`/`llvm-readelf` on `PATH`, then the standard
+Homebrew LLVM path. Every selected candidate must run and identify as LLVM;
+bad explicit tools or complete discovery failure stop before the target audit.
+`ports/cpython/test-host-tools.sh` exercises staged, `PATH`, explicit, invalid,
+and hermetic no-tool cases and is part of both `make unit` and `make check`.
+CPython 3.14.7 cross-building separately requires a host Python with matching
+major/minor 3.14; Python 3.12 is not a supported substitute.
 
 After login, `selfhost-aarch64` runs the deterministic guest-native
 compiler/assembler/static-linker gate. Its fixture mode writes an A64 startup to
@@ -500,9 +510,10 @@ log is `build/logs/aarch64-selfhost-parallel-atomic-20260903.log`, SHA-256
 the 75,738-byte `build/makos-selfhost-focused-serial.log` has SHA-256
 `118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
 Full unchanged `make unit check` passes with the extracted LLVM 19 toolchain
-on `PATH`; the 79,717-byte
-`build/logs/full-unit-check-20260903-atomic-final.log` has SHA-256
-`23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+on `PATH`; the final rerun includes the CPython host-tool gate in both targets.
+The 79,808-byte `build/logs/full-unit-check-20260903-cpython-final.log` has
+SHA-256
+`1878ec27c01ecd21178e6d68ed598eed5cf639e1f1a3c6cda4326d8c602fc76e`.
 This is Raspberry Pi/TCG functional evidence, not macOS/HVF qualification;
 Scheduling, SDK, and Self-hosting remain Partial.
 
