@@ -57,6 +57,17 @@ void *memcpy(void *destination, const void *source, size_t count) {
     return destination;
 }
 
+#if defined(MAKOS_AARCH64_TOOLCHAIN_HOST_TEST)
+extern uint64_t makos_aarch64_toolchain_host_syscall(
+    uint64_t number, uint64_t first, uint64_t second, uint64_t third,
+    uint64_t fourth);
+
+static uint64_t syscall4(uint64_t number, uint64_t first, uint64_t second,
+                         uint64_t third, uint64_t fourth) {
+    return makos_aarch64_toolchain_host_syscall(number, first, second, third,
+                                                fourth);
+}
+#else
 static uint64_t syscall4(uint64_t number, uint64_t first, uint64_t second,
                          uint64_t third, uint64_t fourth) {
     register uint64_t x0 __asm__("x0") = first;
@@ -69,6 +80,7 @@ static uint64_t syscall4(uint64_t number, uint64_t first, uint64_t second,
                      : "memory", "cc");
     return x0;
 }
+#endif
 
 static size_t length(const char *text) {
     size_t count = 0;
@@ -241,6 +253,13 @@ enum {
     MAX_BUILD_CONDITIONAL_DEPTH = 4,
     BUILD_STATE_BYTES = 120,
     BUILD_STATE_SUFFIX_BYTES = 6,
+};
+
+enum read_file_failure {
+    READ_FILE_OK = 0,
+    READ_FILE_OPEN_FAILED,
+    READ_FILE_READ_FAILED,
+    READ_FILE_CLOSE_FAILED,
 };
 
 struct build_input {
@@ -2054,14 +2073,31 @@ static int write_file(const char *path, size_t path_length, const uint8_t *bytes
     return written == byte_count && closed == 1;
 }
 
-static size_t read_file(const char *path, size_t path_length, uint8_t *bytes,
-                        size_t capacity) {
+static size_t read_file_with_failure(
+    const char *path, size_t path_length, uint8_t *bytes, size_t capacity,
+    enum read_file_failure *failure) {
+    if (failure) *failure = READ_FILE_OK;
     uint64_t fd = syscall4(SYS_OPEN, (uintptr_t)path, path_length, 0, 0);
-    if (fd == UINT64_MAX) return 0;
+    if (fd == UINT64_MAX) {
+        if (failure) *failure = READ_FILE_OPEN_FAILED;
+        return 0;
+    }
     uint64_t count = syscall4(SYS_READ, fd, (uintptr_t)bytes, capacity, 0);
     uint64_t closed = syscall4(SYS_CLOSE, fd, 0, 0, 0);
-    if (count == UINT64_MAX || count > capacity || closed != 1) return 0;
+    if (count == UINT64_MAX || count > capacity) {
+        if (failure) *failure = READ_FILE_READ_FAILED;
+        return 0;
+    }
+    if (closed != 1) {
+        if (failure) *failure = READ_FILE_CLOSE_FAILED;
+        return 0;
+    }
     return (size_t)count;
+}
+
+static size_t read_file(const char *path, size_t path_length, uint8_t *bytes,
+                        size_t capacity) {
+    return read_file_with_failure(path, path_length, bytes, capacity, 0);
 }
 
 static int build_state_path_safe(const struct build_manifest *build,
@@ -2077,7 +2113,21 @@ struct include_context {
     size_t active_path_lengths[MAX_BUILD_HEADER_DEPTH];
     struct build_macro macros[MAX_BUILD_MACROS];
     size_t macro_count;
+    int report_failures;
+    int failure_reported;
 };
+
+static void report_include_failure(struct include_context *context,
+                                   const char *path, size_t path_length,
+                                   const char *reason) {
+    if (!context->report_failures || context->failure_reported) return;
+    write_text("MAKOS_AARCH64_C_INCLUDE_ERROR path=");
+    write_bytes(path, path_length);
+    write_text(" reason=");
+    write_text(reason);
+    write_text("\n");
+    context->failure_reported = 1;
+}
 
 struct conditional_state {
     int parent_active;
@@ -2995,8 +3045,7 @@ static int expand_source_recursive(struct include_context *context,
             } else {
                 return 0;
             }
-            while (!path_length && argument < line_end &&
-                   source[argument] != terminator) {
+            while (argument < line_end && source[argument] != terminator) {
                 if (path_length == MAX_BUILD_PATH_BYTES ||
                     !build_path_byte((char)source[argument]))
                     return 0;
@@ -3008,22 +3057,56 @@ static int expand_source_recursive(struct include_context *context,
                 return 0;
             if (active) {
                 size_t include_depth = depth + 1;
-                if (include_depth > MAX_BUILD_HEADER_DEPTH ||
-                    !build_state_path_safe(context->build, path, path_length) ||
-                    !record_dependency(context, path, path_length,
-                                       include_depth))
+                if (include_depth > MAX_BUILD_HEADER_DEPTH) {
+                    report_include_failure(context, path, path_length,
+                                           "depth");
                     return 0;
+                }
+                if (!build_state_path_safe(context->build, path,
+                                           path_length)) {
+                    report_include_failure(context, path, path_length,
+                                           "protected-path");
+                    return 0;
+                }
+                if (!record_dependency(context, path, path_length,
+                                       include_depth)) {
+                    report_include_failure(context, path, path_length,
+                                           "dependency");
+                    return 0;
+                }
                 uint8_t header[BUILD_HEADER_CAPACITY] = {0};
-                size_t header_length = read_file(path, path_length, header,
-                                                 sizeof(header));
-                if (!header_length || header_length == sizeof(header)) return 0;
+                enum read_file_failure failure = READ_FILE_OK;
+                size_t header_length = read_file_with_failure(
+                    path, path_length, header, sizeof(header), &failure);
+                if (failure != READ_FILE_OK) {
+                    report_include_failure(
+                        context, path, path_length,
+                        failure == READ_FILE_OPEN_FAILED
+                            ? "open"
+                            : failure == READ_FILE_READ_FAILED ? "read"
+                                                              : "close");
+                    return 0;
+                }
+                if (!header_length) {
+                    report_include_failure(context, path, path_length,
+                                           "empty");
+                    return 0;
+                }
+                if (header_length == sizeof(header)) {
+                    report_include_failure(context, path, path_length,
+                                           "capacity");
+                    return 0;
+                }
                 size_t active_path = include_depth - 1;
                 for (size_t index = 0; index < path_length; ++index)
                     context->active_paths[active_path][index] = path[index];
                 context->active_path_lengths[active_path] = path_length;
                 if (!expand_source_recursive(context, header, header_length,
-                                             include_depth))
+                                             include_depth)) {
+                    report_include_failure(context, path, path_length,
+                                           "recursive-content");
                     return 0;
+                }
                 context->active_path_lengths[active_path] = 0;
                 if (next < source_length && context->output &&
                     context->expanded[context->output - 1] != '\n') {
@@ -3039,10 +3122,10 @@ static int expand_source_recursive(struct include_context *context,
     return conditional_depth == 0;
 }
 
-static size_t expand_build_source(
+static size_t expand_build_source_mode(
     const struct build_manifest *build, size_t input, const uint8_t *source,
     size_t source_length, uint8_t *expanded, size_t expanded_capacity,
-    struct build_dependencies *dependencies) {
+    struct build_dependencies *dependencies, int report_failures) {
     if (!build || input >= build->input_count || !source || !source_length ||
         !expanded || !dependencies)
         return 0;
@@ -3057,11 +3140,30 @@ static size_t expand_build_source(
         .expanded = expanded,
         .expanded_capacity = expanded_capacity,
         .dependencies = dependencies,
+        .report_failures = report_failures,
     };
     if (!expand_source_recursive(&context, source, source_length, 0) ||
         !context.output)
         return 0;
     return context.output;
+}
+
+static size_t expand_build_source(
+    const struct build_manifest *build, size_t input, const uint8_t *source,
+    size_t source_length, uint8_t *expanded, size_t expanded_capacity,
+    struct build_dependencies *dependencies) {
+    return expand_build_source_mode(build, input, source, source_length,
+                                    expanded, expanded_capacity, dependencies,
+                                    0);
+}
+
+static size_t expand_build_source_diagnostic(
+    const struct build_manifest *build, size_t input, const uint8_t *source,
+    size_t source_length, uint8_t *expanded, size_t expanded_capacity,
+    struct build_dependencies *dependencies) {
+    return expand_build_source_mode(build, input, source, source_length,
+                                    expanded, expanded_capacity, dependencies,
+                                    1);
 }
 
 static void section(volatile uint8_t *object, size_t section_headers,
@@ -4249,6 +4351,48 @@ static uint64_t build_hash(const uint8_t *bytes, size_t count) {
         hash *= UINT64_C(1099511628211);
     }
     return hash;
+}
+
+static void write_generated_header_failure(const char *path,
+                                           size_t path_length,
+                                           const char *stage) {
+    write_text("MAKOS_AARCH64_GENERATED_HEADER_ERROR path=");
+    write_bytes(path, path_length);
+    write_text(" stage=");
+    write_text(stage);
+    write_text("\n");
+}
+
+static int verify_generated_header(const char *path, size_t path_length,
+                                   const uint8_t *expected,
+                                   size_t expected_length) {
+    uint8_t bytes[BUILD_HEADER_CAPACITY] = {0};
+    enum read_file_failure failure = READ_FILE_OK;
+    size_t count = read_file_with_failure(path, path_length, bytes,
+                                          sizeof(bytes), &failure);
+    if (failure != READ_FILE_OK) {
+        write_generated_header_failure(
+            path, path_length,
+            failure == READ_FILE_OPEN_FAILED
+                ? "open"
+                : failure == READ_FILE_READ_FAILED ? "read" : "close");
+        return 0;
+    }
+    if (count != expected_length) {
+        write_generated_header_failure(path, path_length, "length");
+        return 0;
+    }
+    if (build_hash(bytes, count) != build_hash(expected, expected_length)) {
+        write_generated_header_failure(path, path_length, "content");
+        return 0;
+    }
+    for (size_t index = 0; index < count; ++index) {
+        if (bytes[index] != expected[index]) {
+            write_generated_header_failure(path, path_length, "content");
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int build_state_path(const char *manifest_path,
@@ -5476,6 +5620,29 @@ __attribute__((section(".text._start"), noreturn)) void _start(
                      sizeof(deep4_header_source) - 1)))
         fail(80);
     if (fixture_mode) {
+        if (!verify_generated_header(
+                inline_header_path, sizeof(inline_header_path) - 1,
+                (const uint8_t *)inline_header_source,
+                sizeof(inline_header_source) - 1) ||
+            !verify_generated_header(
+                leaf_header_path, sizeof(leaf_header_path) - 1,
+                (const uint8_t *)leaf_header_source,
+                sizeof(leaf_header_source) - 1))
+            fail(80);
+        write_text(
+            "MAKOS_AARCH64_GENERATED_HEADERS_OK "
+            "inline=/home/user/generated-inline.h inline_bytes=");
+        write_size_decimal(sizeof(inline_header_source) - 1);
+        write_text(" inline_fnv1a=");
+        write_hex64(build_hash((const uint8_t *)inline_header_source,
+                               sizeof(inline_header_source) - 1));
+        write_text(
+            " leaf=/home/user/generated-leaf.h leaf_bytes=");
+        write_size_decimal(sizeof(leaf_header_source) - 1);
+        write_text(" leaf_fnv1a=");
+        write_hex64(build_hash((const uint8_t *)leaf_header_source,
+                               sizeof(leaf_header_source) - 1));
+        write_text(" identity=guest-readback-exact\n");
         if (build_hash(REPOSITORY_SELFHOST_C_SOURCE,
                        REPOSITORY_SELFHOST_C_SOURCE_LENGTH) !=
                 REPOSITORY_SELFHOST_C_SOURCE_FNV1A ||
@@ -5537,7 +5704,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
         if (!raw_source_length ||
             raw_source_length == sizeof(raw_source_storage[input]))
             fail(81);
-        build_source_lengths[input] = expand_build_source(
+        build_source_lengths[input] = expand_build_source_diagnostic(
             &build, input, raw_source_storage[input], raw_source_length,
             source_storage[input], sizeof(source_storage[input]),
             &dependencies[input]);
@@ -5553,7 +5720,7 @@ __attribute__((section(".text._start"), noreturn)) void _start(
     if (fixture_mode) {
         uint8_t include_output[BUILD_EXPANDED_SOURCE_CAPACITY] = {0};
         struct build_dependencies include_dependencies = {0};
-        size_t included_length = expand_build_source(
+        size_t included_length = expand_build_source_diagnostic(
             &build, 1, (const uint8_t *)header_c_source,
             sizeof(header_c_source) - 1, include_output,
             sizeof(include_output), &include_dependencies);

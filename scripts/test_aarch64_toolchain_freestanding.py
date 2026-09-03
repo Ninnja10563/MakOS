@@ -144,4 +144,109 @@ with tempfile.TemporaryDirectory(prefix="makos-aarch64-toolchain-") as directory
     if not re.search(r"Type:\s+EXEC", header) or not re.search(r"Machine:\s+AArch64", header):
         raise SystemExit("freestanding toolchain link is not AArch64 ET_EXEC")
 
-print("MAKOS_AARCH64_TOOLCHAIN_FREESTANDING_OK memcpy=defined-exact nonrecursive=1 undefined=0 link=aarch64-et_exec include=self-generated-exact")
+    host_test = output / "include-parser-test.c"
+    host_binary = output / "include-parser-test"
+    host_test.write_text(
+        f'''#define MAKOS_AARCH64_TOOLCHAIN_HOST_TEST 1
+#define _start makos_aarch64_toolchain_guest_start
+#include "{ROOT / "user/aarch64_toolchain.c"}"
+#undef _start
+
+static const char inline_path[] = "/home/user/generated-inline.h";
+static const char leaf_path[] = "/home/user/generated-leaf.h";
+static const char stdint_path[] = "/usr/include/stdint.h";
+static const uint8_t inline_bytes[] =
+    "#ifndef GEN_INLINE_H\\n"
+    "#define GEN_INLINE_H\\n"
+    "#include \\"/home/user/generated-leaf.h\\"\\n"
+    "#endif\\n";
+static const uint8_t leaf_bytes[] =
+    "#define INCLUDED_VALUE 2\\n"
+    "int included_answer = INCLUDED_VALUE;\\n";
+static const uint8_t stdint_bytes[] = "typedef unsigned long uint64_t;\\n";
+
+uint64_t makos_aarch64_toolchain_host_syscall(
+    uint64_t number, uint64_t first, uint64_t second, uint64_t third,
+    uint64_t fourth) {{
+    (void)fourth;
+    if (number == SYS_OPEN) {{
+        const char *path = (const char *)(uintptr_t)first;
+        size_t length = (size_t)second;
+        if (same_name(path, length, inline_path, sizeof(inline_path) - 1)) return 3;
+        if (same_name(path, length, leaf_path, sizeof(leaf_path) - 1)) return 4;
+        if (same_name(path, length, stdint_path, sizeof(stdint_path) - 1)) return 5;
+        return UINT64_MAX;
+    }}
+    if (number == SYS_READ) {{
+        const uint8_t *source = 0;
+        size_t length = 0;
+        if (first == 3) {{ source = inline_bytes; length = sizeof(inline_bytes) - 1; }}
+        if (first == 4) {{ source = leaf_bytes; length = sizeof(leaf_bytes) - 1; }}
+        if (first == 5) {{ source = stdint_bytes; length = sizeof(stdint_bytes) - 1; }}
+        if (!source || length > (size_t)third) return UINT64_MAX;
+        copy_bytes((uint8_t *)(uintptr_t)second, source, length);
+        return length;
+    }}
+    if (number == SYS_CLOSE) return first >= 3 && first <= 5;
+    if (number == SYS_WRITE) return second;
+    return UINT64_MAX;
+}}
+
+static int bytes_equal(const uint8_t *first, const uint8_t *second,
+                       size_t length) {{
+    for (size_t index = 0; index < length; ++index)
+        if (first[index] != second[index]) return 0;
+    return 1;
+}}
+
+int main(void) {{
+    static const uint8_t quoted_source[] =
+        "int root;\\n"
+        "#include \\"/home/user/generated-inline.h\\"\\n"
+        "#include \\"/home/user/generated-inline.h\\"\\n";
+    static const uint8_t quoted_expected[] =
+        "int root;\\nint included_answer = 2;\\n";
+    static const uint8_t angle_source[] = "#include <stdint.h>\\n";
+    struct build_manifest build = {{0}};
+    build.input_count = 2;
+    build.inputs[0].language = BUILD_LANGUAGE_ASM;
+    build.inputs[0].source_path = "/home/user/root.s";
+    build.inputs[0].source_path_length = sizeof("/home/user/root.s") - 1;
+    build.inputs[0].object_path = "/home/user/root.o";
+    build.inputs[0].object_path_length = sizeof("/home/user/root.o") - 1;
+    build.inputs[1].language = BUILD_LANGUAGE_C;
+    build.inputs[1].source_path = "/home/user/root.c";
+    build.inputs[1].source_path_length = sizeof("/home/user/root.c") - 1;
+    build.inputs[1].object_path = "/home/user/root-c.o";
+    build.inputs[1].object_path_length = sizeof("/home/user/root-c.o") - 1;
+    build.output_path = "/home/user/root.elf";
+    build.output_path_length = sizeof("/home/user/root.elf") - 1;
+
+    uint8_t output[BUILD_EXPANDED_SOURCE_CAPACITY] = {{0}};
+    struct build_dependencies dependencies = {{0}};
+    size_t length = expand_build_source(
+        &build, 1, quoted_source, sizeof(quoted_source) - 1, output,
+        sizeof(output), &dependencies);
+    if (length != sizeof(quoted_expected) - 1 || dependencies.count != 2 ||
+        dependencies.max_depth != 2 ||
+        !bytes_equal(output, quoted_expected, length)) return 1;
+
+    memset(output, 0, sizeof(output));
+    memset(&dependencies, 0, sizeof(dependencies));
+    length = expand_build_source(
+        &build, 1, angle_source, sizeof(angle_source) - 1, output,
+        sizeof(output), &dependencies);
+    if (length != sizeof(stdint_bytes) - 1 || dependencies.count != 1 ||
+        dependencies.max_depth != 1 ||
+        !bytes_equal(output, stdint_bytes, length)) return 2;
+    return 0;
+}}
+'''
+    )
+    subprocess.run(
+        [clang, "-std=c17", "-O0", "-I", str(output), str(host_test), "-o", str(host_binary)],
+        check=True,
+    )
+    subprocess.run([str(host_binary)], check=True)
+
+print("MAKOS_AARCH64_TOOLCHAIN_FREESTANDING_OK memcpy=defined-exact nonrecursive=1 undefined=0 link=aarch64-et_exec include=self-generated-exact include_parser=quoted-absolute-recursive-guard,angle-stdint")

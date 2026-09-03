@@ -43,6 +43,13 @@ REPOSITORY_SOURCE_MARKER = (
     f"asm_fnv1a={fnv1a(REPOSITORY_ASM_SOURCE):016x} "
     "identity=build-generated-exact host_reference=compiled"
 ).encode()
+GENERATED_HEADERS_MARKER = (
+    b"MAKOS_AARCH64_GENERATED_HEADERS_OK "
+    b"inline=/home/user/generated-inline.h inline_bytes=164 "
+    b"inline_fnv1a=bbbc9068d3d73e49 "
+    b"leaf=/home/user/generated-leaf.h leaf_bytes=1215 "
+    b"leaf_fnv1a=ccf73fc02c2f9ceb identity=guest-readback-exact"
+)
 LINKER_MARKER = (
     b"MAKOS_AARCH64_LINKER_OK sources=4 languages=aarch64-asm,c-subset-v1 "
     b"compiler=guest-native assembler=guest-native objects=4 "
@@ -834,6 +841,9 @@ def main() -> int:
                     20,
                 )
                 common.send_command(stream, "selfhost-aarch64")
+                common.wait_for_output(
+                    selector, process, output, GENERATED_HEADERS_MARKER, 60
+                )
                 common.wait_for_output(
                     selector, process, output, FIXTURE_BUILD_MARKER, 60
                 )

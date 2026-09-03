@@ -99,7 +99,24 @@ for fragment in (
     "static int parse_macro_arguments(",
     "static int expand_macro_bytes(",
     "static int append_macro_expanded(",
+    "enum read_file_failure",
+    "static size_t read_file_with_failure(",
+    "READ_FILE_OPEN_FAILED",
+    "READ_FILE_READ_FAILED",
+    "READ_FILE_CLOSE_FAILED",
+    "static void report_include_failure(",
     "static size_t expand_build_source(",
+    "static size_t expand_build_source_diagnostic(",
+    "MAKOS_AARCH64_C_INCLUDE_ERROR path=",
+    '"protected-path"',
+    '"dependency"',
+    '"recursive-content"',
+    "static int verify_generated_header(",
+    "MAKOS_AARCH64_GENERATED_HEADER_ERROR path=",
+    'write_generated_header_failure(path, path_length, "length")',
+    'write_generated_header_failure(path, path_length, "content")',
+    "MAKOS_AARCH64_GENERATED_HEADERS_OK",
+    "identity=guest-readback-exact",
     "MAKOS_AARCH64_C_HEADER_DEP_OK",
     "MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK",
     "fingerprint=expanded-source",
@@ -383,6 +400,30 @@ for fragment in (
     "/home/user/generated-aarch64.elf",
 ):
     require(TOOLCHAIN, fragment)
+
+include_parser = TOOLCHAIN[
+    TOOLCHAIN.index("static int expand_source_recursive(") :
+    TOOLCHAIN.index("static size_t expand_build_source_mode(")
+]
+require(
+    include_parser,
+    "while (argument < line_end && source[argument] != terminator)",
+)
+if "while (!path_length && argument < line_end" in include_parser:
+    raise AssertionError("quoted include parsing stops after the first path byte")
+for include in (
+    r'#include \"/home/user/generated-inline.h\"',
+    r'#include \"/home/user/generated-leaf.h\"',
+    "#include <stdint.h>",
+):
+    require(TOOLCHAIN, include)
+if TOOLCHAIN.count(r'#include \"/home/user/generated-inline.h\"') < 2:
+    raise AssertionError("repeated guarded quoted include fixture is absent")
+seed_end = TOOLCHAIN.index("        fail(80);\n    if (fixture_mode) {")
+readback = TOOLCHAIN.index("!verify_generated_header(", seed_end)
+repository_marker = TOOLCHAIN.index("write_repository_source_marker();", readback)
+if not seed_end < readback < repository_marker:
+    raise AssertionError("generated-header readback is not immediate after seeding")
 
 for fragment in (
     "R_AARCH64_ADR_PREL_PG_HI21",
@@ -692,6 +733,8 @@ require(FOCUSED_RUNTIME, "HEADER_SELECTIVE_MARKER")
 require(FOCUSED_RUNTIME, "HEADER_DEP_MARKER")
 require(FOCUSED_RUNTIME, "HEADER_GUARD_MARKER")
 require(FOCUSED_RUNTIME, "HEADER_RUN_MARKER")
+require(FOCUSED_RUNTIME, "GENERATED_HEADERS_MARKER")
+require(FOCUSED_RUNTIME, "identity=guest-readback-exact")
 require(FOCUSED_RUNTIME, "REPOSITORY_SOURCE_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_COLD_MARKER")
 require(FOCUSED_RUNTIME, "REPOSITORY_WARM_MARKER")
