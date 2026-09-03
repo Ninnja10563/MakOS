@@ -160,8 +160,7 @@ prints whether optional real libc/object symbol checks were performed or
 skipped. Set `MAKOS_FIREFOX_ERRNO_SOURCE_DIR`, `MAKOS_FIREFOX_ERRNO_LIBC`, and
 `MAKOS_FIREFOX_ERRNO_OBJECT`, plus
 `MAKOS_FIREFOX_ERRNO_REQUIRE_FIXTURES=1`, to make all three repository evidence
-checks mandatory. This corrects the observed final-link input ABI; it does not
-claim a successful fresh `libxul.so` link or Firefox runtime.
+checks mandatory. This corrects the observed final-link input ABI; that focused gate alone does not claim a successful fresh `libxul.so` link or Firefox runtime.
 The selected Clang installation must include its matching AArch64 intrinsic
 resource headers (`arm_neon.h`; Debian LLVM 19 packages this in
 `libclang-common-19-dev`). `ports/firefox/test-toolchain.sh` compiles a real
@@ -186,6 +185,42 @@ packaging flow rejects them because this mode withholds release provenance;
 they also cannot be used as Firefox runtime, latency, or macOS/HVF
 qualification evidence. Run the default build in `obj-aarch64-makos` to
 produce release artifacts and a provenance stamp.
+
+The completed 2026-09-03 developer-build evidence is an example of that exact
+boundary, not a release input. From MakOS base HEAD
+`5827f228744c936b4091de93323d277fb4b4dcda`, Firefox 140.13.0esr source
+`90ad18aabeaa9cbd63a1f749a57f266e758e50da`, the 59-patch series SHA-256
+`c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974`,
+and patched tree `e6a918f00399df70a73e710a798c3e500e2b0a11`, the protected build
+completed in `881:10`. Object-directory and regenerated-backend selection,
+real print-settings compilation, errno source/runtime-libc/AArch64-object
+inspection, and the new all-five ELF parser all pass. The final exact markers
+are:
+
+```text
+MAKOS_FIREFOX_BINARY_OK target=aarch64-unknown-makos elf=firefox,plugin-container,xpcshell,libxul gecko=linked nss=linked runtime=shared-musl interp=/lib/ld-musl-aarch64.so.1
+MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed release_provenance=withheld
+```
+
+The audited files are:
+
+| Artifact | Size (bytes) | SHA-256 |
+|---|---:|---|
+| `firefox` | 2,002,648 | `b897a56500ec0be81ad14b504c89e8a0594b77662a16e5368713f833c5b772b2` |
+| `plugin-container` | 1,961,832 | `8611075f36124f7371e4291774227329b6f6ac86df76cd3de2966f86e076dd63` |
+| `xpcshell` | 1,961,240 | `c43a9fc6307374bbd4da65d10094207396b8491ed9b19358202ff8f1c9cd30c4` |
+| `libxul.so` | 734,482,952 | `71d5af3f4dee2ddf17bcb3803ee3aa42cd17aef7ce465a6fddde23dbf86b5fd5` |
+| `libnspr4.so` | 337,656 | `fb2aafe6f5a73c9555f115a45f8a192a249b6ea66c6041d0ba1ac6b5082a69f0` |
+
+The complete log is
+`build/logs/firefox-developer-linkfix-20260902-retry.log` (3,084,268 bytes,
+SHA-256
+`77ddae030b0a5b223fcaf27c58552dd8785d2c9c5558e00720c232d1ddbf7a0a`).
+Because developer mode deliberately emitted no provenance, do not feed these
+outputs to packaging or integration and do not infer QEMU/runtime or macOS/HVF
+qualification. A new default release build must independently produce the
+canonical provenance-bearing outputs before package or runtime work begins.
+
 Release binary audit additionally emits `MAKOS_FIREFOX_BUILD_ELF_OK` only after
 bounded parsing of all five exact artifacts: `firefox`, `plugin-container`,
 `xpcshell`, `libxul.so`, and `libnspr4.so`. The three executables require a

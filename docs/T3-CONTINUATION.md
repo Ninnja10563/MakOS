@@ -27,21 +27,45 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-The latest official Firefox ESR release build reached the final `libxul.so`
-link and failed on the Rust `errno` 0.3.8 fallback symbol `errno_location`.
-MakOS's real upstream-musl runtime exports TLS accessor `__errno_location`, so
-the port now stages an exact checksum-safe errno crate whose MakOS cfg selects
-that ABI. Behavioral staging/Cargo tests and direct AArch64 object/runtime-libc
-symbol inspection pass. Patch `0059` is reserved for this Cargo routing after
-the independent print-settings patch `0058`. Do not claim the blocker cleared
-until an unchanged full Firefox link succeeds; packaging and runtime remain
-pending and no QEMU evidence was produced by this fix.
-The preserved developer object directory was moved after its interrupted build,
-and its generated metadata still records the old release path and omits the
-print source. The supported build now detects this state and runs `mach
-configure`, then validates the selected object/source identities and generated
-widget backend. Do not invoke bare make or describe the next build as a cheap
-relink; full link evidence remains pending.
+The protected developer build from MakOS base HEAD
+`5827f228744c936b4091de93323d277fb4b4dcda` has now completed the full
+Firefox 140.13.0esr compile/link in `881:10`. It used pinned source commit
+`90ad18aabeaa9cbd63a1f749a57f266e758e50da`, 59 ordered patches with series
+SHA-256 `c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974`,
+and source-tree identity `e6a918f00399df70a73e710a798c3e500e2b0a11`.
+The supported build reconfigured the moved developer object directory,
+selected the regenerated MakOS backend and print source, compiled the real
+print-settings implementation, and used the corrected Rust errno 0.3.8 musl
+`__errno_location` binding. The errno source, runtime-libc, and AArch64 object
+checks all pass, as does the new all-five ELF parser. Its final exact markers
+are `MAKOS_FIREFOX_BINARY_OK target=aarch64-unknown-makos
+elf=firefox,plugin-container,xpcshell,libxul gecko=linked nss=linked
+runtime=shared-musl interp=/lib/ld-musl-aarch64.so.1` and
+`MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed
+release_provenance=withheld`.
+
+The audited developer outputs are:
+
+- `firefox`: 2,002,648 bytes, SHA-256
+  `b897a56500ec0be81ad14b504c89e8a0594b77662a16e5368713f833c5b772b2`.
+- `plugin-container`: 1,961,832 bytes, SHA-256
+  `8611075f36124f7371e4291774227329b6f6ac86df76cd3de2966f86e076dd63`.
+- `xpcshell`: 1,961,240 bytes, SHA-256
+  `c43a9fc6307374bbd4da65d10094207396b8491ed9b19358202ff8f1c9cd30c4`.
+- `libxul.so`: 734,482,952 bytes, SHA-256
+  `71d5af3f4dee2ddf17bcb3803ee3aa42cd17aef7ce465a6fddde23dbf86b5fd5`.
+- `libnspr4.so`: 337,656 bytes, SHA-256
+  `fb2aafe6f5a73c9555f115a45f8a192a249b6ea66c6041d0ba1ac6b5082a69f0`.
+
+The 3,084,268-byte complete build log is
+`build/logs/firefox-developer-linkfix-20260902-retry.log`, SHA-256
+`77ddae030b0a5b223fcaf27c58552dd8785d2c9c5558e00720c232d1ddbf7a0a`.
+This is developer compile/link evidence only. Release provenance is absent by
+design, so these files cannot authorize a release stamp, package, integrated
+image, QEMU or browser runtime, or macOS/HVF qualification. Those steps remain
+pending and the applicable original-spec audit rows remain Partial. Use the
+supported release wrapper for the next build; never package these developer
+outputs or invoke a bare object-directory make/relink.
 
 The isolated Firefox qualification increment through
 `dfbf3ebe047875d96a0e4a959ed053f4cc8af3ec` fixes an impossible strict-gate
@@ -1247,18 +1271,19 @@ and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
 
 ## Important files
 
-- 2026-09-02 Firefox final-link evidence: the protected developer build reached
-  the genuine final `libxul.so` link and exposed two independent missing target
-  bindings: the C++
-  `CreatePlatformPrintSettings(mozilla::PrintSettingsInitializer const&)`
-  factory and Rust errno 0.3.8's unprefixed `errno_location`. Print-only patch
-  `0058` now adds the MakOS factory with platform-neutral PDF settings and no
-  invented native printer service. Earlier focused compilation proved the exact
-  factory ABI, but the strengthened gate now also requires the actual patched
-  source and regenerated backend selection; the preserved stale backend blocks
-  that final evidence until supported mach reconfiguration. The integrated
-  errno correction and 59-patch identity still require a full `libxul.so`
-  relink, package, integrated image, and unchanged idle-macOS/HVF runtime.
+- 2026-09-03 Firefox developer final-link evidence: the protected build from
+  base HEAD `5827f228744c936b4091de93323d277fb4b4dcda` completed after
+  `881:10`, including `libxul.so`, after supported mach reconfiguration selected
+  `nsPrintSettingsMakOS.cpp` and Rust errno 0.3.8 selected musl's
+  `__errno_location`. The new parser accepts all five exact audited developer
+  outputs, and print compilation plus errno source/libc/object evidence pass.
+  The complete 3,084,268-byte log is
+  `build/logs/firefox-developer-linkfix-20260902-retry.log`, SHA-256
+  `77ddae030b0a5b223fcaf27c58552dd8785d2c9c5558e00720c232d1ddbf7a0a`.
+  Exact artifact hashes and source identities are recorded under Current
+  verified state above. The developer marker explicitly withholds release
+  provenance, so release build/package, integrated image, and unchanged idle
+  macOS/HVF runtime remain pending.
 
 - 2026-08-26 clean-source Firefox prerequisite increment: on the Debian
   Raspberry Pi, a pristine pinned ESR checkout proved that the historical
@@ -1282,10 +1307,10 @@ and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
 
 ## Next actions
 
-1. Rerun the genuine final `libxul.so` link with integrated print patch 0058,
-   Rust errno patch 0059, and the exact 59-patch provenance. Then, on the
-   intended macOS/HVF host,
-   build/package that combined source and create a new provenance-validated
+1. Run the supported default release build with integrated print patch 0058,
+   Rust errno patch 0059, and the exact 59-patch provenance; do not package or
+   reuse the completed developer outputs. Then, on the intended macOS/HVF
+   host, package that release build and create a new provenance-validated
    integrated image; the historical
    `a9c604254f094de2` image is not valid for this increment. When no visible
    QEMU runs and host load/memory pressure is low, run unchanged

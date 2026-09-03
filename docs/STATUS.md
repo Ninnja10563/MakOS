@@ -1,8 +1,41 @@
 # Implementation status
 
-Last updated: 2026-09-02.
+Last updated: 2026-09-03.
 
 ## Implemented
+
+- 2026-09-03 the protected developer Firefox build from MakOS base HEAD
+  `5827f228744c936b4091de93323d277fb4b4dcda` completed the full
+  Firefox 140.13.0esr compile and link in `881:10`. It used pinned source
+  `90ad18aabeaa9cbd63a1f749a57f266e758e50da`, all 59 ordered patches
+  (series SHA-256
+  `c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974`),
+  and patched source-tree identity
+  `e6a918f00399df70a73e710a798c3e500e2b0a11`. The final audit printed the
+  exact `MAKOS_FIREFOX_BINARY_OK target=aarch64-unknown-makos
+  elf=firefox,plugin-container,xpcshell,libxul gecko=linked nss=linked
+  runtime=shared-musl interp=/lib/ld-musl-aarch64.so.1` and
+  `MAKOS_FIREFOX_DEVELOPER_BUILD_OK binary_audit=passed
+  release_provenance=withheld` markers. The audited outputs are `firefox`
+  (2,002,648 bytes,
+  `b897a56500ec0be81ad14b504c89e8a0594b77662a16e5368713f833c5b772b2`),
+  `plugin-container` (1,961,832 bytes,
+  `8611075f36124f7371e4291774227329b6f6ac86df76cd3de2966f86e076dd63`),
+  `xpcshell` (1,961,240 bytes,
+  `c43a9fc6307374bbd4da65d10094207396b8491ed9b19358202ff8f1c9cd30c4`),
+  `libxul.so` (734,482,952 bytes,
+  `71d5af3f4dee2ddf17bcb3803ee3aa42cd17aef7ce465a6fddde23dbf86b5fd5`),
+  and `libnspr4.so` (337,656 bytes,
+  `fb2aafe6f5a73c9555f115a45f8a192a249b6ea66c6041d0ba1ac6b5082a69f0`).
+  The 3,084,268-byte log is
+  `build/logs/firefox-developer-linkfix-20260902-retry.log`, SHA-256
+  `77ddae030b0a5b223fcaf27c58552dd8785d2c9c5558e00720c232d1ddbf7a0a`.
+  The regenerated object-directory/backend check, real print-settings
+  compilation, errno source/libc/object checks, and the new all-five ELF
+  parser all pass. This proves the developer source graph compiles and links;
+  provenance is deliberately absent. It does **not** authorize release
+  provenance, packaging, an integrated image, QEMU/runtime evidence, or
+  macOS/HVF qualification, and the affected original-spec rows remain Partial.
 
 - 2026-09-02 Firefox qualification ordering and packaged-ELF preflight are
   hardened through `ed6bb52e092d4f521e3939e61cedbaa203cd1f2c` and
@@ -48,7 +81,7 @@ Last updated: 2026-09-02.
   Toolchain processes, and the scheduling, SDK, and self-hosting audit rows
   remain Partial.
 
-- 2026-09-02 the next official Firefox ESR release link exposed one exact Rust
+- 2026-09-02 the then-current official Firefox ESR release link exposed one exact Rust
   target-ABI defect: vendored `errno` 0.3.8 treated the distinct MakOS Unix
   target as an unknown fallback and emitted an undefined `errno_location`,
   while the upstream-musl MakOS runtime correctly exports the thread-local
@@ -59,8 +92,9 @@ Last updated: 2026-09-02.
   refresh changed upstream bytes, and inspect a genuine AArch64 Rust object
   importing `__errno_location` plus the real runtime `libc.so` export. The
   source-routing patch is numbered `0059` after the integrated PDF
-  print-settings patch `0058`. A fresh complete `libxul.so` link,
-  package, and Firefox runtime remain pending; this is not a browser pass.
+  print-settings patch `0058`. The later protected developer build completed
+  the full link as recorded above; a provenance-bearing release build,
+  package, and Firefox runtime remain pending. This is not a browser pass.
 
 - 2026-08-30 the bounded guest-native AArch64 compiler/linker adds its first
   file-scope data path against the exact unchanged production source
