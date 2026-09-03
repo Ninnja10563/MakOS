@@ -474,18 +474,37 @@ and process records before the first reap/SMP summary, exact positional
 PID/group/root correlation, three status-42 reaps, and the preserved cold,
 warm, output, and execution checks.
 
-This implementation is staged through
-`5db7e3588227a97e878c989fab3e1361ddff8ed5`. Focused process-table,
-scheduler/self-host structural, synthetic parallel-evidence, Python syntax,
-and strict AArch64 shell compilation checks pass; the combined focused log is
-`build/logs/parallel-combined-focused-20260902.log`, with SHA-256
-`9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
-No QEMU runtime was run for this increment. The next unchanged runtime gate
-expects eight graphs, 20 authenticated CLI builds, and 21 Toolchain processes,
-including these three simultaneous cold graphs; this is an expectation, not a
-pass. The authoritative prior Pi/QEMU TCG result remains five graphs, 16 CLI
-builds, and 17 Toolchain processes. Scheduling, SDK, and self-hosting remain
-Partial.
+The three child Toolchains also build each `MAKOS_AARCH64_MAKBUILD_OK`,
+`MAKOS_AARCH64_MAKBUILD_OUTPUT_OK`, and
+`MAKOS_AARCH64_C_HEADER_DEP_OK` line in a bounded 768-byte buffer and submit
+the complete newline-terminated record with one checked `SYS_WRITE`. The
+cross-PE serial lock therefore protects the entire semantic record rather than
+separate prefix/path/count fragments. The validator retains exact-once full
+marker checks; a status-42 reap alone is not substituted for cold-cache
+evidence.
+
+This implementation is qualified through
+`5a49af108452983bf4809c12a2a8307582fa5955`. The unchanged
+`make test-aarch64-selfhost-runtime` completed with exit 0 on Raspberry Pi
+Debian under QEMU 10.0.11 (`1:10.0.11+ds-0+deb13u1`)/TCG using image SHA-256
+`cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`.
+The gate passes eight graphs, 20 authenticated CLI builds, and 21 Toolchain
+processes, including the three simultaneous cold graphs. Final placements are
+`9,4,8`, dispatches `178,175,174`, with 29 migrations, source/target masks
+`0xe`/`0xe`, zero evidence drops, 43 CPU0 owner compositions, 48 AP deferrals,
+no pending handoff, and zero GPU delayed recoveries, timeouts, or errors. The
+locked snapshot records PIDs `13,15,14`, roots
+`0x4012f000,0x401f3000,0x40191000`, and CPUs `1,2,3`. The 12,408-byte harness
+log is `build/logs/aarch64-selfhost-parallel-atomic-20260903.log`, SHA-256
+`32ef4df36570702594cd15237247e61efe8e934ea93b1b24e24f2992293394da`;
+the 75,738-byte `build/makos-selfhost-focused-serial.log` has SHA-256
+`118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
+Full unchanged `make unit check` passes with the extracted LLVM 19 toolchain
+on `PATH`; the 79,717-byte
+`build/logs/full-unit-check-20260903-atomic-final.log` has SHA-256
+`23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+This is Raspberry Pi/TCG functional evidence, not macOS/HVF qualification;
+Scheduling, SDK, and Self-hosting remain Partial.
 
 The focused gate also proves a repository-source path that is distinct from
 the synthetic language fixtures. `kernel/build.rs` reads the exact bytes of
@@ -660,10 +679,25 @@ is not a general preprocessor: it has no variadics, token
 pasting/stringification, multiline definitions, system include search, or
 unbounded include graphs.
 
+The quoted-path scan continues while input remains before the matching closing
+quote. A prior `!path_length` loop predicate made the scan stop after its first
+valid byte and therefore rejected every real quoted path; structural and
+host-execution tests now guard complete quoted paths and the separate bounded
+`<stdint.h>` form. Diagnostic expansion reports the first active include
+failure as open, read, close, empty, capacity, depth, protected-path,
+dependency, or recursive-content without changing the fail-closed result.
+
 The fixture seeds `/home/user/generated-header.build`, a small assembly
 startup, `/home/user/generated-header.c`,
-`/home/user/generated-inline.h`, and `/home/user/generated-leaf.h`. The C unit
-defines a function before including the guarded root twice. The root's
+`/home/user/generated-inline.h`, and `/home/user/generated-leaf.h`. The
+fixture immediately rereads and byte-compares both generated headers before
+any preprocessing and requires `MAKOS_AARCH64_GENERATED_HEADERS_OK
+inline=/home/user/generated-inline.h inline_bytes=164
+inline_fnv1a=bbbc9068d3d73e49 leaf=/home/user/generated-leaf.h
+leaf_bytes=1215 leaf_fnv1a=ccf73fc02c2f9ceb
+identity=guest-readback-exact`; generated-header failures identify open, read,
+close, length, or content. The C unit defines a function before including the
+guarded root twice. The root's
 defined/undefined branches include a guarded leaf. That leaf sets
 `INCLUDED_DELTA=1`; a false `#if` is followed by a selected `#elif`, which
 defines `ACTIVE_DELTA=2` for the emitted function. `RETURN_TYPE` supplies a
@@ -692,13 +726,15 @@ header-graph cold `0/2`, warm `2/0`, edited-header `1/1`, and rewarm `2/0`
 results. The nested-control graph then proves cold `0/3` and warm `3/0`, emits
 564 linked code bytes under the 1,024-byte aggregate bound, writes a 1,583-byte
 two-segment ELF whose read-only/NX segment starts at offset 1,536, and executes
-that persisted output through the ordinary loader with status 42. All sixteen
-authenticated CLI builds link and reap with status 42; the state-invalidated
-build re-establishes a valid cache. This is bounded
+that persisted output through the ordinary loader with status 42. All 20
+authenticated CLI builds across eight graphs link and reap with status 42; the
+state-invalidated build re-establishes a valid cache. The fixed parallel phase
+proves exact-once cold `0/3`, `0/2`, and `0/3` records for the three-input,
+header, and nested-control graphs before their later warm checks. This is bounded
 incremental reuse with bounded recursive quoted-header discovery, object/text
 and four-parameter function-like macros, include guards, and the documented
 expression subset—not a general preprocessor,
-parallel builds, an
+general parallel build scheduling, an
 arbitrary graph beyond six inputs, a general dependency engine, or a trust
 mechanism. The linker has a 1,024-byte aggregate code bound and fails closed
 when a user-supplied accepted graph exceeds it; individual build translation
@@ -760,11 +796,11 @@ post-enqueue contract. Destroying surface 8 must wake its decoy so the retried
 syscall fails closed and the join completes. Priority is one-shot after a
 successful dispatch; the deadline only expires stale hints. The gate also requires an AP CPU mask, nonzero dispatch counters, a
 simultaneous multi-AP interval with distinct TIDs, exclusive ownership, the
-complete upstream-musl pthread/IPC workload, and status-42 reap. The final
-Raspberry Pi/QEMU 10.0.11 TCG pass records all APs (`cpu_mask=0xe`), automatic
-placements `4,2,14`, three natural load migrations with zero evidence drops,
-live/final overlap on AP1/AP2 (`overlap_mask=0x6`, TIDs 5/6), watcher TID 8 on
-AP2, dispatch counts `10650,13916,10330`, one targeted wake, accepted syscall
+complete upstream-musl pthread/IPC workload, and status-42 reap. The current
+Raspberry Pi/QEMU 10.0.11 (`1:10.0.11+ds-0+deb13u1`) TCG pass records all APs
+(`cpu_mask=0xe`), automatic placements `14,2,4`, three natural load migrations
+with zero evidence drops, watcher TID 8 on CPU2, dispatch counts
+`7014,10845,7361`, one targeted wake, accepted syscall
 149, and three skipped
 unrelated surface waiters. The runtime also requires at least three explicit
 affinity changes that exclude the source PE and confirms all three workers
@@ -777,6 +813,12 @@ strict Gate 3 on the intended idle host. The historical integrated image
 a new Firefox package/integrated image as
 `build/makos-integrated-firefox-handoff149.img` (or override
 `AARCH64_FIREFOX_PACKAGE_IMAGE`) before running that gate.
+The latest unchanged strict-target attempt on the idle Pi rebuilt and checked
+the boot image, then exited 2 before QEMU because that package image is absent.
+This fail-closed prerequisite result is neither a browser runtime failure nor a
+pass; all strict thresholds remain unchanged. Its 7,629-byte
+`build/logs/aarch64-firefox-runtime-preflight-20260903.log` has SHA-256
+`637bc5815537a755b93243ee3f02de20837890c3e9bf0ce5b02a7390ab41fc06`.
 
 Run the ordinary native-application role gate with:
 

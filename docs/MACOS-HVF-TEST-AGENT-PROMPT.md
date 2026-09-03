@@ -12,11 +12,12 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required qualification code baseline: 817602513ccae985f1ca1d1159587520dfba7529
+Required qualification code baseline: 5a49af108452983bf4809c12a2a8307582fa5955
 
 Verify that the checked-out `main` contains this exact baseline commit.
-Do not test an older commit. A later documentation- or test-only handoff commit
-is acceptable if this baseline is its ancestor.
+Do not test an older commit. A later handoff commit is acceptable if this
+baseline is its ancestor; record the exact tested HEAD and the scope of every
+later commit.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, and docs/INTEGRATED-DATA-IMAGE.md.
@@ -38,6 +39,14 @@ is acceptable if this baseline is its ancestor.
        make test-aarch64-production-smp-runtime
        make test-aarch64-cursor-runtime
 
+   Before the self-host run, record SHA-256 of the exact boot image. Preserve
+   the complete harness output and `build/makos-selfhost-focused-serial.log`;
+   record each path, byte size, SHA-256, command exit status, QEMU version, and
+   accelerator. From the final host marker record exact graph/CLI/process
+   counts, placements, dispatches, migration count and source/target masks,
+   evidence drops, parallel PIDs/roots/CPUs, CPU0 owner compositions, AP
+   deferrals, pending handoff, and GPU delayed/timeouts/errors.
+
    The self-hosting gate must report
    `MAKOS_AARCH64_C_BRANCH_BLOCK_OK forms=if,if-else,nested-if,nested-loop body=bounded-control-assignment continuation=return max_depth=4 object=elf64-et-rel symbols=choose,bump,nested,accumulate linked=1 wx=denied results=42,2,5,8,42,2,1,6 malformed=empty-else,branch-declaration-denied,depth-5-denied`.
    Its final host marker must include
@@ -58,6 +67,12 @@ is acceptable if this baseline is its ancestor.
    denied seventh parameter/argument. The final host marker must retain
    `max_parameters=6`, `max_call_arguments=6`, `nonleaf_frame=96,112`, and
    `six_argument_object=elf64-et-rel:808`. It must also report the exact
+   generated-header readback marker before any preprocessor success marker:
+   `MAKOS_AARCH64_GENERATED_HEADERS_OK inline=/home/user/generated-inline.h inline_bytes=164 inline_fnv1a=bbbc9068d3d73e49 leaf=/home/user/generated-leaf.h leaf_bytes=1215 leaf_fnv1a=ccf73fc02c2f9ceb identity=guest-readback-exact`.
+   The complete self-host output must not contain
+   `MAKOS_AARCH64_GENERATED_HEADER_ERROR`,
+   `MAKOS_AARCH64_C_INCLUDE_ERROR`, or
+   `MAKOS_AARCH64_C_PREPROCESSOR_ERROR`. It must also report the exact
    quoted-header/preprocessor guard and dependency markers:
    `MAKOS_AARCH64_C_PREPROCESSOR_GUARD_OK headers=2 max_depth=2 macros=6 conditional_depth=2 include_guard=deduplicated missing=denied relative=denied cycle=denied overdepth=denied macro_expansion=text,function-like parameters=4 expansion_depth=8 if_expression=defined,numeric,arithmetic,shift,comparison,bitwise,not,and,or,short-circuit,conditional elif=selected malformed=define,endif,unterminated,duplicate-else,expression,elif-after-else,zero-divisor,shift-range,overflow,conditional-syntax,conditional-selected-trap,macro-parameters,macro-arity,macro-recursion,macro-token-op-denied depth_limit=4`
    and
@@ -110,6 +125,18 @@ is acceptable if this baseline is its ancestor.
    `output_bytes=1583`, `linked_capacity=1024`, `image_capacity=2048`, and
    `data_offset=1536`, followed by
    `MAKOS_AARCH64_RUN_OK path=/home/user/generated-nested.elf status=42`.
+   In the fixed parallel phase, require exactly one complete, contiguous cold
+   build record for each of `/home/user/generated-three.build` (`0/3`),
+   `/home/user/generated-header.build` (`0/2`), and
+   `/home/user/generated-nested.build` (`0/3`), plus exactly one complete
+   header-dependency record and nested-output record. Do not accept fragmented
+   substrings or infer cold-cache evidence only from exit status. Require
+   `MAKOS_AARCH64_MAKBUILD_PARALLEL_OK spawn_before_wait=3
+   statuses=42,42,42`, exactly three matching status-42 reaps, and exactly one
+   `MAKOS_AARCH64_TOOLCHAIN_PARALLEL_OK` with three distinct PIDs/group PIDs,
+   three distinct nonzero TTBR0 roots, CPUs `1,2,3`, `cpu_mask=0xe`, running
+   state, singleton ownership, scheduler-lock snapshot evidence, and CPU0
+   emission.
    It must prove kernel-owned SMP placement for all 21 real Toolchain
    processes. Require exactly 21
    `MAKOS_AARCH64_TOOLCHAIN_PLACEMENT_OK` decisions, each with singleton AP
@@ -276,6 +303,13 @@ is acceptable if this baseline is its ancestor.
    provenance, the first failing assertion, host load/memory/swap evidence,
    and every QMP/session/PID path. Record an absent required package as not run,
    not as a pass or runtime failure.
+
+   For any earlier self-host failure, preserve
+   `build/makos-selfhost-focused-serial.log`, complete harness stdout/stderr,
+   the first failing assertion, exact exit status, boot-image identity, host
+   load/memory/swap evidence, every retained QMP/session/PID path, and raw bytes
+   surrounding any missing or duplicated parallel marker. Do not reinterpret
+   three child status-42 reaps as proof of a cold marker that is absent.
 
 6. After the strict Firefox QEMU has exited, confirm no QEMU remains, then boot
    the visible login as the sole QEMU from private clones. Do not start another

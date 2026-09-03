@@ -99,19 +99,19 @@ dependencies, and exact libxul/libnspr SONAMEs. Focused interaction,
 provenance, integrated-image, build-mode, syntax, adversarial malformed-image,
 and diff checks pass. No new link, package, or runtime result is implied.
 
-The staged 2026-08-30 self-host increment adds bounded file-scope data and an
+The 2026-08-30 self-host increment adds bounded file-scope data and an
 exact production-source graph. It reads the unchanged
 `ports/musl/shared-demo.c` through the read-only guest path
 `/usr/src/makos/ports/musl/shared-demo.c`, resolves its bounded
 `/usr/include/stdint.h`, emits typed object symbols plus `.rodata`/`.data`,
 applies paired AArch64 page/low-12 address relocations, and emits separate
-R-X/R--/RW-NX regions. The focused gate is extended from 17 to 21 Toolchain
-processes and from 16 to 20 CLI builds for authenticated cold/warm production,
-const-only and mutable-only builds plus ordinary-loader execution. Do not record Pi or macOS runtime evidence
-until those unchanged gates actually complete; SDK/self-hosting remain Partial.
+R-X/R--/RW-NX regions. The qualified focused gate now covers 21 Toolchain
+processes and 20 CLI builds, including authenticated cold/warm production,
+const-only and mutable-only builds plus ordinary-loader execution. SDK and
+self-hosting remain Partial.
 
-The staged AArch64 parallel self-host/SMP increment through
-`5db7e3588227a97e878c989fab3e1361ddff8ed5` adds the fixed authenticated
+The AArch64 parser/parallel self-host increment through
+`5a49af108452983bf4809c12a2a8307582fa5955` retains the fixed authenticated
 `makbuild-parallel` command for the disjoint cold `generated-three.build`,
 `generated-header.build`, and `generated-nested.build` graphs. It performs all
 three spawns before any wait, uses wait-status syscall 126 to distinguish
@@ -125,14 +125,88 @@ must be idle. The harness permits arbitrary child-output order, validates each
 ordered migration chain, and requires the locked snapshot CPU to be visited so
 both legal pre- and post-snapshot migration are covered. Focused process-table,
 structural, synthetic evidence, Python syntax, and strict AArch64 shell compile
-checks pass; the combined log is
-`build/logs/parallel-combined-focused-20260902.log`, with SHA-256
-`9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
-No QEMU runtime was run for this staged increment. The next unchanged gate
-expects eight graphs, 20 CLI builds, and 21 Toolchain processes, with three
-simultaneous cold graphs; do not claim those counts passed. The authoritative
-Pi/TCG result remains five graphs, 16 CLI builds, and 17 Toolchain processes,
-and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
+checks remain in place. The quoted-include parser now consumes the complete
+path through its closing quote; the former `!path_length` loop predicate
+stopped after one byte. Fixture mode immediately rereads and byte-compares its
+generated headers and emits `MAKOS_AARCH64_GENERATED_HEADERS_OK
+inline=/home/user/generated-inline.h inline_bytes=164
+inline_fnv1a=bbbc9068d3d73e49 leaf=/home/user/generated-leaf.h
+leaf_bytes=1215 leaf_fnv1a=ccf73fc02c2f9ceb
+identity=guest-readback-exact`. Bounded diagnostic records identify include
+open/read/close/empty/capacity/depth/protected-path/dependency/
+recursive-content failures and generated-header open/read/close/length/content
+failures. Build, nested-output, and header-dependency markers are each
+assembled within a 768-byte buffer and emitted by one checked `SYS_WRITE`, so
+the existing cross-PE serial lock covers the complete semantic record rather
+than fragments from concurrent Toolchains.
+
+The unchanged `make test-aarch64-selfhost-runtime` completed with exit 0 on
+the Raspberry Pi Debian host under QEMU 10.0.11
+(`1:10.0.11+ds-0+deb13u1`)/TCG using image SHA-256
+`cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`.
+It passes eight graphs, 20 authenticated CLI builds, all 21 Toolchain
+processes, and the three simultaneous cold graphs. The locked parallel
+snapshot records PIDs `13,15,14`, roots
+`0x4012f000,0x401f3000,0x40191000`, and CPUs `1,2,3`; final placements are
+`9,4,8`, dispatches `178,175,174`, with 29 migrations, source and target masks
+`0xe`, zero evidence drops, 43 CPU0 owner compositions, 48 AP deferrals, no
+pending handoff, and zero GPU delayed recoveries, timeouts, or errors. The
+12,408-byte harness log is
+`build/logs/aarch64-selfhost-parallel-atomic-20260903.log`, SHA-256
+`32ef4df36570702594cd15237247e61efe8e934ea93b1b24e24f2992293394da`;
+the 75,738-byte serial log is `build/makos-selfhost-focused-serial.log`,
+SHA-256
+`118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
+Full unchanged `make unit check` passes with the extracted LLVM 19 toolchain on
+`PATH`; `build/logs/full-unit-check-20260903-atomic-final.log` is 79,717 bytes,
+SHA-256
+`23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+Separate Pi/TCG gates pass Native dispatches `6855,7066,10391`, placements
+`13,3,2`, two migrations; Python-role dispatches `7136,10934,6846`, placements
+`1,1,1`, one migration; production Firefox-role dispatches
+`7014,10845,7361`, placements `14,2,4`, three migrations, watcher TID 8 on
+CPU2, and status 42; and cursor positions 7 with zero changed scanout pixels,
+delayed recoveries, timeouts, or errors. This is Raspberry Pi/TCG functional
+evidence, not a Firefox browser pass or macOS/HVF qualification. Scheduling,
+SDK, and Self-hosting remain Partial.
+
+The preserved Native, production Firefox-role, and cursor harness logs are,
+respectively, 8,140 bytes/SHA-256
+`a7eb55cfe43d30cc6a0c956cf3ef76a3204fa51628af995ca9896c459ea24ae0`,
+8,286 bytes/`676f18d5981732f171137dee5e02348be079414078198e375dd1fe7388f68889`,
+and 7,733 bytes/`93904d3ca338235b05cde21e22c2eed21d80b729038d28e376e8a91c34c223ef`.
+
+A visible Raspberry Pi/TCG login from the same qualified image is live at
+handoff as the sole QEMU. It is PID 1023121 under transient user service
+`makos-visible-smp-atomic-makos-pi-visible-smp-atomic-ngRmkLhJ.service`, in
+private session
+`/home/friend/MakOS/build/makos-pi-visible-smp-atomic-ngRmkLhJ`. The session
+contains a private read-only `boot.img`, SHA-256
+`cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`; a
+blank sparse 1 GiB `data.img`, SHA-256
+`6e1cab146df006d2d39559d8d89b48d239238a09a49840d29725c13e24325262`;
+private UEFI vars, SHA-256
+`8bf6243965b943cf708b93a89c0eb3bcb065889cbdcd401e0b69dba43c282107`;
+and `qmp.sock`, `serial.log`, `qemu.pid`, `qmp-status.json`, `login.ppm`, and
+`login.png`. QMP reports `running`. Serial records the 800x600 login UI with
+`desktop=login`, `online=4`, and `production userspace_scheduler_cpus=4`; the
+login was visually inspected. `login.ppm` has SHA-256
+`53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`,
+and `login.png` has SHA-256
+`ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
+This is Pi/TCG display evidence, not macOS/HVF or Firefox browser evidence.
+Leave the sole QEMU running for inspection; send QMP `quit` before any further
+runtime so no two QEMU instances overlap.
+
+The unchanged strict Firefox target was also attempted on the idle Pi at load
+0.67, 1.1 GiB available RAM, and 1.2/5.8 GiB swap used. It rebuilt and checked
+the boot image, then exited 2 before QEMU with `Firefox package image not found:
+build/makos-integrated-firefox-handoff149.img`. The 7,629-byte log is
+`build/logs/aarch64-firefox-runtime-preflight-20260903.log`, SHA-256
+`637bc5815537a755b93243ee3f02de20837890c3e9bf0ce5b02a7390ab41fc06`.
+This is a fail-closed missing release package, not a browser runtime failure or
+pass; no QEMU launched, no macOS/HVF evidence exists, and thresholds remain
+unchanged.
 
 - Implementation baseline `7c01848e9098d8c5f44bd51f542ca06da592e7fe`
   adds a fifth persistent authenticated `MAKBUILD1` graph: one assembly plus
@@ -1329,7 +1403,8 @@ and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
 1. Run the supported default release build with integrated print patch 0058,
    Rust errno patch 0059, and the exact 59-patch provenance; do not package or
    reuse the completed developer outputs. Require qualification code baseline
-   `817602513ccae985f1ca1d1159587520dfba7529`, then package that release build
+   `5a49af108452983bf4809c12a2a8307582fa5955` (which contains package-coherence
+   baseline `817602513ccae985f1ca1d1159587520dfba7529`), then package that release build
    and create a new provenance-validated integrated image on the intended
    macOS/HVF host. If any of the six auxiliary publications is interrupted,
    keep the prior image authoritative and rerun the unchanged command; do not
@@ -1349,7 +1424,7 @@ and the Scheduling, SDK, and Self-hosting audit rows remain Partial.
    while retaining CPU0-exclusive device ownership. Stop any visible QEMU
    through QMP before a focused runtime.
 3. Expand the bounded guest C compiler beyond its current six-function and
-   six-parameter per-translation-unit limits. The staged gate has eight
+   six-parameter per-translation-unit limits. The qualified Pi/TCG gate has eight
    persistent runtime graphs, including the primary four-object graph and a three-object nested-control
    graph whose 564 linked bytes pass the expanded 1,024-byte aggregate bound;
    the build driver accepts two through six inputs. The bounded production

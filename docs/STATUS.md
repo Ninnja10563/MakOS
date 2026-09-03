@@ -77,8 +77,8 @@ Last updated: 2026-09-03.
   build-mode, syntax, and diff gates pass. No new full link, release package,
   QEMU runtime, or macOS/HVF result is claimed; Firefox remains Partial.
 
-- 2026-09-02 the staged AArch64 self-host/SMP increment through
-  `5db7e3588227a97e878c989fab3e1361ddff8ed5` adds the fixed authenticated
+- 2026-09-03 AArch64 self-host/parser and parallel-record qualification through
+  `5a49af108452983bf4809c12a2a8307582fa5955` retains the fixed authenticated
   `makbuild-parallel` command. It spawns the existing disjoint cold
   `generated-three.build`, `generated-header.build`, and
   `generated-nested.build` graphs before performing any wait, reaps every
@@ -93,17 +93,85 @@ Last updated: 2026-09-03.
   limited to an actually idle destination AP. The harness accepts arbitrary
   child-output order, validates complete migration histories, and requires the
   locked snapshot CPU to appear in each child's visited CPUs because a legal
-  migration may occur before or after the snapshot. Focused process-table,
-  scheduler/self-host structural, synthetic evidence, Python syntax, and strict
-  AArch64 shell compile checks pass; their combined log is
-  `build/logs/parallel-combined-focused-20260902.log`, with SHA-256
-  `9bd3ad49858c4335b2db997c4974c310e5601a2e461554435b5ced1be72be583`.
-  No QEMU runtime was run for this staged increment. The unchanged next gate
-  expects eight graphs, 20 CLI builds, and 21 Toolchain processes, including
-  three simultaneous cold graphs; those counts have not passed yet. The last
-  qualified Pi/TCG evidence remains five graphs, 16 CLI builds, and 17
-  Toolchain processes, and the scheduling, SDK, and self-hosting audit rows
-  remain Partial.
+  migration may occur before or after the snapshot. The quoted-include parser
+  now consumes every valid byte through the closing quote instead of stopping
+  after its first path byte. Fixture mode immediately rereads and byte-compares
+  the generated headers before preprocessing, then emits
+  `MAKOS_AARCH64_GENERATED_HEADERS_OK inline=/home/user/generated-inline.h
+  inline_bytes=164 inline_fnv1a=bbbc9068d3d73e49
+  leaf=/home/user/generated-leaf.h leaf_bytes=1215
+  leaf_fnv1a=ccf73fc02c2f9ceb identity=guest-readback-exact`. Include diagnostics
+  distinguish open, read, close, empty, capacity, depth, protected-path,
+  dependency, and recursive-content failures; generated-header diagnostics
+  distinguish open/read/close/length/content. Each build, nested-output, and
+  header-dependency record is now assembled in a bounded 768-byte buffer and
+  emitted by one checked `SYS_WRITE`, preventing parallel Toolchain records
+  from being spliced between per-call serial locks.
+
+  The unchanged `make test-aarch64-selfhost-runtime` completed with exit 0 on
+  the Raspberry Pi Debian host under QEMU 10.0.11
+  (`1:10.0.11+ds-0+deb13u1`)/TCG using image SHA-256
+  `cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`.
+  It passed eight graphs, 20 authenticated CLI builds, and all 21 Toolchain
+  processes, including the three simultaneous cold graphs. The locked snapshot
+  recorded PIDs `13,15,14`, roots
+  `0x4012f000,0x401f3000,0x40191000`, and CPUs `1,2,3`; final placements were
+  `9,4,8`, dispatches `178,175,174`, with 29 migrations, source/target masks
+  `0xe`/`0xe`, zero evidence drops, 43 CPU0 owner compositions, 48 AP
+  deferrals, no pending handoff, and zero GPU delayed recoveries, timeouts, or
+  errors. The 12,408-byte harness log is
+  `build/logs/aarch64-selfhost-parallel-atomic-20260903.log`, SHA-256
+  `32ef4df36570702594cd15237247e61efe8e934ea93b1b24e24f2992293394da`;
+  the 75,738-byte serial log is `build/makos-selfhost-focused-serial.log`,
+  SHA-256
+  `118d4e1f3a2f55eb342671c38a2cb0acec944703056644a9742e30103f73c84c`.
+  Full unchanged `make unit check` also passes with the extracted LLVM 19
+  toolchain on `PATH`; its 79,717-byte log is
+  `build/logs/full-unit-check-20260903-atomic-final.log`, SHA-256
+  `23bdbb78d0bb547d1d70fbe5ff55ea1f34fa698d9a4243f029abb5f4690f8113`.
+  Separate unchanged Pi/TCG gates also pass: Native dispatches
+  `6855,7066,10391`, placements `13,3,2`, two migrations; Python-role
+  dispatches `7136,10934,6846`, placements `1,1,1`, one migration; production
+  Firefox-role dispatches `7014,10845,7361`, placements `14,2,4`, three
+  migrations, watcher TID 8 on CPU2, status 42; and cursor positions 7 with
+  zero changed scanout pixels, delayed recoveries, timeouts, or errors. These
+  are Raspberry Pi/TCG functional results, not a Firefox browser pass or
+  macOS/HVF evidence. Scheduling, SDK/developer-tools, and self-hosting remain
+  Partial: this fixed three-graph command is not arbitrary parallel build
+  scheduling or a substantial in-guest MakOS build.
+
+  A separate visible Raspberry Pi/TCG login from that exact image is live at
+  handoff as the sole QEMU: transient user service
+  `makos-visible-smp-atomic-makos-pi-visible-smp-atomic-ngRmkLhJ.service`, PID
+  1023121, private session
+  `/home/friend/MakOS/build/makos-pi-visible-smp-atomic-ngRmkLhJ`. The session
+  contains the private read-only `boot.img`, SHA-256
+  `cd808fb92791194058b1671b5a2d0986f028507c4a6558a30517a4337fb853ce`; a
+  blank sparse 1 GiB `data.img`, SHA-256
+  `6e1cab146df006d2d39559d8d89b48d239238a09a49840d29725c13e24325262`;
+  private UEFI vars, SHA-256
+  `8bf6243965b943cf708b93a89c0eb3bcb065889cbdcd401e0b69dba43c282107`;
+  and `qmp.sock`, `serial.log`, `qemu.pid`, `qmp-status.json`, `login.ppm`, and
+  `login.png`. QMP reports `running`; serial records the 800x600 login UI with
+  `desktop=login`, `online=4`, and `production userspace_scheduler_cpus=4`.
+  The login was visually inspected; `login.ppm` has SHA-256
+  `53179ecad66d43194bfc58a93a3f8bbb3d1d11bda432e1110c385f5cd59d8382`
+  and `login.png` has SHA-256
+  `ef6b87edd8b54b2714f2c3ab735235001b1fa63ed4d8cfeb7adb9d24678398b6`.
+  This is Pi/TCG display evidence, not macOS/HVF or Firefox browser evidence.
+  Leave this sole QEMU undisturbed for inspection, and issue QMP `quit` to it
+  before starting any further runtime.
+
+- 2026-09-03 the unchanged strict Firefox target was attempted on the idle
+  Raspberry Pi at load 0.67, with 1.1 GiB available RAM and 1.2/5.8 GiB swap
+  used. It rebuilt and checked the boot image, then exited 2 before QEMU with
+  `Firefox package image not found:
+  build/makos-integrated-firefox-handoff149.img`. The 7,629-byte log is
+  `build/logs/aarch64-firefox-runtime-preflight-20260903.log`, SHA-256
+  `637bc5815537a755b93243ee3f02de20837890c3e9bf0ce5b02a7390ab41fc06`.
+  This is the intended fail-closed missing-release-package result, not a
+  Firefox browser runtime failure or pass. No QEMU launched, no macOS/HVF
+  evidence exists, and all strict thresholds remain unchanged.
 
 - 2026-09-02 the then-current official Firefox ESR release link exposed one exact Rust
   target-ABI defect: vendored `errno` 0.3.8 treated the distinct MakOS Unix
@@ -134,8 +202,9 @@ Last updated: 2026-09-03.
   requires authenticated cold/warm builds, a relocated read from the production
   `libmakosdemo.so` string, `makos_shared_add(20,22) == 42`, mutable-data
   execution plus separate const-only and mutable-only ordinary-loader runs.
-  Its new runtime evidence is still pending; it has not been run in this
-  implementation pass. ET_REL construction has a 4 KiB in-memory work bound,
+  The qualified Pi/TCG self-host run above covers those production, const-only,
+  and mutable-only cold/warm and ordinary-loader checks with status 42. ET_REL
+  construction has a 4 KiB in-memory work bound,
   while persisted objects and packed executables retain MakFS's 2 KiB file
   bound; empty R--/RW segments are omitted.
   This remains bounded and the SDK and
