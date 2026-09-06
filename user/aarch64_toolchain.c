@@ -5048,7 +5048,11 @@ static void fail(uint64_t status) {
     for (;;) __asm__ volatile("wfe");
 }
 
-__attribute__((section(".text._start"), noreturn)) void _start(
+#if !defined(MAKOS_AARCH64_TOOLCHAIN_HOST_TEST)
+/* ELF section placement belongs to the guest image, not the host harness. */
+__attribute__((section(".text._start")))
+#endif
+__attribute__((noreturn)) void _start(
     uint64_t argc, char **argv, char **envp) {
     static const char fixture_manifest_path[] = "/home/user/generated.build";
     static const char alternate_manifest_path[] =

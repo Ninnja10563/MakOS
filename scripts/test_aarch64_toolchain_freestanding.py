@@ -115,6 +115,11 @@ with tempfile.TemporaryDirectory(prefix="makos-aarch64-toolchain-") as directory
     ).stdout
     if len(re.findall(r"^[0-9a-fA-F]+ T memcpy$", defined, re.M)) != 1:
         raise SystemExit("freestanding toolchain does not define exactly one global memcpy")
+    symbols = subprocess.run(
+        [objdump, "--syms", str(obj)], check=True, text=True, stdout=subprocess.PIPE
+    ).stdout
+    if not re.search(r"^\S+\s+g\s+F\s+\.text\._start\s+\S+\s+_start$", symbols, re.M):
+        raise SystemExit("guest entrypoint is not in its required ELF .text._start section")
     disassembly = subprocess.run(
         [objdump, "-dr", str(obj)], check=True, text=True, stdout=subprocess.PIPE
     ).stdout
@@ -324,10 +329,24 @@ int main(void) {{
 }}
 '''
     )
+    # Exercise the Mach-O frontend on every development host, without a macOS
+    # SDK or linker. The harness uses only Clang's freestanding C headers.
+    # Native compilation and execution below still test the actual host ABI.
+    macho = output / "include-parser-test-macho.o"
+    subprocess.run(
+        [
+            clang, "-target", "arm64-apple-macos11", "-std=c17",
+            "-ffreestanding", "-fno-builtin", "-O0", "-I", str(output),
+            "-c", str(host_test), "-o", str(macho),
+        ],
+        check=True,
+    )
+    if macho.read_bytes()[:8] != bytes.fromhex("cffaedfe0c000001"):
+        raise SystemExit("host regression harness did not produce 64-bit ARM Mach-O")
     subprocess.run(
         [clang, "-std=c17", "-O0", "-I", str(output), str(host_test), "-o", str(host_binary)],
         check=True,
     )
     subprocess.run([str(host_binary)], check=True)
 
-print("MAKOS_AARCH64_TOOLCHAIN_FREESTANDING_OK memcpy=defined-exact nonrecursive=1 undefined=0 link=aarch64-et_exec include=self-generated-exact include_parser=quoted-absolute-recursive-guard,angle-stdint records=build,output,header sys_write=one-each overflow=fail-closed")
+print("MAKOS_AARCH64_TOOLCHAIN_FREESTANDING_OK memcpy=defined-exact nonrecursive=1 undefined=0 link=aarch64-et_exec include=self-generated-exact include_parser=quoted-absolute-recursive-guard,angle-stdint records=build,output,header sys_write=one-each overflow=fail-closed guest_entry_section=.text._start host_compile=arm64-macho host_runtime=passed")
