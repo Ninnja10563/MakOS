@@ -6,6 +6,8 @@ extern crate alloc;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_accounts;
 #[cfg(target_arch = "aarch64")]
+mod aarch64_application_balance;
+#[cfg(target_arch = "aarch64")]
 mod aarch64_clipboard;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_desktop;

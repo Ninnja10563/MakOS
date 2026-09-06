@@ -153,6 +153,7 @@ struct ContextSlot {
     role: ProcessRole,
     affinity_mask: u8,
     automatic_cpu: u8,
+    automatic_load_baseline: [u64; 3],
     automatic_migrated: bool,
     affinity_user_set: bool,
     context: crate::arch::UserContext,
@@ -176,6 +177,7 @@ impl ContextSlot {
         role: ProcessRole::None,
         affinity_mask: 0,
         automatic_cpu: 0,
+        automatic_load_baseline: [0; 3],
         automatic_migrated: false,
         affinity_user_set: false,
         context: crate::arch::UserContext::initial(0, 0, 0, 0),
@@ -574,15 +576,24 @@ impl SchedulerState {
         {
             return None;
         }
-        let placement = self.least_loaded_compute_ap();
-        let source_load = placement.loads[cpu - 1];
-        let target_load = placement.loads[placement.cpu - 1];
-        if placement.cpu == cpu
-            || source_load
-                < target_load.saturating_add(APPLICATION_REBALANCE_DISPATCH_DELTA)
-        {
-            return None;
+        let mut idle_mask = 0u8;
+        for candidate in 1..4 {
+            if self.table.current_pid_on(candidate).is_none() {
+                idle_mask |= 1u8 << candidate;
+            }
         }
+        // Compare work observed during this thread's lifetime. Historical work
+        // from a completed group must not make a currently idle AP look busier
+        // than the AP repeatedly dispatching this new thread.
+        let placement = crate::aarch64_application_balance::migration_target(
+            cpu,
+            [self.cpu_dispatches[1], self.cpu_dispatches[2], self.cpu_dispatches[3]],
+            slot.automatic_load_baseline,
+            idle_mask,
+            usize::from(self.compute_placement_cursor.clamp(1, 3)),
+            APPLICATION_REBALANCE_DISPATCH_DELTA,
+        )?;
+        self.compute_placement_cursor = (1 + placement.cpu % 3) as u8;
         self.contexts[index].automatic_cpu = placement.cpu as u8;
         self.contexts[index].automatic_migrated = true;
         let migration = ComputeMigration {
@@ -3673,6 +3684,7 @@ pub fn clone_thread(
                 parent.affinity_mask
             },
             automatic_cpu: application_placement.map_or(0, |placement| placement.cpu as u8),
+            automatic_load_baseline: application_placement.map_or([0; 3], |placement| placement.loads),
             automatic_migrated: false,
             affinity_user_set: false,
             context: child_context,
@@ -3761,6 +3773,7 @@ pub fn fork_process(frame: &crate::arch::ExceptionFrame) -> Option<u64> {
             role: parent.role,
             affinity_mask: 1,
             automatic_cpu: 0,
+            automatic_load_baseline: [0; 3],
             automatic_migrated: false,
             affinity_user_set: false,
             context: child_context,
@@ -4818,6 +4831,7 @@ fn install_loaded_process(
             role,
             affinity_mask: compute_placement.map_or(1, |placement| 1u8 << placement.cpu),
             automatic_cpu: 0,
+            automatic_load_baseline: [0; 3],
             automatic_migrated: false,
             affinity_user_set: false,
             context,

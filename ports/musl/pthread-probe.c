@@ -52,6 +52,7 @@ static volatile unsigned production_smp_release;
 static volatile unsigned production_affinity_failed;
 static volatile unsigned production_auto_waiting;
 static volatile unsigned production_auto_release;
+static volatile uint64_t production_auto_checksum;
 static volatile unsigned production_input_ready;
 static long production_input_surface;
 static long production_input_decoy_surface;
@@ -95,6 +96,29 @@ static void winch_handler(int signal)
 	}
 }
 
+static void production_auto_load(void)
+{
+	for (unsigned iteration = 0; iteration < 4096; iteration++)
+		makos_call(1, 0, 0);
+	/*
+	 * Dispatch imbalance alone is insufficient: the policy runs at an EL0
+	 * timer exception. HVF can finish all 4096 yields between 100 Hz ticks.
+	 * Keep doing real EL0 work for five clock ticks before any explicit
+	 * affinity request. This neither observes migration state nor selects a
+	 * target CPU; the kernel must still make and prove its own load decision.
+	 */
+	uint64_t begin = (uint64_t)makos_call(27, 0, 0);
+	uint64_t value = UINT64_C(0x9e3779b97f4a7c15);
+	do {
+		for (unsigned iteration = 0; iteration < 16384; iteration++) {
+			value ^= value << 13;
+			value ^= value >> 7;
+			value ^= value << 17;
+		}
+		production_auto_checksum = value;
+	} while ((uint64_t)makos_call(27, 0, 0) - begin < 5);
+}
+
 static void *production_smp_worker(void *argument)
 {
 	unsigned index = (unsigned)(uintptr_t)argument;
@@ -111,8 +135,7 @@ static void *production_smp_worker(void *argument)
 	if (index == 0) {
 		while (__atomic_load_n(&production_auto_waiting, __ATOMIC_ACQUIRE) != 0x6)
 			makos_call(1, 0, 0);
-		for (unsigned iteration = 0; iteration < 4096; iteration++)
-			makos_call(1, 0, 0);
+		production_auto_load();
 		__atomic_store_n(&production_auto_release, 1, __ATOMIC_RELEASE);
 	} else {
 		const struct timespec pause = { .tv_sec = 0, .tv_nsec = 1000000 };

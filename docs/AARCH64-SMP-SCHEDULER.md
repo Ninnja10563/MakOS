@@ -35,7 +35,7 @@ Firefox and ordinary Native process leaders, the shell, and UI/service roles
 remain on CPU0, while non-leader Firefox and ordinary native-application
 threads retain affinity `0xe` but receive kernel-owned least-reserved AP
 preferences. A timer may move each default worker once when its AP exceeds the
-least-loaded AP by 64 cumulative dispatches; an explicit affinity request
+least-loaded AP by 64 dispatches measured since that worker was cloned; an explicit affinity request
 clears the preference and remains authoritative. Single-threaded guest
 compiler, assembler, and linker leaders have a separate `Toolchain` role: the
 kernel places each new process on one least-dispatched AP, preferring idle APs
@@ -155,6 +155,30 @@ join, exit, wait, and reap status 42. The current Pi/TCG pass reports Python
 dispatches `12997,9286,9224`, placements `1,1,1`, and one automatic migration.
 This proves the built-in Python role's scheduler behavior; it is not evidence
 that MicroPython or CPython executed this fixture.
+
+The September 4 M3/HVF run passed the Native phase but failed the following
+Python phase's required automatic-migration evidence. Two timing assumptions
+were unsafe: migration compared boot-lifetime dispatch totals (including the
+finished Native group's skew), and the fixture could complete its 4096 yields
+between 100 Hz timer interrupts before setting authoritative explicit affinity.
+Application clone now records the three AP dispatch counters under the scheduler
+lock; automatic migration uses saturating differences from that worker's epoch.
+Initial placement/accounting keeps its lifetime totals, the migration threshold
+remains 64, and the decision still runs only at the existing timer context safe
+point. Each worker retains its one-migration bound; explicit affinity continues
+to disable the automatic preference. Forks/new leaders/empty slots have no
+inherited epoch. Migration-record `loads` are the worker-epoch dispatch deltas.
+
+The pthread workload retains all 4096 yields and then computes in EL0 through
+five guest clock ticks before releasing sleeping peers and setting affinity.
+It never reads migration state or requests an automatic target. This gives the
+timer-based policy a real preemption interval on HVF without changing any
+runtime assertion, harness timeout, or Firefox threshold. The focused test
+executes the exact production policy against prior-group load skew, the full
+64-dispatch boundary, idle preference, rotated ties, and saturation; it also
+executes the exact guest workload with a host clock fixture that advances only
+after all yields, including unsigned counter wrap. Runtime requalification on
+macOS/HVF is still required for this correction.
 
 A third embedded EL0 program proves remote-running group teardown. Its leader
 clones a shared-VM worker, CPU0 and AP1 execute them concurrently, and the
