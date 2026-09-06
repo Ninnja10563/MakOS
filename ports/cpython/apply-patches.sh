@@ -11,10 +11,4 @@ test -f "$source_dir/configure" || {
 	exit 1
 }
 
-if ! grep -q '\*-\*-makos\*)' "$source_dir/configure.ac"; then
-	patch -d "$source_dir" -p1 <"$port_dir/patches/0001-makos-target.patch"
-fi
-
-grep -q '\*-\*-makos\*)' "$source_dir/configure"
-grep -q 'macos\* | makos\*' "$source_dir/config.sub"
-echo "MAKOS_CPYTHON_PATCHES_OK target=aarch64-unknown-makos"
+exec python3 "$port_dir/apply-patches.py" "$source_dir"

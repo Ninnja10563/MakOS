@@ -28,3 +28,18 @@ source/file reads, and `json` through upstream zipimport, then exits status 0
 and reclaims its address space. Current boundary: IPv4-only config, static core
 module set, no packaged dynamic extensions/ensurepip, 2 KiB writable MakFS4
 files, partial signals/process/readiness/POSIX breadth.
+
+`apply-patches.sh` verifies each target-patch file in a private staging directory
+with zero fuzz and an explicit forward/reverse direction. It supports clean
+3.14.7 source and the partial state left by the old `config.sub` rejection;
+rerunning does not duplicate either configure branch. Unsupported context
+changes fail before publication, preserving source and old rejection artifacts.
+Publication is atomic per file, not across all three files; an interrupted
+publication can be recovered by the same unchanged command. Do not patch or
+build one source directory concurrently.
+
+Both `make unit` and `make check` run offline patch replay/recovery tests.
+`ports/cpython/test.sh` additionally checks the pinned archive SHA and repeats
+those tests against all three complete upstream files. This tests patching,
+not a target interpreter build; that still requires host Python 3.14 and the
+documented target sysroots.

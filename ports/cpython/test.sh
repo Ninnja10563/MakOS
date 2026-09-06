@@ -9,6 +9,8 @@ do
 done
 sh "$port_dir/test-host-tools.sh"
 "$port_dir/fetch.sh" --check
+python3 "$port_dir/test-patches.py" --archive \
+    "$port_dir/../../build/ports/cpython/distfiles/Python-3.14.7.tar.xz"
 "$port_dir/apply-patches.sh"
 if test -x "$port_dir/../../build/ports/cpython/makos/python.exe"; then
 	file "$port_dir/../../build/ports/cpython/makos/python.exe" |
