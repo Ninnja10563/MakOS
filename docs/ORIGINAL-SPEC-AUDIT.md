@@ -1,11 +1,25 @@
 # Original specification audit
 
-Status uses only runtime/static evidence in this workspace. `Implemented` means
+Status uses runtime/static evidence with its host and provenance recorded;
+externally supplied Mac results are explicitly labeled user-reported.
+`Implemented` means
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-09-03. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-09-06. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
+
+Current qualification correction: the user's Apple M3/macOS 26.6.2/QEMU 11.0.3
+HVF report at `0fb7466822ad` confirms a fresh release Firefox build with all
+five artifacts and release provenance, Firefox-role SMP, and cursor runtime.
+The same report records four blockers now addressed in code through `23c0842`:
+Darwin host section syntax, CPU0 block-service progress during filesystem
+contention, application dispatch history/timer workload, and exact CPython
+3.14.7 patch replay. See [repair evidence](HVF-BLOCKERS-20260906.md).
+The Mac logs are user-reported, not locally inspected. Strict real Firefox and
+visible Mac login did not run; a fresh integrated image was blocked. No
+Partial/Missing row is upgraded. Historical developer-only release limitations
+below apply to those older artifacts, not the newer reported Mac release build.
 
 Current self-host implementation baseline
 `5a49af108452983bf4809c12a2a8307582fa5955` corrects full quoted-include path

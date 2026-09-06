@@ -304,7 +304,10 @@ otherwise the binary can start but fail to resolve libraries or
 `virtio-gpu-device`.
 On a host using the repository's extracted LLVM, prepend its `bin` directory
 to `PATH` and set `MAKOS_NM`, `MAKOS_REAL_CLANG`, `MAKOS_REAL_CLANGXX`, and
-`MAKOS_LLD` to the matching pinned tools. The Firefox driver test scopes its
+`MAKOS_LLD` to the matching pinned tools. For musl/port rebuilds also set
+`MAKOS_AR`, `MAKOS_RANLIB`, `MAKOS_OBJDUMP`, and `MAKOS_READELF` to the
+corresponding LLVM binaries; their port-script defaults target Homebrew.
+The Firefox driver test scopes its
 own `MAKOS_CC` wrapper to the Firefox audit, so it cannot replace the bare-metal
 compiler used by MicroPython during the same `make unit check` run.
 The CPython target ELF audit uses the same portability principle. Set
@@ -317,6 +320,23 @@ bad explicit tools or complete discovery failure stop before the target audit.
 and hermetic no-tool cases and is part of both `make unit` and `make check`.
 CPython 3.14.7 cross-building separately requires a host Python with matching
 major/minor 3.14; Python 3.12 is not a supported substitute.
+
+The target patch now matches the pinned 3.14.7 `config.sub` (including its
+`hiux`/`windows` context). `apply-patches.sh` verifies each of the three files
+in a private staging directory, using explicit direction and zero fuzz. It
+recovers the old partial state where configure files changed but `config.sub`
+did not, and preserves existing rejection artifacts. Unexpected contexts fail
+before any source publication. Individual file replacements are atomic; a
+rerun recovers interrupted multi-file publication. Do not concurrently patch
+or build the same source tree. `make unit check` includes offline fresh/partial
+replay tests; `ports/cpython/test.sh` also replays the SHA-verified archive.
+
+The guest toolchain host test now excludes only the ELF `.text._start` section
+attribute under its existing host-test macro. It still compiles and runs the
+whole host capture harness, also cross-compiles that harness to ARM64 Mach-O
+without a macOS SDK, and asserts production ELF `_start` section placement.
+For the accompanying block-service and application-balancing repairs and the
+unchanged Mac rerun sequence, see [HVF blocker repair](HVF-BLOCKERS-20260906.md).
 
 After login, `selfhost-aarch64` runs the deterministic guest-native
 compiler/assembler/static-linker gate. Its fixture mode writes an A64 startup to

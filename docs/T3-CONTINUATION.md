@@ -27,6 +27,38 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-09-06 HVF blocker repair (takes precedence over historical notes below)
+
+The user tested `0fb7466822ad7c78e0a4e6ceabbb41fd227176b0` on Apple M3,
+macOS 26.6.2, QEMU 11.0.3/HVF. They report a fresh **release** Firefox build
+passing ELF/binary/provenance checks (`developer=0`, five artifacts), plus
+passing Firefox-role SMP and cursor runtime. The self-host block timeout,
+Python-role automatic migration, Darwin host-harness section, and CPython
+3.14.7 patch failures are tracked in [the repair report](HVF-BLOCKERS-20260906.md).
+Those Mac logs are not present on the Pi: preserve the distinction between
+user-reported Mac evidence and locally executed Pi tests. Strict real Firefox
+and visible Mac login were not run because CPython prevented integration.
+
+The repair code through `23c0842` retains the 5,000-ms block-owner deadline,
+64-dispatch application migration requirement, all existing runtime assertions,
+and all Firefox thresholds. Requalify the same commands on idle macOS/HVF;
+do not treat the Pi functional results as Mac qualification. The historical
+Pi login PID 1023121 was found running and stopped by QMP `quit` on September 6
+before new tests. Its private session/images/logs remain intact. Always inspect
+the current process list before launching another guest.
+
+Final Pi validation passes full `make unit check`, SHA-verified CPython archive
+patch replay, unchanged self-host runtime (20 CLI builds, 21 processes, three
+parallel children, locked AP1-3 overlap), Native/Python SMP (four/one automatic
+migrations), Firefox-role SMP (three migrations and real input handoff), and
+seven-position zero-scanout cursor. No QEMU/test process remains running.
+The Pi has Python 3.13.5; the unchanged CPython build stops after successful
+patching at its missing Python 3.14 generator, so a fresh interpreter and
+integrated-image build remain Mac work. Use the report's exact logs/hashes
+and Mac rerun sequence, keeping every latency threshold and assertion intact.
+
+### Historical evidence through 2026-09-03
+
 The protected developer build from MakOS base HEAD
 `5827f228744c936b4091de93323d277fb4b4dcda` has now completed the full
 Firefox 140.13.0esr compile/link in `881:10`. It used pinned source commit

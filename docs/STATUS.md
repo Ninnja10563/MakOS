@@ -1,6 +1,29 @@
 # Implementation status
 
-Last updated: 2026-09-03.
+Last updated: 2026-09-06.
+
+## Current qualification update
+
+The user's Apple M3/macOS 26.6.2/QEMU 11.0.3 HVF run of `0fb7466822ad`
+reports a fresh release Firefox build passing ELF/binary/provenance checks
+(`developer=0`), Firefox-role SMP runtime, and the seven-position/zero-scanout
+cursor gate. Four other gates failed: Darwin freestanding host test, self-host
+CPU0 block service, Python-role automatic migration, and the CPython target
+patch. Repair code through `23c0842` and new regression coverage are described
+in [HVF blocker repair](HVF-BLOCKERS-20260906.md). No existing assertion,
+deadline, or threshold was reduced. Mac requalification remains required.
+
+Local Pi/TCG validation passes full `make unit check`, the complete pinned
+CPython archive patch replay, and unchanged self-host, Native/Python SMP,
+Firefox-role SMP, and cursor gates. Self-hosting reaches all 20 CLI builds,
+21 processes, and parallel-child/locked-overlap proofs; Python migration is
+present. CPython target compilation stops at the Pi's absent host Python 3.14.
+Exact evidence and hashes are in the repair report. No QEMU remains running.
+
+This newer user-reported release-build evidence supersedes earlier statements
+that only a developer build exists. It does not prove a new integrated image
+or browser runtime: CPython blocked integration, so strict real Firefox and
+visible Mac login were not run. All applicable original-spec rows stay Partial.
 
 ## Implemented
 
