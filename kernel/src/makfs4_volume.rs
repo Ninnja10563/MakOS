@@ -1282,6 +1282,8 @@ fn with_inode_cache<R>(function: impl FnOnce(&mut InodeCache) -> R) -> R {
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
+        #[cfg(target_arch = "aarch64")]
+        crate::aarch64_virtio_blk::service_requests_while_waiting();
         core::hint::spin_loop();
     }
     let result = function(unsafe { &mut *INODE_CACHE.value.get() });
@@ -1722,6 +1724,8 @@ impl MutationGuard {
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
+            #[cfg(target_arch = "aarch64")]
+            crate::aarch64_virtio_blk::service_requests_while_waiting();
             core::hint::spin_loop();
         }
         Self

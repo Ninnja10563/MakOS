@@ -296,13 +296,29 @@ immutable AP1 probe to the minimum file-write capability while no login session
 exists. AP1 uses normal VFS/MakFS4 syscalls to write and `fsync` 4 KiB, close,
 reopen, read and byte-verify 4 KiB, then the kernel removes the fixture. Every
 AP read/write/FLUSH is copied through an eight-slot queue. CPU0's ordinary 100
-Hz timer bottom half alone submits requests; if the IRQ interrupted a direct
+Hz timer bottom half submits requests; if the IRQ interrupted a direct
 CPU0 block operation, the service observes the owner lock and defers one tick
 instead of recursing. Low-level ring submission still fails closed off CPU0.
 Pi/TCG runtime reports 33 requests/completions: 18 reads, 10 writes and 5
 flushes, all 33 serviced by the timer, status 65, exact content, inode cleanup,
 and frame balance. The AP request wait remains bounded EL1 `WFE`, not scheduler
 block/idle/wake evidence.
+
+CPU0 also drains that same copied-request queue while contending for the VFS,
+MakFS4 inode-cache, or MakFS4 mutation lock. An AP can hold one of these locks
+across synchronous block I/O; a CPU0 syscall waiting for that lock has IRQs
+masked, so a timer-only owner service creates a circular wait. This contention
+path enters only the block driver, never the filesystem or scheduler, retains
+CPU0 MMIO ownership and the existing device-lock recursion guard, and leaves
+the 5,000 ms AP request deadline unchanged. The separate timer completion
+counter still distinguishes timer work from contention work. The host
+regression executes the production queue/service and filesystem lock bodies
+with counter/event/MMIO adapters, requires read/write/flush progress with no
+timer, checks three simultaneous AP requests, owner affinity and recursive
+device-entry deferral, and reproduces the VFS deadlock when only the contention
+hook is removed in its negative control. This is host behavioral evidence;
+the reported macOS/HVF parallel self-host failure still needs its unchanged
+runtime gate rerun on the fix.
 
 An additional opt-in fixture qualifies the production virtio-GPU owner path.
 The immutable AP1 process receives only `CAP_GRAPHICS` and uses the ordinary

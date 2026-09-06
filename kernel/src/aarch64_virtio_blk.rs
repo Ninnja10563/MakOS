@@ -369,14 +369,14 @@ fn queue_request(
     }
     NONOWNER_REQUESTS.fetch_add(1, Ordering::AcqRel);
     slot.state.store(SLOT_READY, Ordering::Release);
-    unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+    notify_service_waiters();
 
     let deadline = crate::arch::counter_deadline_millis(5_000);
     while slot.state.load(Ordering::Acquire) != SLOT_DONE {
         if crate::arch::counter_deadline_expired(deadline) {
             crate::fatal("AArch64 block owner request timeout");
         }
-        unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+        wait_for_service_event();
     }
     let result = unsafe { slot.result.get().read() };
     if result && kind == REQUEST_READ {
@@ -392,6 +392,17 @@ fn queue_request(
 
 pub fn service_requests_from_timer() -> usize {
     service_requests(true)
+}
+
+pub fn service_requests_while_waiting() -> usize {
+    if crate::arch::cpu_index() != 0 {
+        return 0;
+    }
+    // An AP can hold a filesystem lock while awaiting this CPU's copied
+    // block request. A CPU0 syscall contending for that lock has IRQs masked,
+    // so waiting for the timer here would deadlock. Drain only the low-level
+    // block queue: this path must never acquire a VFS/MakFS4/scheduler lock.
+    service_requests(false)
 }
 
 fn service_requests(timer_service: bool) -> usize {
@@ -462,9 +473,17 @@ fn service_requests(timer_service: bool) -> usize {
         if timer_service {
             TIMER_SERVICE_COMPLETIONS.fetch_add(completed as u64, Ordering::AcqRel);
         }
-        unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+        notify_service_waiters();
     }
     completed
+}
+
+fn notify_service_waiters() {
+    unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+}
+
+fn wait_for_service_event() {
+    unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
 }
 
 pub fn reset_service_affinity_evidence() {

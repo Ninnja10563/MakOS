@@ -259,6 +259,7 @@ unit:
 	python3 scripts/test_aarch64_cursor_plane.py
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
+	python3 scripts/test_aarch64_block_owner.py
 	python3 scripts/test_aarch64_selfhost.py
 	python3 scripts/test_aarch64_selfhost_parallel.py
 	python3 scripts/test_aarch64_toolchain_freestanding.py
@@ -321,6 +322,7 @@ check:
 	python3 scripts/test_aarch64_cursor_plane.py
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
+	python3 scripts/test_aarch64_block_owner.py
 	python3 scripts/test_aarch64_selfhost.py
 	python3 scripts/test_aarch64_selfhost_parallel.py
 	python3 scripts/test_aarch64_toolchain_freestanding.py

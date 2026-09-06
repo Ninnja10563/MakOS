@@ -4584,6 +4584,8 @@ fn with_state<R>(function: impl FnOnce(&mut State) -> R) -> R {
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
+        #[cfg(target_arch = "aarch64")]
+        crate::aarch64_virtio_blk::service_requests_while_waiting();
         core::hint::spin_loop();
     }
     let result = function(unsafe { &mut *STATE.state.get() });
