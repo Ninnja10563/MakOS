@@ -12,22 +12,17 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required qualification implementation baseline: a20e2c205b481a24824633fe4bb8260f4433bcbf
+Required packaging implementation baseline: f409f4925ed4fe4e1dd319cd7f33e7d0d0067d0f
 
-Verify that the checked-out `main` contains this exact baseline commit.
-Do not test an older implementation or an arbitrary future descendant. The
-only expected commits between self-host qualification baseline
-`5a49af108452983bf4809c12a2a8307582fa5955` and the required implementation
-baseline are `00d486fd7db97c213971148d477eb762375a39b0`,
-`c502eff70a158fc72063fdf7f63b7e5513319ca3`, and
-`7c906e943706ceb8ca278c2df8dd1bc92797cd96`, and
-`a20e2c205b481a24824633fe4bb8260f4433bcbf`. A later handoff commit is
-acceptable only when its diff after `a20e2c2` is documentation-only. Require
-the checked-out HEAD, local `main`, `origin/main`, and remote `main` to match;
-record that exact tested HEAD and every later documentation commit.
+Use the exact full handoff commit supplied in chat, containing this baseline;
+do not choose an arbitrary future descendant. This follows Mac-qualified
+6de93f55c121737e1b23168dec543dc68bc872a5 and adds Mozilla manifest patch0060,
+regressions and documentation only. Require checked-out HEAD, local main,
+origin/main, and remote main to match, and record the exact tested commit.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
-   docs/STATUS.md, docs/BUILD.md, and docs/INTEGRATED-DATA-IMAGE.md.
+   docs/STATUS.md, docs/BUILD.md, docs/INTEGRATED-DATA-IMAGE.md, and
+   docs/FIREFOX-PACKAGING-20260908.md.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
    average, free/used memory, swap/compressor state, and every QEMU process.
@@ -206,16 +201,25 @@ record that exact tested HEAD and every later documentation commit.
    errors. Every delayed completion, if any, must have a matching recovered
    record with the same queue and command.
 4. The historical `build/makos-integrated-a9c604254f094de2.img` predates
-   Firefox patch `0059` and is not valid for this increment. A developer build
+   Firefox patch `0060` and is not valid for this increment. The September 8
+   report qualified the earlier 59-patch release build but found Mozilla's
+   MakOS package manifest omitted plugin-container and xpcshell. Patch0060
+   adds both under the existing XP_MAKOS configure define. Preserve the prior
+   outputs and logs; never manually copy either executable into dist/firefox.
+   The changed source/patch identity requires the supported full release
+   wrapper again, even if the existing incremental cache can reuse binaries.
+   Never restamp the old 59-patch build by hand or exempt this source change.
+   A developer build
    is compile/link evidence only and cannot be packaged. With
    `MAKOS_FIREFOX_DEVELOPER_BUILD` unset, run the supported release path, never
-   a bare make/relink inside the object directory:
+   a bare make/relink inside the object directory. Preserve the previously
+   qualified source checkout and sysroots. If they are absent, prepare them
+   with the documented prerequisite commands (clone.sh, musl/build-makos.sh,
+   libcxx/build-makos.sh, rust/build-std.sh); do not discard or rebuild them
+   merely to avoid using the existing cache. With prerequisites present, run:
 
-       ports/firefox/clone.sh
-       ports/musl/build-makos.sh
-       ports/libcxx/build-makos.sh
-       ports/rust/build-std.sh
        ports/firefox/test-widget.sh
+       python3 ports/firefox/test-package-manifest.py --source-dir build/ports/firefox/source
        env -u MAKOS_FIREFOX_DEVELOPER_BUILD ports/firefox/build-makos.sh -j1
 
    Set the documented Python 3.11/3.12 and `MAKOS_*` LLVM/libclang variables
@@ -244,8 +248,8 @@ record that exact tested HEAD and every later documentation commit.
    `MAKOS_FIREFOX_BUILD_OK developer=0`. It must then create the canonical
    release build stamp for Firefox 140.13.0esr source commit
    `90ad18aabeaa9cbd63a1f749a57f266e758e50da`. The release build/package
-   markers must report 59 patches with exact ordered series SHA-256
-   `c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974`,
+   markers must report 60 patches with exact ordered series SHA-256
+   `4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe`,
    and five audited build hashes. Do not manually create, copy from another
    build, or edit the provenance record.
 
@@ -256,6 +260,10 @@ record that exact tested HEAD and every later documentation commit.
        make integrated-data-aarch64 SOURCE_DATA_IMAGE="$SOURCE_DATA_IMAGE"
 
    Require `MAKOS_FIREFOX_PACKAGE_OK` and `MAKOS_INTEGRATED_DATA_OK`. Record
+   Mozilla's successful stage-package output and both regular executable
+   paths at dist/firefox/plugin-container and dist/firefox/xpcshell. The
+   supported packager must perform its own byte-authority comparisons; do not
+   substitute a manual hash check for those gates. Record
    the new `build/makos-integrated-<identity>.img`, its matching
    `.manifest.json`, their SHA-256 values, preserved-region identities, five
    exact stripped runtime hashes, and package/image semantic identity. If any
@@ -288,7 +296,7 @@ record that exact tested HEAD and every later documentation commit.
    assertions. Do not weaken or reinterpret any of them.
 
    Before QEMU, the target must print `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the
-   pinned source, 59-patch series identity above,
+   pinned source, 60-patch series identity above,
    `artifacts=build-audited,runtime-sha256-matched`, and
    `elf=aarch64-pie,libxul
    all_five_elf=aarch64-et-dyn,interp-and-deps-by-kind`. Missing provenance,

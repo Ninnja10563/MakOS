@@ -6,20 +6,23 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-09-06. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-09-08. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification correction: the user's Apple M3/macOS 26.6.2/QEMU 11.0.3
-HVF report at `0fb7466822ad` confirms a fresh release Firefox build with all
-five artifacts and release provenance, Firefox-role SMP, and cursor runtime.
-The same report records four blockers now addressed in code through `23c0842`:
-Darwin host section syntax, CPU0 block-service progress during filesystem
-contention, application dispatch history/timer workload, and exact CPython
-3.14.7 patch replay. See [repair evidence](HVF-BLOCKERS-20260906.md).
-The Mac logs are user-reported, not locally inspected. Strict real Firefox and
-visible Mac login did not run; a fresh integrated image was blocked. No
-Partial/Missing row is upgraded. Historical developer-only release limitations
-below apply to those older artifacts, not the newer reported Mac release build.
+Current qualification: the user's Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF report
+at `6de93f55c121737e1b23168dec543dc68bc872a5` passes all four September 6
+repairs, full unit/check, CPython build/package, self-host and Native/Python
+SMP twice, Firefox-role SMP, cursor, and Firefox binary/provenance checks.
+Exact self-host header/parallel/locked-overlap proofs and zero migration drops
+passed. Integration then failed at Mozilla's missing MakOS stage-package
+children. Patch0060 adds the manifest entries; Pi Mozilla component-staging,
+package-coherence, and full unit/check regressions pass. See
+[packaging repair and qualification boundary](FIREFOX-PACKAGING-20260908.md).
+The Mac logs are user-reported, not locally inspected. The current 60-patch
+release build/provenance and integrated image require regeneration through
+supported commands before unchanged strict Firefox and visible Mac login can
+run. No Partial/Missing row is upgraded. Historical developer-only release
+limitations below apply to those older artifacts, not the reported Mac release.
 
 Current self-host implementation baseline
 `5a49af108452983bf4809c12a2a8307582fa5955` corrects full quoted-include path

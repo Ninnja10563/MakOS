@@ -1,29 +1,30 @@
 # Implementation status
 
-Last updated: 2026-09-06.
+Last updated: 2026-09-08.
 
 ## Current qualification update
 
-The user's Apple M3/macOS 26.6.2/QEMU 11.0.3 HVF run of `0fb7466822ad`
-reports a fresh release Firefox build passing ELF/binary/provenance checks
-(`developer=0`), Firefox-role SMP runtime, and the seven-position/zero-scanout
-cursor gate. Four other gates failed: Darwin freestanding host test, self-host
-CPU0 block service, Python-role automatic migration, and the CPython target
-patch. Repair code through `23c0842` and new regression coverage are described
-in [HVF blocker repair](HVF-BLOCKERS-20260906.md). No existing assertion,
-deadline, or threshold was reduced. Mac requalification remains required.
+The user's Apple M3/macOS 26.6.2/QEMU 11.0.3 HVF run of
+`6de93f55c121737e1b23168dec543dc68bc872a5` passes all four previously reported
+blockers: unit/check, CPython build/package, self-host runtime (twice), and
+Native/Python SMP runtime (twice). Firefox-role SMP, seven-position zero-scanout
+cursor, and Firefox binary/provenance checks also pass. Required 20-build,
+21-process, parallel-child, locked-overlap, exact-header, and zero-drop proofs
+passed. These Mac results are user-reported, not locally inspected.
 
-Local Pi/TCG validation passes full `make unit check`, the complete pinned
-CPython archive patch replay, and unchanged self-host, Native/Python SMP,
-Firefox-role SMP, and cursor gates. Self-hosting reaches all 20 CLI builds,
-21 processes, and parallel-child/locked-overlap proofs; Python migration is
-present. CPython target compilation stops at the Pi's absent host Python 3.14.
-Exact evidence and hashes are in the repair report. No QEMU remains running.
+Integration then failed because Mozilla's MakOS manifest omitted
+`plugin-container` and `xpcshell` from `stage-package`. Append-only patch0060
+adds both under the existing `XP_MAKOS` define; all package byte-authority,
+provenance, runtime assertions, and thresholds remain unchanged. The supported
+release wrapper must produce new 60-patch provenance before integration can
+be retried. See [packaging repair and exact evidence](FIREFOX-PACKAGING-20260908.md).
 
-This newer user-reported release-build evidence supersedes earlier statements
-that only a developer build exists. It does not prove a new integrated image
-or browser runtime: CPython blocked integration, so strict real Firefox and
-visible Mac login were not run. All applicable original-spec rows stay Partial.
+Local Pi checks pass full `make unit check`, actual Mozilla component-staging
+regressions, and adversarial package-coherence tests. No QEMU was launched for
+this packaging-only increment; no QEMU remains running. A fresh integrated
+image, strict Firefox runtime, and visible Mac login remain unqualified.
+All applicable original-spec rows stay Partial. Historical developer-only
+limitations below apply to those older artifacts, not the reported Mac release.
 
 ## Implemented
 

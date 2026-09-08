@@ -13,6 +13,24 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Firefox packaging update (2026-09-08): Mac qualification at `6de93f5` passes
+the prior CPython/self-host/SMP repairs, but integration stopped at missing
+Mozilla stage-package process executables. Patch0060 adds both under
+`XP_MAKOS`; supported packaging still enforces all five authorized artifact
+hashes. The new 60-patch series SHA-256 is
+`4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe`.
+Preserve the existing cache and rerun
+`env -u MAKOS_FIREFOX_DEVELOPER_BUILD ports/firefox/build-makos.sh -j1` to
+apply the new patch and regenerate release provenance through the supported
+build/audit path. Never copy missing executables into `dist/firefox` or restamp
+a 59-patch build manually. Then rerun
+`make integrated-data-aarch64 SOURCE_DATA_IMAGE=build/makos-data-aarch64.img`.
+Use its new content-addressed image for the unchanged idle-Mac Firefox gate.
+The [repair report](FIREFOX-PACKAGING-20260908.md) distinguishes local Mozilla
+component-staging tests from the still-required full integration/runtime;
+the [test-agent prompt](MACOS-HVF-TEST-AGENT-PROMPT.md) includes the exact
+release, runtime, and private-clone visible-login protocol.
+
 ```sh
 brew install qemu
 rustup target add x86_64-unknown-none x86_64-unknown-uefi \
@@ -337,6 +355,9 @@ whole host capture harness, also cross-compiles that harness to ARM64 Mach-O
 without a macOS SDK, and asserts production ELF `_start` section placement.
 For the accompanying block-service and application-balancing repairs and the
 unchanged Mac rerun sequence, see [HVF blocker repair](HVF-BLOCKERS-20260906.md).
+The user's subsequent `6de93f5` Mac report passes those repairs; the remaining
+integration blocker and new release identity are tracked in
+[the September 8 packaging report](FIREFOX-PACKAGING-20260908.md).
 
 After login, `selfhost-aarch64` runs the deterministic guest-native
 compiler/assembler/static-linker gate. Its fixture mode writes an A64 startup to

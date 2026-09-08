@@ -27,7 +27,36 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-09-06 HVF blocker repair (takes precedence over historical notes below)
+### 2026-09-08 Firefox packaging repair (current handoff)
+
+The user reports `6de93f55c121737e1b23168dec543dc68bc872a5` passed all four
+September 6 repairs on Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF, including
+self-host and Native/Python SMP twice, CPython build/package, full unit/check,
+Firefox-role SMP, cursor, and Firefox binary/provenance checks. The fresh
+integration command then failed because Mozilla's MakOS `stage-package`
+manifest omitted `plugin-container` and `xpcshell`. No fresh integrated image,
+strict real Firefox, or visible login was qualified. No manual copying occurred.
+
+Append-only patch0060 (implementation `f409f49`) adds both executables under
+the existing `XP_MAKOS` define. The new 60-patch series SHA-256 is
+`4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe`.
+The old 59-patch identity must be rejected; regenerate release provenance only
+through the supported `build-makos.sh` with developer mode unset. Preserve
+existing source/output caches and never manually copy or restamp the children.
+
+Pi full `make unit check`, Mozilla configure/preprocessor/component-staging
+regressions, and existing package-coherence adversarial tests pass. No current
+release build/integration/browser runtime was attempted on the Pi, whose
+canonical release outputs and integration prerequisites are absent. No QEMU
+was launched; none remains. See [exact report and logs](FIREFOX-PACKAGING-20260908.md)
+and [the Mac testing-agent prompt](MACOS-HVF-TEST-AGENT-PROMPT.md). Next priority
+is the supported release/integration rerun, unchanged idle-Mac strict Firefox
+gate, then sole visible login from private clones with PID/session/data/QMP
+recorded. No runtime threshold or assertion changed. Preserve the distinction
+between user-reported Mac results and locally executed Pi checks; do not claim
+full OS completion while audit rows remain Partial/Missing.
+
+### Historical 2026-09-06 HVF blocker repair
 
 The user tested `0fb7466822ad7c78e0a4e6ceabbb41fd227176b0` on Apple M3,
 macOS 26.6.2, QEMU 11.0.3/HVF. They report a fresh **release** Firefox build

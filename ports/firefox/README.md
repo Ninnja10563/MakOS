@@ -35,13 +35,28 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
-The latest release build reached the final `libxul.so` link before exposing a
-Rust `errno` 0.3.8 target-selection defect: its unknown-Unix fallback requested
+The September 8 user report qualifies the 59-patch release build's binary and
+provenance checks on macOS at MakOS `6de93f5`. Integration then stopped because
+Mozilla's MakOS manifest omitted `plugin-container` and `xpcshell` from
+`stage-package`, although both stamped `dist/bin` inputs existed. Patch `0060`
+adds both under the existing target `XP_MAKOS` define, using the normal flat
+Unix package layout. No host-copy workaround or package/provenance exemption
+is introduced. The ordered 60-patch SHA-256 is
+`4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe`.
+Rerun the supported release wrapper with developer mode unset before
+integration; it must regenerate current provenance, even if it reuses cached
+binary outputs. Do not manually copy files into `dist/firefox` or restamp an
+old build. Fresh full-package and strict idle-macOS/HVF browser qualification
+remain pending; see [the repair report](../../docs/FIREFOX-PACKAGING-20260908.md).
+
+The preceding release build exposed a Rust `errno` 0.3.8 target-selection
+defect at the final `libxul.so` link: its unknown-Unix fallback requested
 `errno_location`, but MakOS's upstream-musl libc correctly exports the
 thread-local `__errno_location`. The staged checksum-safe errno crate now
 selects the real musl accessor for MakOS. Focused source/Cargo staging and exact
-AArch64 object/runtime-libc symbol checks pass; a fresh complete link, package,
-and guest runtime are still pending. Patch `0059` carries the Cargo routing so
+AArch64 object/runtime-libc symbol checks pass, followed by the reported Mac
+release build above. Package and current guest runtime qualification remain
+pending. Patch `0059` carries the Cargo routing so
 the independent print-settings patch remains `0058` in the combined series.
 
 Ordered patches recognize MakOS without Linux masquerading; add
@@ -53,7 +68,8 @@ Unix/pthreads code, never Linux platform identity. `test-widget.sh` and
 `test-nspr.sh` compile focused slices independently. Source patches now bridge
 retained-window pixels, pointer/button/wheel/resize/close events, ASCII/navigation keys,
 accelerator shortcuts, and per-user MakOS plain-text clipboard data. These
-latest widget changes await constrained compile/guest verification. IME,
+latest widget changes have release compile evidence; current guest qualification
+remains pending. IME,
 accessibility, GPU acceleration, audio, and production multiprocess compositor
 integration remain target runtime work.
 
@@ -62,8 +78,21 @@ generic printer code when `NS_PRINTING` is enabled. MakOS uses Gecko's complete
 platform-neutral settings with PDF output and a real default PDF filename; it
 does not invent a native printer, driver, or printer-service ABI. The focused
 AArch64/MakOS object compile defines the exact hidden factory symbol required
-by `Unified_cpp_widget3.o`. A fresh full `libxul.so` link, package, and guest
-print-preview/PDF runtime proof remain pending.
+by `Unified_cpp_widget3.o`, and the reported full release link passes.
+Guest print-preview/PDF runtime proof remains pending.
+
+`test-package-manifest.py` is included in unit/check and port tests. With a
+local source checkout it reads the full pinned upstream manifest, applies
+patch0060 in a temporary directory, uses Mozilla's configure/preprocessor and
+flat/omni staging code for the `[xpcom]` component, verifies exact fixture
+bytes/executable modes, rejects either missing child, and checks unchanged
+Linux/macOS/Windows manifest output. It does not build a full Gecko package.
+Without source it explicitly reports structural-only coverage. Require the
+Mozilla checks without modifying the source checkout with:
+
+```sh
+python3 ports/firefox/test-package-manifest.py --source-dir build/ports/firefox/source
+```
 
 `test-print-settings.py` reports structural-only coverage explicitly by
 default. To reproduce the object/symbol evidence against an existing generated
@@ -172,9 +201,11 @@ executes basic runtime `dlopen`/`dlsym`/call/`dlclose`. It still lacks full
 recursive/TLS/versioned relocation coverage, general process launch, scalable
 file-backed/shared VM, and remaining pthread,
 signal, socket, profile-storage, compositor, audio, and sandbox contracts.
-Mozilla's `stage-package` emits a real 28-file runtime tree. `package-makos.sh`
-replaces the 2.1 GiB debug `libxul.so` with the audited 191 MiB stripped ELF,
-then writes and fully CRC-verifies a 344 MiB sector-backed package image.
+Historical Mozilla staging produced a 28-file runtime tree and packaging used
+a 191 MiB stripped `libxul.so` in a 344 MiB sector-backed image. Those old
+sizes are not current qualification. The current release path requires all
+five provenance-authorized artifacts, including both executables newly added
+to the manifest by patch0060; its full package awaits Mac requalification.
 The full build writes a canonical provenance stamp only after the binary audit.
 Packaging rechecks its pinned source HEAD, exact applied-patch-series marker,
 and exact patched tracked tree. The tree is reconstructed from the pinned

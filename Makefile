@@ -240,6 +240,7 @@ unit:
 	python3 scripts/test_firefox_provenance.py
 	python3 scripts/test_firefox_errno.py
 	python3 ports/firefox/test-print-settings.py
+	python3 ports/firefox/test-package-manifest.py
 	python3 scripts/test_firefox_objdir.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
 	ports/firefox/test-toolchain.sh
@@ -304,6 +305,7 @@ check:
 	python3 scripts/test_firefox_provenance.py
 	python3 scripts/test_firefox_errno.py
 	python3 ports/firefox/test-print-settings.py
+	python3 ports/firefox/test-package-manifest.py
 	python3 scripts/test_firefox_objdir.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
 	ports/firefox/test-toolchain.sh

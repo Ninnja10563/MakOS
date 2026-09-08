@@ -15,6 +15,7 @@ do
 done
 "$port_dir/test-host-tools.sh" >/dev/null
 python3 "$port_dir/test-print-settings.py"
+python3 "$port_dir/test-package-manifest.py"
 "$port_dir/audit.sh" >/dev/null
 "$port_dir/toolchain-audit.sh" | \
     grep -Eq '^MAKOS_FIREFOX_TOOLCHAIN_(OK|BLOCKED) '
