@@ -1,0 +1,25 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] installer: stage MakOS process and JavaScript executables
+
+MakOS uses the Unix flat application directory, not a macOS application
+bundle. Include both required executables in Mozilla's package manifest so
+stage-package carries the same plugin-container and xpcshell bytes that the
+release build stamp authorizes. Other platforms retain their package lists.
+
+XP_MAKOS is provided by the target configure check and reaches the package
+preprocessor through the installer's existing ACDEFINES argument.
+
+diff --git a/browser/installer/package-manifest.in b/browser/installer/package-manifest.in
+--- a/browser/installer/package-manifest.in
++++ b/browser/installer/package-manifest.in
+@@ -86,6 +86,10 @@
+ @BINPATH@/@MOZ_CHILD_PROCESS_NAME@.app/
+ @BINPATH@/@MOZ_EME_PROCESS_NAME@.app/
+ #endif
++#ifdef XP_MAKOS
++@BINPATH@/@MOZ_CHILD_PROCESS_NAME@
++@BINPATH@/xpcshell
++#endif
+ #ifdef XP_WIN
+ @BINPATH@/@MOZ_CHILD_PROCESS_NAME@
+ #if MOZ_PACKAGE_MSVC_DLLS
