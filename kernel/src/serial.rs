@@ -30,11 +30,26 @@ pub fn print(args: fmt::Arguments<'_>) {
 }
 
 pub fn write_bytes(bytes: &[u8]) {
+    write_output_bytes(bytes, false);
+}
+
+/// Keep a complete TTY write, including ONLCR expansion, under one serial
+/// guard. Graphics rendering must happen after this function releases it.
+pub fn write_tty_bytes(bytes: &[u8], output_crlf: bool) {
+    write_output_bytes(bytes, output_crlf);
+}
+
+fn write_output_bytes(bytes: &[u8], output_crlf: bool) {
     #[cfg(target_arch = "aarch64")]
     let _guard = SerialGuard::acquire();
     let mut serial = Serial;
     for &byte in bytes {
         if byte == b'\n' {
+            // Preserve the existing TTY ONLCR followed by serial LF expansion.
+            // This deliberately does not change either layer's byte policy.
+            if output_crlf {
+                serial.write_byte(b'\r');
+            }
             serial.write_byte(b'\r');
         }
         serial.write_byte(byte);

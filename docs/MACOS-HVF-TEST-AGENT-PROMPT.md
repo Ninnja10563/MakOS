@@ -12,20 +12,21 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 1b243548b937aaf8498581c1d7baf2a8eea5ab94
+Previous exact Mac-tested baseline: 799354fd96a9a7db999acaafd05ea485fb5693b0
 
-Use the exact full EL0-entry repair commit supplied in chat, descending from
+Use the exact full EL0-evidence atomicity repair commit supplied in chat, descending from
 this baseline; do not test the baseline again or choose an arbitrary future
-descendant. The repair covers selected-root executable PC validation,
-clear-child-TID cross-CPU notification, futex compare/enqueue serialization,
-and dynamic-musl regression coverage;
+descendant. This repair makes guest result emission a bounded single write
+and serializes its complete TTY output including the line ending. It retains
+the preceding executable-context and futex repairs, with an unchanged parser;
 Firefox patches remain at the qualified
 60-patch identity. Require checked-out HEAD, local main, origin/main, and
 remote main to match, and record the exact tested commit.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, docs/INTEGRATED-DATA-IMAGE.md, and
-   docs/FIREFOX-PACKAGING-20260908.md and docs/FIREFOX-EL0-ENTRY-20260910.md.
+   docs/FIREFOX-PACKAGING-20260908.md, docs/FIREFOX-EL0-ENTRY-20260910.md,
+   and docs/EL0-EVIDENCE-ATOMICITY-20260911.md.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
    average, free/used memory, swap/compressor state, and every QEMU process.
@@ -54,6 +55,9 @@ remote main to match, and record the exact tested commit.
    a common nonzero aligned root and next-page PC with
    `proof=validated-before-eret`, three status-42 joins, and the
    ordinary status-42 dynamic-process reap. Require unchanged boot hashes.
+   The result must be one contiguous record including its terminating line
+   ending; preserve the raw serial bytes. Never join fragments around kernel
+   diagnostics or suppress those diagnostics to satisfy the existing parser.
    Preserve its printed session directory, session.json/PID/inherited QMP fd,
    private boot/data/vars, and serial.log on success or failure. This fixture
    is not Firefox and cannot replace its unchanged strict gate.

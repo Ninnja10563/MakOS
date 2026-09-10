@@ -1,8 +1,27 @@
 # Implementation status
 
-Last updated: 2026-09-10.
+Last updated: 2026-09-11.
 
 ## Current qualification update
+
+The latest user-reported Mac/HVF run at
+`799354fd96a9a7db999acaafd05ea485fb5693b0` passes unit/check and image build
+but fails the EL0 evidence parser: kernel exit diagnostics split the guest's
+result marker. Three validated AP entries and status-42 reap were present,
+with no fatal/rejection; the gate nevertheless failed. All later runtimes,
+Firefox preflight/runtime and visible login were not run. The producer/TTY
+serial-boundary repair keeps the parser and all gates unchanged; see
+[the atomicity report](EL0-EVIDENCE-ATOMICITY-20260911.md).
+
+For this repair, local Pi/TCG passes full unit/check and image build, the
+unchanged EL0 gate twice with intact raw records, self-host (20 CLI builds,
+21 processes, 29 migrations), Native/Python-role SMP, Firefox-role input/SMP
+and cursor (seven positions, zero changed pixels/errors/timeouts). These are
+functional Pi results, not Mac/HVF or real-Firefox qualification. No QEMU
+remains; final visible login was not launched. Audit Partial/Missing rows
+remain unchanged.
+
+### Earlier qualification and implementation evidence
 
 The user's Apple M3 (16 GB)/macOS 26.6.2/QEMU 11.0.3/HVF report at
 `1b243548b937aaf8498581c1d7baf2a8eea5ab94` passes supported fresh Firefox

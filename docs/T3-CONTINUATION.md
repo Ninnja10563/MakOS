@@ -27,7 +27,36 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-09-10 Firefox EL0 entry repair (current handoff)
+### 2026-09-11 EL0 result emission repair (current handoff)
+
+The user reports Mac/HVF `799354fd96a9a7db999acaafd05ea485fb5693b0` passes
+unit/check and image build but fails the new EL0 gate because its result was
+split by kernel exit diagnostics after `resume=0x80001000`. All three
+validated AP entries and status-42 reap existed, without fatal/rejection, but
+the required contiguous marker was absent. Qualification remains failed;
+all later gates, real Firefox preflight/runtime and visible login were not run.
+
+The producer now formats the complete bounded result before one checked
+normal TTY write. The serial sink holds one guard through the complete TTY
+write including ONLCR conversion, then releases it before graphics rendering.
+The parser, marker, workloads, deadlines and Firefox provenance are unchanged.
+No fragment joining or timing delay is used. See [the exact Mac report and
+repair evidence](EL0-EVIDENCE-ATOMICITY-20260911.md) and the updated
+[Mac testing prompt](MACOS-HVF-TEST-AGENT-PROMPT.md). Preserve existing images,
+profiles and artifacts; Pi functional evidence never replaces Mac/HVF.
+
+Local Pi/TCG qualification passes full `make unit check`, image build, the
+unchanged EL0 gate twice (complete raw records through their line endings),
+self-host (20 CLI builds, 21 processes, 29 migrations, exact headers/parallel
+proof), Native/Python-role SMP, Firefox-role input/SMP, and cursor (seven
+positions, zero changed pixels/errors/timeouts). Both EL0 sessions retain
+private disks and raw/session evidence; prior logs/captures are archived.
+The report records hashes, PIDs, exact results and the broader harnesses'
+normal temporary-disk cleanup. No QEMU/build/test remains. Real Firefox and
+final visible login still require the sequential unchanged Mac/HVF retest;
+no audit Partial/Missing row is upgraded.
+
+### Historical 2026-09-10 Firefox EL0 entry repair
 
 Apple Silicon macOS/QEMU/HVF remains the primary interactive/performance
 qualification target. The user reports `1b243548b937aaf8498581c1d7baf2a8eea5ab94`

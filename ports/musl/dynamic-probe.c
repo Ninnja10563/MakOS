@@ -21,6 +21,25 @@ struct worker_result {
 	int (*resume_probe)(void);
 };
 
+static int emit_el0_result(const struct worker_result results[WORKERS],
+	uintptr_t thread_entry, void *code)
+{
+	char record[512];
+	int length = snprintf(record, sizeof record,
+		"MAKOS_MUSL_EL0_ENTRY_OK loader=musl threads=3 "
+		"singleton=0x2,0x4,0x8 tids=%ld,%ld,%ld pthread_create=%p "
+		"rx=%p resume=%p calls=96 statuses=42,42,42 block=sleep-until\n",
+		results[0].tid, results[1].tid, results[2].tid,
+		(void *)thread_entry, code, (char *)code + PAGE_BYTES);
+	if (length <= 0 || (size_t)length >= sizeof record)
+		return -1;
+	/* stdio/writev can split a record across native writes. Publish this
+	 * complete bounded record once; a partial/error result is a failure,
+	 * not permission to retry a suffix around another CPU's diagnostics. */
+	return write(STDOUT_FILENO, record, (size_t)length) == (ssize_t)length
+		? 0 : -1;
+}
+
 static void *dynamic_worker(void *argument)
 {
 	struct worker_result *result = argument;
@@ -115,12 +134,8 @@ int main(int argc, char **argv)
 			if (results[index].tid == results[previous].tid)
 				return 132;
 	}
-	if (printf("MAKOS_MUSL_EL0_ENTRY_OK loader=musl threads=3 "
-		"singleton=0x2,0x4,0x8 tids=%ld,%ld,%ld pthread_create=%p "
-		"rx=%p resume=%p calls=96 statuses=42,42,42 block=sleep-until\n",
-		results[0].tid, results[1].tid, results[2].tid,
-		(void *)thread_entry, (void *)code, (char *)code + PAGE_BYTES) < 0 ||
-	    fflush(stdout) || munmap(code, PAGE_BYTES * 2))
+	if (emit_el0_result(results, thread_entry, code) ||
+	    munmap(code, PAGE_BYTES * 2))
 		return 133;
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1)
 		return 122;

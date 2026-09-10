@@ -13,7 +13,14 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Firefox entry update (2026-09-10): the Mac report at `1b24354` passes the
+EL0 evidence update (2026-09-11): Mac `799354f` passes unit/check and image
+build, but kernel exit diagnostics split the guest result marker. The
+[producer/serial repair](EL0-EVIDENCE-ATOMICITY-20260911.md) formats one bounded
+record before a checked TTY write and keeps its complete serial output under
+one guard. Rebuild the boot image, then rerun the unchanged EL0 gate before
+later gates. No Firefox source/provenance rebuild is required for this change.
+
+Historical Firefox entry update (2026-09-10): the Mac report at `1b24354` passes the
 supported 60-patch release/package/integration. Real Firefox then rejected a
 valid dynamic-loader PC on AP entry before paint. The selected-root executable
 mapping repair and `make test-aarch64-el0-entry-runtime` regression are

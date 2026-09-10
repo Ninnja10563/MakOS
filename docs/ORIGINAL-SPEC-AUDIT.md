@@ -6,10 +6,20 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-09-10. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-09-11. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: the user's Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF report
+Current qualification: Mac/HVF `799354fd96a9a7db999acaafd05ea485fb5693b0`
+passes unit/check and image build, but the EL0 gate fails on a fragmented
+guest result despite validated AP execution and status-42 reap. Later gates,
+real Firefox and visible login were not run. Complete producer/TTY serial
+emission is repaired without changing the parser or gate limits; see
+[the exact report](EL0-EVIDENCE-ATOMICITY-20260911.md). No Partial/Missing row
+is upgraded by this repair. Local Pi/TCG passes full unit/check, image build,
+the unchanged EL0 gate twice, self-host, Native/Python-role SMP, Firefox-role
+input/SMP and cursor. Real Firefox and visible login await Mac/HVF retesting.
+
+Earlier qualification: the user's Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF report
 at `1b243548b937aaf8498581c1d7baf2a8eea5ab94` passes the supported 60-patch
 Firefox release/package/integration, all five artifact/provenance checks,
 unit/check, CPython build/package, self-host and Native/Python-role twice,

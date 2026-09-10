@@ -54,6 +54,10 @@ the ordinary process status-42 reap are required. Run
 against kernel affinity/CPU observations and retains private disks plus
 PID/session/QMP/serial/hash evidence. It is a loader/scheduler/VM regression,
 not real Firefox execution. See [the entry report](../../docs/FIREFOX-EL0-ENTRY-20260910.md).
+Its result is formatted into a bounded buffer before one checked normal TTY
+write. Formatting overflow or a non-full write fails without retrying a
+suffix; the TTY serial sink serializes the complete record and line ending
+against kernel diagnostics. The strict evidence parser is unchanged.
 
 ## Executable evidence
 

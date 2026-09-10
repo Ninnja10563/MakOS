@@ -266,6 +266,8 @@ unit:
 	python3 scripts/test_aarch64_smp_scheduler.py
 	python3 scripts/test_aarch64_el0_entry.py
 	python3 scripts/test_aarch64_el0_entry_runtime.py
+	python3 scripts/test_aarch64_el0_emission.py
+	python3 scripts/test_aarch64_tty_serial_atomic.py
 	python3 scripts/test_aarch64_clear_child_tid.py
 	python3 scripts/test_aarch64_futex_wait_atomic.py
 	python3 scripts/test_aarch64_block_owner.py
@@ -335,6 +337,8 @@ check:
 	python3 scripts/test_aarch64_smp_scheduler.py
 	python3 scripts/test_aarch64_el0_entry.py
 	python3 scripts/test_aarch64_el0_entry_runtime.py
+	python3 scripts/test_aarch64_el0_emission.py
+	python3 scripts/test_aarch64_tty_serial_atomic.py
 	python3 scripts/test_aarch64_clear_child_tid.py
 	python3 scripts/test_aarch64_futex_wait_atomic.py
 	python3 scripts/test_aarch64_block_owner.py

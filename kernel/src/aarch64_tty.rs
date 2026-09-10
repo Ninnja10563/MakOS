@@ -420,6 +420,14 @@ impl ByteSink for TerminalSink {
     }
 }
 
+struct TerminalDisplaySink;
+
+impl ByteSink for TerminalDisplaySink {
+    fn write(&mut self, bytes: &[u8]) {
+        crate::graphics::terminal_write(bytes);
+    }
+}
+
 pub enum Delivery {
     None,
     Handler,
@@ -612,7 +620,11 @@ pub fn write(fd: u64, bytes: &[u8]) -> Result<usize, Errno> {
         if !matches!(fd, 1 | 2) || !state.fd_open(pid, fd) {
             return Err(Errno::BadFileDescriptor);
         }
-        let mut sink = TerminalSink;
+        // Serial takes one lock across the entire translated write, rather
+        // than releasing it between the line body and ONLCR's line ending.
+        // Do not retain the serial lock while graphics can log diagnostics.
+        crate::serial::write_tty_bytes(bytes, state.line.termios().output_crlf);
+        let mut sink = TerminalDisplaySink;
         state.line.write_output(bytes, &mut sink);
         Ok(bytes.len())
     })
