@@ -93,6 +93,9 @@ static IRQ_ENTRIES: AtomicU64 = AtomicU64::new(0);
 static KERNEL_ROOT: AtomicU64 = AtomicU64::new(0);
 static ACTIVE_USER_ROOTS: [AtomicU64; MAX_AARCH64_CPUS] =
     [const { AtomicU64::new(0) }; MAX_AARCH64_CPUS];
+// Bounded evidence: at most one validated high-code page-boundary EL0 re-entry
+// per AP per boot. This is outer dispatch, not an exception's direct ERET.
+static HIGH_USER_ENTRY_REPORTED_MASK: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_OPEN_TRACES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_READDIR_TRACES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_MISSING_SYSCALL_TRACES: AtomicU64 = AtomicU64::new(0);
@@ -1162,19 +1165,31 @@ pub fn switch_address_space(root: u64) {
     ACTIVE_USER_ROOTS[cpu_index()].store(target, Ordering::Release);
 }
 
-pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
+fn user_context_entry_valid(context: &UserContext, active_root: u64) -> bool {
     const USER_SPSR_ALLOWED: u64 = 0xf000_0000;
+    // USER_IMAGE_LIMIT constrains initial ELF placement, not a saved PC:
+    // pthread clone/return can be in the interpreter, a DSO, or JIT text.
+    // Validate the selected address space before walking either PC or stack.
+    active_root != 0
+        && context.ttbr0 == active_root
+        && user_instruction_pointer_valid_in(context.ttbr0, context.elr)
+        && (matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
+            || user_stack_pointer_valid_in(context.ttbr0, context.sp_el0))
+        && context.spsr & !USER_SPSR_ALLOWED == 0
+}
+
+pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
     let active_root = cached_active_root();
-    let stack_valid = matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
-        || user_stack_pointer_valid_in(context.ttbr0, context.sp_el0);
-    if active_root == 0
-        || context.ttbr0 != active_root
-        || !(USER_ADDRESS_BASE..USER_IMAGE_LIMIT).contains(&context.elr)
-        || !stack_valid
-        || context.spsr & !USER_SPSR_ALLOWED != 0
-    {
+    if !user_context_entry_valid(context, active_root) {
+        let root_valid = active_root != 0
+            && context.ttbr0 == active_root
+            && context.ttbr0 != kernel_root()
+            && context.ttbr0 & (PAGE_SIZE - 1) == 0;
+        let stack_valid = root_valid
+            && (matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
+                || user_stack_pointer_valid_in(context.ttbr0, context.sp_el0));
         crate::serial_println!(
-            "AArch64 EL0 entry rejected cpu={} active_root={:#x} context_root={:#x} elr={:#x} sp={:#x} stack_valid={} spsr={:#x}",
+            "AArch64 EL0 entry rejected cpu={} active_root={:#x} context_root={:#x} elr={:#x} sp={:#x} stack_valid={} spsr={:#x} instruction_mapping={:?}",
             cpu_index(),
             active_root,
             context.ttbr0,
@@ -1182,8 +1197,28 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
             context.sp_el0,
             u8::from(stack_valid),
             context.spsr,
+            if root_valid {
+                user_instruction_mapping_in(context.ttbr0, context.elr)
+            } else {
+                UserInstructionMapping::Denied
+            },
         );
         crate::fatal("AArch64 EL0 entry precondition failed");
+    }
+    if cpu_index() != 0
+        && context.elr >= USER_MMAP_BASE
+        && context.elr & (PAGE_SIZE - 1) == 0
+        && HIGH_USER_ENTRY_REPORTED_MASK.fetch_or(1 << cpu_index(), Ordering::AcqRel)
+            & (1 << cpu_index())
+            == 0
+    {
+        crate::serial_println!(
+            "MAKOS_AARCH64_HIGH_EL0_ENTRY_OK cpu={} tid={} root={:#x} pc={:#x} proof=validated-before-eret",
+            cpu_index(),
+            crate::aarch64_process::current_tid(),
+            context.ttbr0,
+            context.elr,
+        );
     }
     start_scheduler_timer();
     // Keep EL1 IRQs masked across the assembly restore. The target SPSR
@@ -1379,20 +1414,82 @@ pub(crate) fn user_range_writable(address: u64, length: usize) -> bool {
 }
 
 pub fn user_address_executable(address: u64) -> bool {
-    let root = cached_active_root();
-    if root == 0 || address & 3 != 0 || !(USER_ADDRESS_BASE..USER_ADDRESS_LIMIT).contains(&address)
+    user_address_executable_in(cached_active_root(), address)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UserInstructionMapping {
+    Executable,
+    Absent,
+    Denied,
+}
+
+fn user_instruction_mapping_in(root: u64, address: u64) -> UserInstructionMapping {
+    if root == 0
+        || root == kernel_root()
+        || root & (PAGE_SIZE - 1) != 0
+        || address & 3 != 0
+        || !(USER_ADDRESS_BASE..USER_ADDRESS_LIMIT).contains(&address)
     {
-        return false;
+        return UserInstructionMapping::Denied;
     }
-    let Some(slot) = user_page_slot(root, address & !(PAGE_SIZE - 1)) else {
-        return false;
-    };
-    let entry = unsafe { slot.read_volatile() };
-    entry & 0b11 == TABLE_DESCRIPTOR && entry & (1 << 6) != 0 && entry & UXN == 0
+    // Distinguish a genuinely absent translation (eligible for lazy RX VMA
+    // validation) from a privileged block, malformed descriptor, or table
+    // execute/access restriction. Leaf UXN alone cannot override the latter.
+    let mut table = root;
+    for shift in [39, 30, 21] {
+        let index = ((address >> shift) & 511) as usize;
+        let entry = unsafe { (table as *const u64).add(index).read_volatile() };
+        if entry == 0 {
+            return UserInstructionMapping::Absent;
+        }
+        const UXN_TABLE: u64 = 1 << 60;
+        const AP_TABLE_NO_EL0: u64 = 1 << 61;
+        if entry & 0b11 != TABLE_DESCRIPTOR
+            || entry & (UXN_TABLE | AP_TABLE_NO_EL0) != 0
+            || entry & ADDRESS_MASK == 0
+        {
+            return UserInstructionMapping::Denied;
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    let index = ((address >> 12) & 511) as usize;
+    let entry = unsafe { (table as *const u64).add(index).read_volatile() };
+    if entry == 0 {
+        UserInstructionMapping::Absent
+    } else if entry & 0b11 == TABLE_DESCRIPTOR
+        && entry & (0b11 << 6) == AP_USER_RO
+        && entry & ACCESS_FLAG != 0
+        && entry & PXN != 0
+        && entry & UXN == 0
+    {
+        UserInstructionMapping::Executable
+    } else {
+        UserInstructionMapping::Denied
+    }
+}
+
+fn user_address_executable_in(root: u64, address: u64) -> bool {
+    // Keep signal-handler validation non-faulting and free of VM locks.
+    user_instruction_mapping_in(root, address) == UserInstructionMapping::Executable
+}
+
+fn user_instruction_pointer_valid_in(root: u64, address: u64) -> bool {
+    match user_instruction_mapping_in(root, address) {
+        UserInstructionMapping::Executable => true,
+        // A saved post-SVC PC can cross into an untouched executable page;
+        // madvise may also discard code while retaining its RX reservation.
+        // Do not page in or perform I/O here. Normal EL0 instruction faults
+        // enforce/populate the same VMA after ERET. Never use metadata to
+        // override a resident non-executable or invalid translation.
+        UserInstructionMapping::Absent => crate::aarch64_vm::executable_region_in(root, address),
+        UserInstructionMapping::Denied => false,
+    }
 }
 
 fn user_page_slot(root: u64, virtual_address: u64) -> Option<*mut u64> {
-    if root == kernel_root()
+    if root == 0
+        || root == kernel_root()
         || root & (PAGE_SIZE - 1) != 0
         || virtual_address & (PAGE_SIZE - 1) != 0
         || !(USER_ADDRESS_BASE..USER_ADDRESS_LIMIT).contains(&virtual_address)

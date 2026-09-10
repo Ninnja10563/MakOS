@@ -2941,6 +2941,12 @@ def main() -> int:
                     selector,
                     process,
                     output,
+                    b"MAKOS_MUSL_EL0_ENTRY_OK loader=musl threads=3 singleton=0x2,0x4,0x8",
+                )
+                wait_for_output(
+                    selector,
+                    process,
+                    output,
                     b"MAKOS_MUSL_DYNAMIC_REAP_OK status=42 lifecycle=spawn,interp,needed-libc,relocate,main,exit,wait,reap",
                 )
                 send_command(stream, "musl-dso")

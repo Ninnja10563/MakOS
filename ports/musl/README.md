@@ -45,6 +45,16 @@ and positional reads are no longer capped at MakFS's 2 KiB mutable-file size.
 It then `dlclose`s successfully. Large dependency counts, recursive/versioned/TLS DSO
 suites, writable/shared mappings, demand paging, and unload stress remain.
 
+The `musl-shared` dynamic-libc PIE also regresses AArch64 EL0 entry outside
+the main-image placement interval: real `pthread_create` in the loaded musl
+interpreter creates three children on AP1/AP2/AP3, each executing 32 high mmap
+RW-to-RX syscall/page-boundary resumes and returning 42. All three joins and
+the ordinary process status-42 reap are required. Run
+`make test-aarch64-el0-entry-runtime`; its focused harness validates exact TIDs
+against kernel affinity/CPU observations and retains private disks plus
+PID/session/QMP/serial/hash evidence. It is a loader/scheduler/VM regression,
+not real Firefox execution. See [the entry report](../../docs/FIREFOX-EL0-ENTRY-20260910.md).
+
 ## Executable evidence
 
 `build-makos.sh` performs a fresh upstream configure for

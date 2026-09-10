@@ -1,30 +1,36 @@
 # Implementation status
 
-Last updated: 2026-09-08.
+Last updated: 2026-09-10.
 
 ## Current qualification update
 
-The user's Apple M3/macOS 26.6.2/QEMU 11.0.3 HVF run of
-`6de93f55c121737e1b23168dec543dc68bc872a5` passes all four previously reported
-blockers: unit/check, CPython build/package, self-host runtime (twice), and
-Native/Python SMP runtime (twice). Firefox-role SMP, seven-position zero-scanout
-cursor, and Firefox binary/provenance checks also pass. Required 20-build,
-21-process, parallel-child, locked-overlap, exact-header, and zero-drop proofs
-passed. These Mac results are user-reported, not locally inspected.
+The user's Apple M3 (16 GB)/macOS 26.6.2/QEMU 11.0.3/HVF report at
+`1b243548b937aaf8498581c1d7baf2a8eea5ab94` passes supported fresh Firefox
+release/package/integration with all five artifacts and 60-patch provenance.
+The missing stage-package children are fixed and Mac-qualified. Unit/check,
+CPython build/package, self-host twice, Native/Python-role twice, Firefox-role
+input/SMP, and seven-position zero-scanout cursor also pass. Required exact
+self-host/header/parallel/overlap and zero-drop proofs pass. These Mac results
+are user-reported, not locally inspected.
 
-Integration then failed because Mozilla's MakOS manifest omitted
-`plugin-container` and `xpcshell` from `stage-package`. Append-only patch0060
-adds both under the existing `XP_MAKOS` define; all package byte-authority,
-provenance, runtime assertions, and thresholds remain unchanged. The supported
-release wrapper must produce new 60-patch provenance before integration can
-be retried. See [packaging repair and exact evidence](FIREFOX-PACKAGING-20260908.md).
+Real Firefox passed image preflight but hit a kernel fatal before paint:
+AP1/AP2 saved PC `0x280adc14` is in the valid musl loader, outside the
+main-ELF range incorrectly used by EL0 entry validation. There are no latency
+results. The repair replaces that address-window check with selected-root
+executable page/VMA validation, retaining isolation, W^X, stack, SPSR and
+IRQ-restore protections. See [EL0 entry report](FIREFOX-EL0-ENTRY-20260910.md)
+for exact Mac image/log identities, regression scope, and local validation.
+Genuine pthread regression also exposed exit/futex wake races: clear-child-TID
+now notifies idle CPUs after unlocked publication, and wait compares/enqueues
+under the wake lock. All four new host suites pass (44 cases plus three
+negative controls). Final Pi runtime results and the preserved boot-balance
+failure are recorded in that report, separately from Mac qualification.
 
-Local Pi checks pass full `make unit check`, actual Mozilla component-staging
-regressions, and adversarial package-coherence tests. No QEMU was launched for
-this packaging-only increment; no QEMU remains running. A fresh integrated
-image, strict Firefox runtime, and visible Mac login remain unqualified.
-All applicable original-spec rows stay Partial. Historical developer-only
-limitations below apply to those older artifacts, not the reported Mac release.
+Firefox source/provenance and all strict gate thresholds remain unchanged.
+The qualified integrated image can be reused after hash/provenance preflight;
+the repaired kernel requires a new boot image. Strict real Firefox and final
+visible Mac login remain unqualified. All applicable original-spec rows stay
+Partial. Historical limitations below describe their dated artifacts.
 
 ## Implemented
 

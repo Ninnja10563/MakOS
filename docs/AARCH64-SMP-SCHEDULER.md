@@ -1,5 +1,49 @@
 # AArch64 multicore userspace scheduler design
 
+## Saved EL0 instruction validation
+
+The initial main-image placement interval is not the valid resumed-PC range.
+Musl's interpreter is mapped at `0x28000000`, and DSOs/JIT text can occupy the
+higher mmap arena. `enter_user_context` validates the selected root's mapping
+before restoring registers: matching nonzero active/context root, aligned
+four-byte user PC, read-only EL0 executable page with AF/PXN and no UXN, and
+no parent table restriction denying EL0 access/execution. Root alignment and
+non-kernel identity are required before walking tables. Stack/SPSR checks and
+the IRQ-masked assembly restore remain unchanged.
+
+An absent translation is distinguished from a denied resident or malformed
+descriptor. Only a live process's RX VMA in that exact root can authorize an
+absent PC; the ordinary instruction fault later populates it. This handles
+post-SVC page crossing and discarded executable pages without scheduler-side
+I/O. The metadata lookup takes the VM lock after the caller releases the
+scheduler lock; it never faults, allocates, or acquires the scheduler lock.
+Signal-handler executable validation remains resident-only and does not take
+the VM lock under the TTY lock. Concurrent mapping changes remain subject to
+the hardware's permissions and ordinary fault path after ERET.
+
+`make test-aarch64-el0-entry-runtime` boots a fresh private guest and runs the
+genuinely dynamic `musl-shared` pthread probe. Three affinity-bound workers
+block in high RX code and resume at the next page through outer dispatch.
+The first validated high page-boundary entry on each AP emits a bounded
+CPU/TID/root/PC record; these are matched to all three workers and their exact
+shared mapping before accepting 96 completed calls, status-42 joins and reap.
+Because those records are once per AP per boot, use the focused fresh-guest
+target for qualification, not a second invocation in the same guest. This is
+dynamic-loader/scheduler/VM evidence, not a real-Firefox latency pass. See
+[the Mac failure and repair report](FIREFOX-EL0-ENTRY-20260910.md).
+
+Thread-exit clear-child-TID cleanup must notify idle CPUs after waking futex
+waiters, just as ordinary futex wake and robust-owner cleanup do. Musl uses
+this mechanism to release its thread-list lock; other exiting/joining threads
+may be pinned to idle APs. The cleared word and Ready states are published
+before the scheduler lock is released and the existing SGI/SEV notification
+is sent. No notification is needed when zero waiters woke. Host ordering and
+missing-notification negative-control tests cover this path.
+Futex wait's word comparison and waiter registration share the scheduler lock
+with wake. Sampling before acquiring that lock permits clear-child-TID to
+clear/wake an empty queue and then miss a waiter enqueued from the stale
+sample. A changed word instead returns the existing `EAGAIN` without blocking.
+
 ## Current verified boundary
 
 QEMU `virt` starts four PEs through PSCI `CPU_ON_64`. Every PE has a

@@ -561,6 +561,25 @@ pub fn map_anonymous_fixed(pid: u64, base: u64, length: u64, protection: u64) ->
     })
 }
 
+/// Authorize only an absent instruction translation in this exact process
+/// root. No allocation, device I/O, or scheduler-lock acquisition is allowed
+/// here; the ordinary EL0 instruction fault performs demand population later.
+pub(crate) fn executable_region_in(root: u64, address: u64) -> bool {
+    with_state(|state| {
+        let Some(process) = state
+            .processes
+            .iter()
+            .find(|process| process.pid != 0 && process.root == root)
+        else {
+            return false;
+        };
+        state
+            .regions
+            .find(process.pid, address, PAGE_SIZE)
+            .is_some_and(|region| u64::from(region.protection) == (PROT_READ | PROT_EXEC))
+    })
+}
+
 pub fn handle_page_fault(pid: u64, address: u64, write: bool, execute: bool) -> bool {
     let page = address & !(PAGE_SIZE - 1);
     let Some((root, protection, backing)) = with_state(|state| {

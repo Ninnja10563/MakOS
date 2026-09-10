@@ -6,22 +6,24 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-09-08. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-09-10. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: the user's Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF report
-at `6de93f55c121737e1b23168dec543dc68bc872a5` passes all four September 6
-repairs, full unit/check, CPython build/package, self-host and Native/Python
-SMP twice, Firefox-role SMP, cursor, and Firefox binary/provenance checks.
-Exact self-host header/parallel/locked-overlap proofs and zero migration drops
-passed. Integration then failed at Mozilla's missing MakOS stage-package
-children. Patch0060 adds the manifest entries; Pi Mozilla component-staging,
-package-coherence, and full unit/check regressions pass. See
-[packaging repair and qualification boundary](FIREFOX-PACKAGING-20260908.md).
-The Mac logs are user-reported, not locally inspected. The current 60-patch
-release build/provenance and integrated image require regeneration through
-supported commands before unchanged strict Firefox and visible Mac login can
-run. No Partial/Missing row is upgraded. Historical developer-only release
+at `1b243548b937aaf8498581c1d7baf2a8eea5ab94` passes the supported 60-patch
+Firefox release/package/integration, all five artifact/provenance checks,
+unit/check, CPython build/package, self-host and Native/Python-role twice,
+Firefox-role SMP/input, and cursor. Exact self-host header/parallel/locked
+overlap proofs and zero migration drops passed. These Mac logs are
+user-reported, not locally inspected.
+
+Real Firefox passed preflight but fatally rejected valid loader PC `0x280adc14`
+on AP1/AP2 before paint. Selected-root executable page/VMA validation replaces
+the erroneous main-image-only entry check, with new hostile mapping/context
+and dynamic-musl AP regressions. See [EL0 entry repair](FIREFOX-EL0-ENTRY-20260910.md).
+Strict Firefox latency and final visible login are still unqualified; the
+unchanged integrated image needs preflight plus a repaired boot image, not a
+Firefox provenance exemption. No Partial/Missing row is upgraded. Historical
 limitations below apply to those older artifacts, not the reported Mac release.
 
 Current self-host implementation baseline

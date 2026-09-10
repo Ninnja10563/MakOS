@@ -27,7 +27,53 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-09-08 Firefox packaging repair (current handoff)
+### 2026-09-10 Firefox EL0 entry repair (current handoff)
+
+Apple Silicon macOS/QEMU/HVF remains the primary interactive/performance
+qualification target. The user reports `1b243548b937aaf8498581c1d7baf2a8eea5ab94`
+passed fresh release Firefox build/package/integration (all five artifacts,
+60 patches), CPython, unit/check, self-host twice, Native/Python-role twice,
+Firefox-role input/SMP and cursor. The manifest omission is Mac-qualified.
+Real Firefox passed image preflight but fatally rejected AP1/AP2 loader PC
+`0x280adc14` before paint; there are no input/Ctrl-A latency results.
+
+The kernel now validates the selected root's full-range executable mapping,
+not the initial main-image placement interval. Valid RO/EL0/PXN/!UXN pages
+qualify; invalid/resident NX/writable/privileged mappings do not. Only genuinely
+absent translations may use the same live process root's RX VMA, leaving
+population to the normal instruction fault. Root, stack, SPSR and IRQ-restore
+guards remain. New host and dynamic-musl AP/high-RX runtime regressions cover
+this path; the static Firefox-role fixture never constituted real Firefox.
+The new genuine pthread regression also exposed missing cross-CPU notification
+after clear-child-TID futex wake during exit. Cleanup now notifies idle CPUs
+after the cleared word/Ready states are published and the scheduler lock is
+released; ordinary futex wake semantics and deadlines remain unchanged.
+Futex wait now samples the expected word inside its scheduler-locked enqueue
+operation, preventing a concurrent clear/wake from preceding a stale enqueue.
+
+Final-kernel Pi/TCG runs pass dynamic-musl AP/RX execution, Native/Python SMP,
+Firefox-role input/SMP, self-host (20 CLI builds, 21 processes, 30 migrations,
+zero drops), and cursor (seven positions, zero changed pixels/errors/timeouts).
+One earlier cursor attempt failed the unchanged boot load-balancing ratio;
+the failure and unchanged successful rerun are both retained in the report.
+The four added host suites cover 44 cases and three reproducing negative
+controls. These results do not qualify real Firefox on Mac/HVF.
+Final full `make unit check` also passes; no QEMU/test process remains. The
+report records final boot/kernel and source-check log hashes. Build logs and
+private guest disks are retained locally, not committed as repository source.
+
+No Firefox source/patch/provenance/threshold change is needed. Retain the
+qualified `build/makos-integrated-c23395ff4644b183.img`, require its hash
+`c23395ff4644b183991f2508bdd475ad2120110019f134ebd2b5af0c550a12dc` and unchanged
+preflight, rebuild the boot image, and rerun strict Firefox on the idle Mac.
+Only after passing should the sole visible login use private clones with
+PID/session/data/QMP recorded. See [repair and exact evidence](FIREFOX-EL0-ENTRY-20260910.md)
+and [the updated testing prompt](MACOS-HVF-TEST-AGENT-PROMPT.md). Preserve all
+old Mac/Pi artifacts, inspect every QEMU/test process before launch, distinguish
+Pi functional checks from Mac/HVF qualification, and leave audit Partial/Missing
+rows unchanged.
+
+### Historical 2026-09-08 Firefox packaging repair
 
 The user reports `6de93f55c121737e1b23168dec543dc68bc872a5` passed all four
 September 6 repairs on Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF, including

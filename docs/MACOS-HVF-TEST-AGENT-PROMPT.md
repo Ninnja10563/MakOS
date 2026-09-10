@@ -12,17 +12,20 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Required packaging implementation baseline: f409f4925ed4fe4e1dd319cd7f33e7d0d0067d0f
+Previous exact Mac-tested baseline: 1b243548b937aaf8498581c1d7baf2a8eea5ab94
 
-Use the exact full handoff commit supplied in chat, containing this baseline;
-do not choose an arbitrary future descendant. This follows Mac-qualified
-6de93f55c121737e1b23168dec543dc68bc872a5 and adds Mozilla manifest patch0060,
-regressions and documentation only. Require checked-out HEAD, local main,
-origin/main, and remote main to match, and record the exact tested commit.
+Use the exact full EL0-entry repair commit supplied in chat, descending from
+this baseline; do not test the baseline again or choose an arbitrary future
+descendant. The repair covers selected-root executable PC validation,
+clear-child-TID cross-CPU notification, futex compare/enqueue serialization,
+and dynamic-musl regression coverage;
+Firefox patches remain at the qualified
+60-patch identity. Require checked-out HEAD, local main, origin/main, and
+remote main to match, and record the exact tested commit.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, docs/INTEGRATED-DATA-IMAGE.md, and
-   docs/FIREFOX-PACKAGING-20260908.md.
+   docs/FIREFOX-PACKAGING-20260908.md and docs/FIREFOX-EL0-ENTRY-20260910.md.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
    average, free/used memory, swap/compressor state, and every QEMU process.
@@ -36,10 +39,24 @@ origin/main, and remote main to match, and record the exact tested commit.
    each exit status:
 
        make unit check
+       make test-aarch64-el0-entry-runtime
        make test-aarch64-selfhost-runtime
        make test-aarch64-native-smp-runtime
        make test-aarch64-production-smp-runtime
        make test-aarch64-cursor-runtime
+
+   The new EL0-entry gate must report
+   `MAKOS_AARCH64_EL0_ENTRY_RUNTIME_OK accel=hvf fixture=dynamic-musl-pthread`,
+   three distinct TIDs observed by the kernel on AP1/AP2/AP3 with masks
+   0x2/0x4/0x8, loader pthread_create in 0x28000000..0x30000000, high mmap RX
+   code, resume on the next page, 96 calls with `block=sleep-until`, three
+   `MAKOS_AARCH64_HIGH_EL0_ENTRY_OK` records matching those exact TIDs/CPUs,
+   a common nonzero aligned root and next-page PC with
+   `proof=validated-before-eret`, three status-42 joins, and the
+   ordinary status-42 dynamic-process reap. Require unchanged boot hashes.
+   Preserve its printed session directory, session.json/PID/inherited QMP fd,
+   private boot/data/vars, and serial.log on success or failure. This fixture
+   is not Firefox and cannot replace its unchanged strict gate.
 
    Record the boot-image SHA-256 both before and immediately after the
    self-host run, because its phony image prerequisite rebuilds that file;
@@ -200,13 +217,31 @@ origin/main, and remote main to match, and record the exact tested commit.
    cursor, `completion=fast-plus-bounded-recovery`, and zero GPU timeouts or
    errors. Every delayed completion, if any, must have a matching recovered
    record with the same queue and command.
-4. The historical `build/makos-integrated-a9c604254f094de2.img` predates
+4. The September 9 Mac run successfully published and preflighted
+   `build/makos-integrated-c23395ff4644b183.img`, SHA-256
+   `c23395ff4644b183991f2508bdd475ad2120110019f134ebd2b5af0c550a12dc`.
+   This kernel/probe repair does not change Firefox source or provenance.
+   Prefer reuse of that preserved image after exact hash and unchanged
+   preflight verification:
+
+       shasum -a 256 build/makos-integrated-c23395ff4644b183.img
+       python3 scripts/verify_firefox_runtime_image.py build/makos-integrated-c23395ff4644b183.img
+
+   If both pass, set INTEGRATED_IMAGE to that exact image and proceed to step
+   5 without rebuilding/restamping Firefox. The boot image must be rebuilt
+   from the repair (the Make runtime targets do this); do not reuse the old
+   kernel. Record the new boot hash independently of the preserved data hash.
+
+   If that image is unavailable, use only the supported release/integration
+   path below; if it exists but fails verification, preserve it and stop with
+   the exact blocker. Do not bypass preflight or replace evidence silently.
+   The historical `build/makos-integrated-a9c604254f094de2.img` predates
    Firefox patch `0060` and is not valid for this increment. The September 8
    report qualified the earlier 59-patch release build but found Mozilla's
    MakOS package manifest omitted plugin-container and xpcshell. Patch0060
    adds both under the existing XP_MAKOS configure define. Preserve the prior
    outputs and logs; never manually copy either executable into dist/firefox.
-   The changed source/patch identity requires the supported full release
+   An old 59-patch source/patch identity requires the supported full release
    wrapper again, even if the existing incremental cache can reuse binaries.
    Never restamp the old 59-patch build by hand or exempt this source change.
    A developer build
@@ -278,7 +313,7 @@ origin/main, and remote main to match, and record the exact tested commit.
    copy, edit, or manually reconcile the possibly mixed old/candidate
    auxiliary set.
 
-5. Run the strict real-Firefox gate only against that newly generated image,
+5. Run the strict real-Firefox gate only against that verified current image,
    only when `uptime`, `vm_stat`, `sysctl vm.swapusage`, and `memory_pressure`
    show an idle host with low memory pressure, and only after confirming no
    QEMU is running. Set `INTEGRATED_IMAGE` to the exact content-addressed path
@@ -335,7 +370,7 @@ origin/main, and remote main to match, and record the exact tested commit.
    surrounding any missing or duplicated parallel marker. Do not reinterpret
    three child status-42 reaps as proof of a cold marker that is absent.
 
-6. After the strict Firefox QEMU has exited, confirm no QEMU remains, then boot
+6. Only after strict Firefox passes and its QEMU has exited, confirm no QEMU remains, then boot
    the visible login as the sole QEMU from private clones. Do not start another
    runtime while it is active. Create the session and sparse clones without
    modifying either source image:

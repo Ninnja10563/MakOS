@@ -157,6 +157,10 @@ test-aarch64-production-smp-runtime: image-aarch64
 test-aarch64-native-smp-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_native_smp.py
 
+.PHONY: test-aarch64-el0-entry-runtime
+test-aarch64-el0-entry-runtime: image-aarch64
+	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_el0_entry.py
+
 test-aarch64-selfhost-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_selfhost.py
 
@@ -260,6 +264,10 @@ unit:
 	python3 scripts/test_aarch64_cursor_plane.py
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
+	python3 scripts/test_aarch64_el0_entry.py
+	python3 scripts/test_aarch64_el0_entry_runtime.py
+	python3 scripts/test_aarch64_clear_child_tid.py
+	python3 scripts/test_aarch64_futex_wait_atomic.py
 	python3 scripts/test_aarch64_block_owner.py
 	python3 scripts/test_aarch64_application_balance.py
 	python3 scripts/test_aarch64_selfhost.py
@@ -325,6 +333,10 @@ check:
 	python3 scripts/test_aarch64_cursor_plane.py
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
+	python3 scripts/test_aarch64_el0_entry.py
+	python3 scripts/test_aarch64_el0_entry_runtime.py
+	python3 scripts/test_aarch64_clear_child_tid.py
+	python3 scripts/test_aarch64_futex_wait_atomic.py
 	python3 scripts/test_aarch64_block_owner.py
 	python3 scripts/test_aarch64_application_balance.py
 	python3 scripts/test_aarch64_selfhost.py

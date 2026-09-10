@@ -3933,7 +3933,6 @@ pub fn futex(
         };
         Some(now.saturating_add(ticks))
     };
-    let observed = unsafe { core::ptr::read_volatile(address as *const u32) };
     frame.registers[0] = 0;
     let captured = crate::arch::UserContext::capture(frame);
     let result = with_state(|state| {
@@ -3945,6 +3944,10 @@ pub fn futex(
         };
         let group_pid = state.contexts[index].group_pid;
         let key = FutexKey::new(state.contexts[index].context.ttbr0, address);
+        // Compare and enqueue under the same lock as every futex wake.
+        // A pre-lock sample could survive clear-child-TID's zero + wake of
+        // an empty queue and then enqueue a waiter that can never be woken.
+        let observed = unsafe { core::ptr::read_volatile(address as *const u32) };
         let handle = match state.futex.wait(
             key,
             TaskId::new(group_pid, tid),
@@ -7123,6 +7126,12 @@ fn clear_child_tid_on_exit() {
         let woken = with_state(|state| {
             wake_futex_in_state(state, FutexKey::new(root, address), usize::MAX)
         });
+        if woken != 0 {
+            // Publish the cleared word and runnable waiters before waking APs.
+            // A joining/thread-list waiter may be pinned to an idle CPU; the
+            // exiting CPU's local reschedule cannot make that CPU run it.
+            notify_idle_cpus();
+        }
         crate::serial_println!(
             "MAKOS_CLEAR_CHILD_TID_OK pid={} address={:#x} zeroed=1 wake={}",
             pid,

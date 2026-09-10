@@ -42,7 +42,7 @@ fi
 	make -s DESTDIR="$stage_dir" LIBCC="$builtins" install-headers install-libs
 )
 
-"$cc" --sysroot="$stage_dir" -fno-stack-protector \
+"$cc" --sysroot="$stage_dir" -fno-stack-protector -fPIC \
 	-c "$port_dir/dynamic-probe.c" -o "$build_dir/dynamic-probe.o"
 "$cc" --sysroot="$stage_dir" -nostdlib -pie \
 	-Wl,--dynamic-linker=/lib/ld-musl-aarch64.so.1 \

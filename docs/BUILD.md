@@ -13,7 +13,18 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Firefox packaging update (2026-09-08): Mac qualification at `6de93f5` passes
+Firefox entry update (2026-09-10): the Mac report at `1b24354` passes the
+supported 60-patch release/package/integration. Real Firefox then rejected a
+valid dynamic-loader PC on AP entry before paint. The selected-root executable
+mapping repair and `make test-aarch64-el0-entry-runtime` regression are
+documented in [the entry report](FIREFOX-EL0-ENTRY-20260910.md). Rebuild the boot
+image for the repaired kernel. The preserved integrated image
+`build/makos-integrated-c23395ff4644b183.img` can be reused after its recorded
+SHA-256 and `scripts/verify_firefox_runtime_image.py` pass; no Firefox source
+patch/provenance change is made by this repair. Run strict Firefox unchanged
+on the idle Mac/HVF host. Pi functional evidence is not Mac qualification.
+
+Historical Firefox packaging update (2026-09-08): Mac qualification at `6de93f5` passes
 the prior CPython/self-host/SMP repairs, but integration stopped at missing
 Mozilla stage-package process executables. Patch0060 adds both under
 `XP_MAKOS`; supported packaging still enforces all five authorized artifact
@@ -45,6 +56,7 @@ make test-x86_64-install
 make test-aarch64-cursor-runtime
 make test-aarch64-production-smp-runtime
 make test-aarch64-native-smp-runtime
+make test-aarch64-el0-entry-runtime
 make test-aarch64-firefox-runtime
 make test-aarch64-ipv6-runtime
 make test-aarch64

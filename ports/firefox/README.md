@@ -35,6 +35,15 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
+Current qualification (2026-09-10): the user's Mac/HVF report at `1b24354`
+passes the supported 60-patch release, both staged process executables, all
+five artifact/provenance audits, and integrated-image publication. Real
+Firefox then hit the kernel's main-image-only EL0 PC guard in the dynamic
+loader before paint. The [kernel entry repair](../../docs/FIREFOX-EL0-ENTRY-20260910.md)
+does not change Firefox source or the qualified image's provenance; reverify
+that image and rebuild the boot kernel for strict Mac/HVF retesting. The
+historical packaging limitations below precede this newer report.
+
 The September 8 user report qualifies the 59-patch release build's binary and
 provenance checks on macOS at MakOS `6de93f5`. Integration then stopped because
 Mozilla's MakOS manifest omitted `plugin-container` and `xpcshell` from
@@ -205,7 +214,8 @@ Historical Mozilla staging produced a 28-file runtime tree and packaging used
 a 191 MiB stripped `libxul.so` in a 344 MiB sector-backed image. Those old
 sizes are not current qualification. The current release path requires all
 five provenance-authorized artifacts, including both executables newly added
-to the manifest by patch0060; its full package awaits Mac requalification.
+to the manifest by patch0060; the user-reported `1b24354` Mac run qualified
+the full package. Real Firefox remains blocked pending kernel entry retesting.
 The full build writes a canonical provenance stamp only after the binary audit.
 Packaging rechecks its pinned source HEAD, exact applied-patch-series marker,
 and exact patched tracked tree. The tree is reconstructed from the pinned
