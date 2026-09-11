@@ -13,7 +13,14 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-EL0 evidence update (2026-09-11): Mac `799354f` passes unit/check and image
+Darwin host-test update (2026-09-11): Mac `2413ade` stops during unit/check on
+the emission adapter's collision with the SDK's fortified `snprintf` macro.
+The [host-only repair](EL0-DARWIN-ADAPTER-20260911.md) redirects one extracted
+call without changing SDK macros, fortification, `-Werror` or the compiler.
+Restart the same sequential Mac qualification from `make unit check`; no
+production, runtime-gate or Firefox source/provenance change is required.
+
+Historical EL0 evidence update (2026-09-11): Mac `799354f` passes unit/check and image
 build, but kernel exit diagnostics split the guest result marker. The
 [producer/serial repair](EL0-EVIDENCE-ATOMICITY-20260911.md) formats one bounded
 record before a checked TTY write and keeps its complete serial output under

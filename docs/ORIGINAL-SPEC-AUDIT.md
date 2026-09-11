@@ -9,7 +9,14 @@ spec breadth remains; `Missing` means no qualifying implementation.
 Last audit: 2026-09-11. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: Mac/HVF `799354fd96a9a7db999acaafd05ea485fb5693b0`
+Current qualification: Mac `2413aded422057bf345faf1a800c58d51c956656`
+stops at unit/check on a host-adapter collision with the SDK's fortified
+`snprintf` macro. Check and every later gate were not run; this is not a guest
+or Firefox runtime failure. The [host-only repair](EL0-DARWIN-ADAPTER-20260911.md)
+preserves fortification, `-Werror`, production code and runtime gates. Mac/HVF
+qualification remains pending. No audit Partial/Missing row is upgraded.
+
+Earlier qualification: Mac/HVF `799354fd96a9a7db999acaafd05ea485fb5693b0`
 passes unit/check and image build, but the EL0 gate fails on a fragmented
 guest result despite validated AP execution and status-42 reap. Later gates,
 real Firefox and visible login were not run. Complete producer/TTY serial

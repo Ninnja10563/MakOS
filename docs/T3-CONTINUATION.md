@@ -27,7 +27,30 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-09-11 EL0 result emission repair (current handoff)
+### 2026-09-11 Darwin EL0 host-adapter repair (current handoff)
+
+The latest Mac report at `2413aded422057bf345faf1a800c58d51c956656` stops in
+the first command, `make unit check`: Apple clang rejects the test adapter's
+`snprintf` macro redefinition against the Darwin fortified SDK header.
+`check`, image rebuild, all runtimes, Firefox preflight and visible login
+were not run. This is a host-test portability failure, not a guest failure.
+
+Only the host adapter changes: redirect its single extracted formatter call
+without defining/undefining the SDK macro. Original assertions and negative
+controls remain, with new fortified-header and old-collision regressions.
+Production code, Make/runtime gates, fortification and `-Werror` stay intact.
+See [the report and local evidence](EL0-DARWIN-ADAPTER-20260911.md). Restart the
+unchanged sequential Mac protocol from unit/check using the exact pushed
+repair HEAD supplied in chat; no compiler substitution or provenance bypass.
+The earlier Pi/TCG evidence below is historical, not a new runtime claim.
+
+Local Pi/Debian passes the focused suite with GCC 14.2 and LLVM clang 19.1.7
+(host-default and fortified-header variants), the unchanged parser/serial
+regressions, and full `make unit check` (exit 0, 118.491 s). Boot/kernel hashes
+remain unchanged. No QEMU was launched; no MakOS build/test remains running.
+Actual Darwin SDK/Apple clang validation is still required on the Mac.
+
+### Historical 2026-09-11 EL0 result emission repair
 
 The user reports Mac/HVF `799354fd96a9a7db999acaafd05ea485fb5693b0` passes
 unit/check and image build but fails the new EL0 gate because its result was

@@ -12,13 +12,15 @@ next runtime.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 799354fd96a9a7db999acaafd05ea485fb5693b0
+Previous exact Mac-tested baseline: 2413aded422057bf345faf1a800c58d51c956656
 
-Use the exact full EL0-evidence atomicity repair commit supplied in chat, descending from
-this baseline; do not test the baseline again or choose an arbitrary future
-descendant. This repair makes guest result emission a bounded single write
-and serializes its complete TTY output including the line ending. It retains
-the preceding executable-context and futex repairs, with an unchanged parser;
+Use the exact full Darwin host-adapter repair commit supplied in chat,
+descending from this baseline; do not test the baseline again or choose an
+arbitrary future descendant. The last run stopped in unit/check on a fortified
+SDK snprintf macro collision. This host-only repair leaves the SDK macro,
+fortification, -Werror and production behavior unchanged. Keep /usr/bin/cc
+(Apple clang); do not set HOST_CC to substitute another compiler. It retains
+the preceding whole-record emission, executable-context and futex repairs;
 Firefox patches remain at the qualified
 60-patch identity. Require checked-out HEAD, local main, origin/main, and
 remote main to match, and record the exact tested commit.
@@ -26,7 +28,8 @@ remote main to match, and record the exact tested commit.
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
    docs/STATUS.md, docs/BUILD.md, docs/INTEGRATED-DATA-IMAGE.md, and
    docs/FIREFOX-PACKAGING-20260908.md, docs/FIREFOX-EL0-ENTRY-20260910.md,
-   and docs/EL0-EVIDENCE-ATOMICITY-20260911.md.
+   docs/EL0-EVIDENCE-ATOMICITY-20260911.md and
+   docs/EL0-DARWIN-ADAPTER-20260911.md.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
    average, free/used memory, swap/compressor state, and every QEMU process.

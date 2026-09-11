@@ -37,6 +37,12 @@ assert "fflush(" not in main and "printf(" not in main
 assert len(re.findall(r"\bwrite\(", emitter)) == 1
 assert not re.search(r"\b(?:printf|fflush|writev|syscall)\(", emitter)
 assert "char record[512];" in emitter
+# Adapt only this extracted call, not the SDK's snprintf macro. Darwin's
+# fortified <stdio.h> owns that macro; defining or undefining it here would
+# collide with or discard the host header's fortification policy.
+adapted_emitter, format_calls = re.subn(
+    r"\bsnprintf(?=\s*\()", "checked_snprintf", emitter)
+assert format_calls == 1
 declarations = re.search(r"enum \{ WORKERS = .*?;", source).group()
 declarations += "\n" + item(source, "struct worker_result {") + ";\n"
 
@@ -106,12 +112,10 @@ static ssize_t fragmented_write(int fd, const void *buffer, size_t length)
 #else
 #define write checked_write
 #endif
-#define snprintf checked_snprintf
 '''
 
 DRIVER = r'''
 #undef write
-#undef snprintf
 int main(int argc, char **argv)
 {
     struct worker_result results[WORKERS] = {{0}};
@@ -148,6 +152,22 @@ int main(int argc, char **argv)
 }
 '''
 
+# This models the reported Darwin header collision on Linux; it is not an
+# implementation of Darwin fortification. Keep an actual SDK macro when one
+# exists. The model is never called: checked_snprintf uses the host vsnprintf.
+SDK_SNPRINTF_MODEL = r'''
+#ifndef snprintf
+#define snprintf(str, len, ...) __snprintf_chk_func (str, len, 0, __VA_ARGS__)
+#endif
+'''
+SDK_SNPRINTF_RETAINED = r'''
+#ifndef snprintf
+#error "SDK snprintf macro was removed by the test adapter"
+#endif
+'''
+assert not re.search(r"^\s*#\s*(?:define|undef)\s+snprintf\b",
+                     ADAPTER + DRIVER, re.MULTILINE)
+
 
 def with_record(record: str) -> str:
     return "\n".join(line for line in GOOD.splitlines()
@@ -166,20 +186,39 @@ def fragmented_must_fail(record: str) -> None:
 with tempfile.TemporaryDirectory(prefix="makos-el0-emission-") as name:
     directory = Path(name)
     fixture = directory / "emission.c"
-    fixture.write_text(ADAPTER + declarations + emitter + DRIVER)
     compiler = os.environ.get("HOST_CC") or shutil.which("cc")
     if not compiler:
         raise SystemExit("host C compiler unavailable")
-    binaries = [directory / "one-write", directory / "fragmented-write"]
-    for index, binary in enumerate(binaries):
-        subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
-                        *(["-DFRAGMENT_WRITES"] if index else []),
-                        str(fixture), "-o", str(binary)], check=True)
-    subprocess.run([str(binaries[0])], check=True, timeout=10)
-    good = subprocess.check_output([str(binaries[0]), "--emit"], text=True, timeout=10)
-    assert runtime.validate_output(with_record(good)) == ((11, 12, 13), 0x280B0750, 0x80000000)
-    fragmented_must_fail(subprocess.check_output(
-        [str(binaries[1]), "--emit"], text=True, timeout=10))
+    flags = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2"]
+    # Insert the model after all real host headers, never before <stdio.h>.
+    sdk_adapter = ADAPTER.replace("\nstatic char captured",
+                                 SDK_SNPRINTF_MODEL + "\nstatic char captured", 1)
+    assert sdk_adapter != ADAPTER
+    for label, adapter, extra_flags, suffix in (
+        ("host", ADAPTER, [], ""),
+        ("sdk-macro", sdk_adapter, ["-D_FORTIFY_SOURCE=2"], SDK_SNPRINTF_RETAINED),
+    ):
+        fixture.write_text(adapter + declarations + adapted_emitter + DRIVER + suffix)
+        binaries = [directory / f"{label}-one-write", directory / f"{label}-fragmented-write"]
+        for index, binary in enumerate(binaries):
+            subprocess.run([compiler, *flags, *extra_flags,
+                            *(["-DFRAGMENT_WRITES"] if index else []),
+                            str(fixture), "-o", str(binary)], check=True)
+        subprocess.run([str(binaries[0])], check=True, timeout=10)
+        good = subprocess.check_output([str(binaries[0]), "--emit"], text=True, timeout=10)
+        assert runtime.validate_output(with_record(good)) == ((11, 12, 13), 0x280B0750, 0x80000000)
+        fragmented_must_fail(subprocess.check_output(
+            [str(binaries[1]), "--emit"], text=True, timeout=10))
+
+    # The old global redirection must reproduce a macro-redefinition failure
+    # under the same warnings-as-errors policy, not merely fail at runtime.
+    fixture.write_text(sdk_adapter + "\n#define snprintf checked_snprintf\n"
+                       + declarations + emitter + DRIVER)
+    collision = subprocess.run(
+        [compiler, *flags, "-D_FORTIFY_SOURCE=2", str(fixture),
+         "-o", str(directory / "old-macro-collision")], capture_output=True, text=True)
+    assert collision.returncode != 0, "old SDK macro collision unexpectedly compiled"
+    assert "snprintf" in collision.stderr and "redefined" in collision.stderr, collision.stderr
 
 # Preserve the reported Mac failure as a negative fixture, not a repaired line.
 fragmented_must_fail(
@@ -193,4 +232,5 @@ fragmented_must_fail(
 
 print("MAKOS_AARCH64_EL0_EMISSION_HOST_OK emitter=production-c cases=11 "
       "buffer=512 write=one-full short,error,overflow=fail-closed "
-      "negative_controls=split-write,reported-mac-fragment parser=unchanged")
+      "negative_controls=split-write,reported-mac-fragment parser=unchanged "
+      "header_macro=preserved fortify=host-default,2 macro_collision=negative-control")

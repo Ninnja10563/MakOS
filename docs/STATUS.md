@@ -4,7 +4,22 @@ Last updated: 2026-09-11.
 
 ## Current qualification update
 
-The latest user-reported Mac/HVF run at
+Mac/HVF qualification of `2413aded422057bf345faf1a800c58d51c956656` stopped
+at `make unit check` (unit failed; check not reached). The host test redefined
+Darwin's fortified `snprintf` macro under Apple clang `-Werror`. No image,
+runtime, Firefox preflight or visible-login gate ran. The host-only adapter
+repair preserves SDK macros/fortification and adds collision regression
+coverage without changing production behavior or runtime gates. See
+[the Darwin adapter report](EL0-DARWIN-ADAPTER-20260911.md). Mac retesting is
+still required; audit Partial/Missing rows are unchanged.
+
+The host-only repair passes focused GCC 14/LLVM clang 19 tests and full
+`make unit check` on Pi/Debian (118.491 s). The original boot/kernel hashes
+remain unchanged; no new QEMU/runtime or Darwin result is claimed.
+
+### Earlier emission repair evidence
+
+The earlier user-reported Mac/HVF run at
 `799354fd96a9a7db999acaafd05ea485fb5693b0` passes unit/check and image build
 but fails the EL0 evidence parser: kernel exit diagnostics split the guest's
 result marker. Three validated AP entries and status-42 reap were present,
