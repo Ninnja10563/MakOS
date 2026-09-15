@@ -381,7 +381,10 @@ fn memory_summary(boot: &BootInfo) -> (u64, u64) {
 }
 
 fn fatal(message: &str) -> ! {
-    serial_println!("MAKOS_FATAL: {}", message);
+    // A host may stop QEMU as soon as a pipe read contains MAKOS_FATAL:,
+    // even if that read ends at the colon. Put the complete reason first;
+    // one serial guard binds both lines to this failure on an SMP guest.
+    serial_println!("MAKOS_FAILURE_DETAIL: {}\nMAKOS_FATAL: {}", message, message);
     arch::halt_forever()
 }
 

@@ -224,6 +224,55 @@ fn kernel_formatted_record_uses_same_guard() {
 }
 
 #[test]
+fn fatal_detail_precedes_stop_marker_under_one_guard() {
+    reset();
+    fatal("synthetic host-test reason");
+    let bytes = CAPTURE.lock().unwrap().bytes.clone();
+    let marker = b"MAKOS_FATAL:";
+    let detail = b"MAKOS_FAILURE_DETAIL: synthetic host-test reason\r\n";
+    // Simulate every possible two-chunk boundary, including immediately
+    // after the colon. Detection is still an immediate prefix predicate.
+    for split in 0..=bytes.len() {
+        let mut captured = bytes[..split].to_vec();
+        if !captured.windows(marker.len()).any(|part| part == marker) {
+            captured.extend_from_slice(&bytes[split..]);
+        }
+        let stop = captured.windows(marker.len()).position(|part| part == marker).unwrap();
+        assert!(
+            captured[..stop].ends_with(detail),
+            "fatal reason missing before immediate stop marker at split {split}"
+        );
+    }
+    assert_eq!(
+        bytes,
+        b"MAKOS_FAILURE_DETAIL: synthetic host-test reason\r\nMAKOS_FATAL: synthetic host-test reason\r\n"
+    );
+    assert_guarded_records(1);
+}
+
+#[test]
+fn concurrent_fatal_records_keep_their_own_detail() {
+    reset();
+    GATE.lock().unwrap().pause_at_first_byte = true;
+    let writer = std::thread::spawn(|| fatal("first synthetic reason"));
+    {
+        let mut gate = GATE.lock().unwrap();
+        while !gate.first_byte_seen {
+            gate = GATE_CHANGED.wait(gate).unwrap();
+        }
+    }
+    let contender = std::thread::spawn(|| fatal("second synthetic reason"));
+    writer.join().unwrap();
+    contender.join().unwrap();
+    assert_eq!(
+        CAPTURE.lock().unwrap().bytes,
+        b"MAKOS_FAILURE_DETAIL: first synthetic reason\r\nMAKOS_FATAL: first synthetic reason\r\nMAKOS_FAILURE_DETAIL: second synthetic reason\r\nMAKOS_FATAL: second synthetic reason\r\n"
+    );
+    assert_guarded_records(2);
+    assert_eq!(GATE.lock().unwrap().acquire_attempts, 2);
+}
+
+#[test]
 fn concurrent_kernel_trace_cannot_split_tty_record() {
     for output_crlf in [false, true] {
         reset();

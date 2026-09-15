@@ -8,18 +8,23 @@ Test the current MakOS main branch on an idle Apple Silicon macOS host using
 AArch64 QEMU with HVF. This is qualification work only: preserve repository
 changes and test data, do not change source or thresholds, do not run two QEMU
 instances concurrently, and stop every visible guest through QMP before the
-next runtime.
+next runtime. Stop on the first failed command; do not retry or run later
+gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 2413aded422057bf345faf1a800c58d51c956656
+Previous exact Mac-tested baseline: 9614841ffb349cfa235fd7348a27b4c7f42843ad
 
-Use the exact full Darwin host-adapter repair commit supplied in chat,
+Use the exact full Firefox fatal-evidence repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
-arbitrary future descendant. The last run stopped in unit/check on a fortified
-SDK snprintf macro collision. This host-only repair leaves the SDK macro,
-fortification, -Werror and production behavior unchanged. Keep /usr/bin/cc
-(Apple clang); do not set HOST_CC to substitute another compiler. It retains
+arbitrary future descendant. The last run passed all earlier gates and
+Firefox preflight, then stopped at a kernel fatal whose captured serial ended
+exactly at MAKOS_FATAL: without its reason. The guest cause remains unknown.
+This evidence repair emits its reason before the unchanged fatal marker and
+preserves queued raw bytes during cleanup; it does not claim to fix that
+guest failure. Do not change fatal assertions, timeouts, thresholds, SDK
+macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
+HOST_CC to substitute another compiler. It retains
 the preceding whole-record emission, executable-context and futex repairs;
 Firefox patches remain at the qualified
 60-patch identity. Require checked-out HEAD, local main, origin/main, and
@@ -29,7 +34,8 @@ remote main to match, and record the exact tested commit.
    docs/STATUS.md, docs/BUILD.md, docs/INTEGRATED-DATA-IMAGE.md, and
    docs/FIREFOX-PACKAGING-20260908.md, docs/FIREFOX-EL0-ENTRY-20260910.md,
    docs/EL0-EVIDENCE-ATOMICITY-20260911.md and
-   docs/EL0-DARWIN-ADAPTER-20260911.md.
+   docs/EL0-DARWIN-ADAPTER-20260911.md and
+   docs/FIREFOX-FATAL-CAPTURE-20260915.md.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
    average, free/used memory, swap/compressor state, and every QEMU process.
@@ -43,6 +49,7 @@ remote main to match, and record the exact tested commit.
    each exit status:
 
        make unit check
+       make image-aarch64
        make test-aarch64-el0-entry-runtime
        make test-aarch64-selfhost-runtime
        make test-aarch64-native-smp-runtime
@@ -227,7 +234,7 @@ remote main to match, and record the exact tested commit.
 4. The September 9 Mac run successfully published and preflighted
    `build/makos-integrated-c23395ff4644b183.img`, SHA-256
    `c23395ff4644b183991f2508bdd475ad2120110019f134ebd2b5af0c550a12dc`.
-   This kernel/probe repair does not change Firefox source or provenance.
+   This kernel diagnostic/capture repair does not change Firefox source or provenance.
    Prefer reuse of that preserved image after exact hash and unchanged
    preflight verification:
 
@@ -369,6 +376,16 @@ remote main to match, and record the exact tested commit.
    provenance, the first failing assertion, host load/memory/swap evidence,
    and every QMP/session/PID path. Record an absent required package as not run,
    not as a pass or runtime failure.
+
+   On a fatal, preserve the final raw serial file after the harness exits,
+   not just the exception's earlier snapshot. Include the complete
+   MAKOS_FAILURE_DETAIL: record that precedes the unchanged MAKOS_FATAL:
+   marker, and the exact preceding thread/CPU/root records. Do not infer a
+   missing reason, join fragments into successful evidence, retry after the
+   first failure, or launch the final visible login. Capture any temporary
+   session paths/PID/QMP descriptors while the harness is running; where its
+   normal cleanup removes temporary disks, record that fact rather than
+   claiming they were retained. Preserve all existing master images/data.
 
    For any earlier self-host failure, preserve
    `build/makos-selfhost-focused-serial.log`, complete harness stdout/stderr,

@@ -27,9 +27,43 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-09-11 Darwin EL0 host-adapter repair (current handoff)
+### 2026-09-15 Firefox fatal evidence repair (current handoff)
 
-The latest Mac report at `2413aded422057bf345faf1a800c58d51c956656` stops in
+The user reports Mac/HVF `9614841ffb349cfa235fd7348a27b4c7f42843ad`
+passes unit/check, image, EL0, self-host, Native/Python-role SMP,
+Firefox-role SMP/input, cursor, and integrated-image/provenance preflight.
+Real Firefox fails before latency stages; captured raw serial ends exactly
+at `MAKOS_FATAL:` after a thread-create record for TID 8. The fatal reason
+is **unknown**. The supplied report is authoritative, but no separate raw
+attachment is available on this Pi. Do not infer a guest cause from the last
+thread-create record or call this a provenance failure.
+
+The immediate fatal-prefix assertion reads arbitrary pipe chunks and cleanup
+previously discarded pending stdout. The repair emits a complete reason
+before the unchanged fatal marker under the same serial guard and archives
+queued raw bytes after shutdown without waiting. It is an evidence repair,
+not a demonstrated fix for the unknown Firefox guest fatal. All fatal
+predicates, deadlines, latency thresholds and provenance remain unchanged.
+See [the report and local checks](FIREFOX-FATAL-CAPTURE-20260915.md).
+
+Pi/Debian focused regressions and full `make unit check` pass (124.032 s).
+Image build and the unchanged Pi/TCG EL0 gate pass with three AP entries,
+96 blocking calls, status-42 joins/reap and unchanged runtime boot hashes.
+Private session `build/makos-el0-entry-azwadxec` and the old boot/kernel are
+retained. No QEMU/build/test remains; real Firefox and visible login were not
+run locally. These results do not qualify the unknown Mac guest fatal.
+
+Rebuild the boot image and restart the unchanged sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) at the exact pushed commit in
+chat. Keep the qualified `c23395ff4644b183` integrated image after exact hash
+and provenance verification. Stop on the first failure and preserve raw
+serial, especially `MAKOS_FAILURE_DETAIL:` preceding any fatal prefix. No
+final visible login until strict real Firefox passes. Audit Partial/Missing
+rows remain unchanged; Pi results are not Mac/HVF qualification.
+
+### Historical 2026-09-11 Darwin EL0 host-adapter repair
+
+The then-current Mac report at `2413aded422057bf345faf1a800c58d51c956656` stops in
 the first command, `make unit check`: Apple clang rejects the test adapter's
 `snprintf` macro redefinition against the Darwin fortified SDK header.
 `check`, image rebuild, all runtimes, Firefox preflight and visible login

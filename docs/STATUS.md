@@ -1,8 +1,31 @@
 # Implementation status
 
-Last updated: 2026-09-11.
+Last updated: 2026-09-15.
 
 ## Current qualification update
+
+User-reported Mac/HVF `9614841ffb349cfa235fd7348a27b4c7f42843ad` passes
+unit/check, image, EL0 (contiguous record, 96 calls, three AP entries/joins),
+self-host, Native/Python-role and Firefox-role SMP fixtures, cursor and
+unchanged integrated-image/provenance preflight. The earlier host-adapter and
+EL0 emission repairs are therefore Mac-qualified at that commit.
+
+Real Firefox fails before latency stages with serial ending at `MAKOS_FATAL:`
+without a reason. Its guest cause remains unknown. The capture-path repair
+puts the complete reason before the fatal marker in one serial critical
+section and preserves queued raw stdout during cleanup. It does not change
+fatal rejection, runtime gates or Firefox provenance, and does not establish
+that Firefox is repaired. See [failure report and local validation](FIREFOX-FATAL-CAPTURE-20260915.md).
+Mac/HVF retesting remains required; final visible login is not qualified and
+no audit Partial/Missing row is upgraded.
+
+Local Pi/Debian passes focused producer/pipe regressions, full unit/check
+(124.032 s), image build, and unchanged Pi/TCG EL0 runtime (three AP entries,
+96 calls, status-42 joins/reap, matching boot hashes). Old boot/kernel and
+private runtime/session evidence are retained. No QEMU remains. The qualified
+Mac integrated image is absent on this Pi; real Firefox was not run locally.
+
+### Earlier Darwin host-adapter evidence
 
 Mac/HVF qualification of `2413aded422057bf345faf1a800c58d51c956656` stopped
 at `make unit check` (unit failed; check not reached). The host test redefined

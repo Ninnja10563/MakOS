@@ -12,6 +12,7 @@ import selectors
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.parse import urlsplit, urlunsplit
@@ -162,6 +163,44 @@ def wait_for_firefox_selection_output(
         if serial_log:
             pathlib.Path(serial_log).write_bytes(output)
         raise
+
+
+def preserve_final_firefox_serial_output(
+    process: subprocess.Popen[bytes],
+    output: bytearray,
+    serial_log: str | None,
+) -> None:
+    """Save raw queued bytes after shutdown, without waiting or changing failure.
+
+    Fatal detection still rejects immediately. Only a stopped process is
+    drained: there can be no ongoing QEMU writer, and a nonblocking read also
+    handles a pipe whose other write descriptors have not yet closed.
+    """
+    if not serial_log:
+        return
+    try:
+        if process.poll() is not None and process.stdout is not None:
+            descriptor = process.stdout.fileno()
+            blocking = os.get_blocking(descriptor)
+            os.set_blocking(descriptor, False)
+            try:
+                while True:
+                    try:
+                        chunk = os.read(descriptor, 4096)
+                    except BlockingIOError:
+                        break
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+            finally:
+                os.set_blocking(descriptor, blocking)
+    except (OSError, ValueError) as error:
+        print(f"Could not drain final Firefox serial output: {error}", file=sys.stderr)
+    try:
+        pathlib.Path(serial_log).write_bytes(output)
+    except OSError as error:
+        # Diagnostic I/O must never replace the original runtime assertion.
+        print(f"Could not preserve final Firefox serial log: {error}", file=sys.stderr)
 
 
 def wait_for_output_count(
@@ -3429,9 +3468,14 @@ def main() -> int:
                 qmp_command(stream, "quit")
             process.wait(timeout=5)
         finally:
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=5)
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=5)
+            finally:
+                preserve_final_firefox_serial_output(
+                    process, output, os.environ.get("MAKOS_AARCH64_FIREFOX_SERIAL_LOG")
+                )
         missing_controls = [
             control
             for control in range(1, 12)

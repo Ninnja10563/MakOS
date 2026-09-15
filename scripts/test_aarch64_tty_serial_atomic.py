@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SERIAL = (ROOT / "kernel/src/serial.rs").read_text()
 TTY = (ROOT / "kernel/src/aarch64_tty.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
+MAIN = (ROOT / "kernel/src/main.rs").read_text()
 
 
 def item(source: str, declaration: str) -> str:
@@ -85,6 +86,14 @@ assert release.index("SERIAL_LOCK.store(false, Ordering::Release)") < release.in
 production = "\n\n".join(excerpts).replace('#[cfg(target_arch = "aarch64")]\n', "")
 assert "asm!(" not in production
 
+# Exercise the exact fatal formatter and serial macros. Only the final
+# hardware halt is adapted to return, so the host can inspect captured bytes.
+fatal = item(MAIN, "fn fatal(message:")
+assert fatal.count("arch::halt_forever()") == 1
+adapted_fatal = fatal.replace(" -> !", "").replace("    arch::halt_forever()", "")
+production += "\n" + SERIAL[SERIAL.index("#[macro_export]"):]
+production += "\nmod serial { pub use super::print; }\n" + adapted_fatal
+
 with tempfile.TemporaryDirectory(prefix="makos-tty-serial-atomic-") as temporary:
     directory = Path(temporary)
     library = directory / "libmakos_tty.rlib"
@@ -96,9 +105,12 @@ with tempfile.TemporaryDirectory(prefix="makos-tty-serial-atomic-") as temporary
     source = directory / "serial_output.rs"
     source.write_text(production)
     fixture = directory / "test.rs"
-    fixture.write_text((ROOT / "scripts/test_aarch64_tty_serial_atomic.rs").read_text())
+    template = (ROOT / "scripts/test_aarch64_tty_serial_atomic.rs").read_text()
 
     def compile_fixture(name: str) -> Path:
+        # Keep production macro definitions at crate scope, not expanded by
+        # include!: Rust forbids absolute calls to macro-expanded exports.
+        fixture.write_text(template.replace('include!("serial_output.rs");', source.read_text()))
         binary = directory / name
         subprocess.run(
             ["rustc", "--edition=2024", "--test", str(fixture),
@@ -148,7 +160,19 @@ pub fn write_tty_bytes(bytes: &[u8], output_crlf: bool) {
     if negative.returncode == 0 or "serial byte emitted without the outer guard" not in negative.stdout + negative.stderr:
         raise SystemExit(f"Missing serial guard negative control did not fail correctly:\n{negative.stdout}{negative.stderr}")
 
+    # The former single guarded record still loses its reason if the host
+    # rejects at a chunk ending at the colon. A lock alone cannot fix this.
+    old_fatal = 'fn fatal(message: &str) { serial_println!("MAKOS_FATAL: {}", message); }'
+    source.write_text(production.replace(adapted_fatal, old_fatal))
+    negative = subprocess.run(
+        [str(compile_fixture("old-fatal-prefix")), "--exact", "fatal_detail_precedes_stop_marker_under_one_guard"],
+        capture_output=True, text=True, timeout=15,
+    )
+    if negative.returncode == 0 or "fatal reason missing before immediate stop marker" not in negative.stdout + negative.stderr:
+        raise SystemExit(f"Old fatal prefix negative control did not fail correctly:\n{negative.stdout}{negative.stderr}")
+
 print("MAKOS_AARCH64_TTY_SERIAL_ATOMIC_HOST_OK output=production-code "
       "tty_translation=production-crate byte_equivalence=preserved "
       "record_lock=whole-write contender=kernel-formatted-log "
-      "negative_controls=old-chunks,missing-guard adapters=host-mutex,byte-capture")
+      "fatal_detail=before-stop-marker chunk_boundaries=all "
+      "negative_controls=old-chunks,missing-guard,old-fatal-prefix adapters=host-mutex,byte-capture")

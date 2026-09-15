@@ -6,10 +6,20 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-09-11. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-09-15. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: Mac `2413aded422057bf345faf1a800c58d51c956656`
+Current qualification: user-reported Mac/HVF
+`9614841ffb349cfa235fd7348a27b4c7f42843ad` passes unit/check, image, EL0,
+self-host, Native/Python-role and Firefox-role SMP fixtures, cursor, and
+integrated-image/provenance preflight. Real Firefox fails before latency
+stages with serial ending at `MAKOS_FATAL:` without its reason. The reason
+must not be inferred. The [evidence-capture repair](FIREFOX-FATAL-CAPTURE-20260915.md)
+retains immediate fatal rejection and all runtime thresholds. It does not
+fix an identified guest cause or qualify Firefox. Strict real Firefox and
+final visible login remain unqualified. No Partial/Missing row is upgraded.
+
+Earlier qualification: Mac `2413aded422057bf345faf1a800c58d51c956656`
 stops at unit/check on a host-adapter collision with the SDK's fortified
 `snprintf` macro. Check and every later gate were not run; this is not a guest
 or Firefox runtime failure. The [host-only repair](EL0-DARWIN-ADAPTER-20260911.md)

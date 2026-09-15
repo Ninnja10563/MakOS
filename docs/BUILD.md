@@ -13,7 +13,16 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Darwin host-test update (2026-09-11): Mac `2413ade` stops during unit/check on
+Firefox evidence update (2026-09-15): Mac `9614841` passes unit/check, image,
+EL0, self-host, SMP-role fixtures, cursor and Firefox preflight; real Firefox
+fails with captured serial ending at the fatal prefix, before its reason.
+The [capture repair](FIREFOX-FATAL-CAPTURE-20260915.md) requires a new boot
+image, not a Firefox rebuild/restamp. It preserves immediate failure and
+existing timeouts/thresholds. Restart the same sequential Mac qualification
+from `make unit check`. The underlying guest fatal remains undiagnosed; do
+not claim a Firefox fix from this diagnostic change or Pi evidence.
+
+Historical Darwin host-test update (2026-09-11): Mac `2413ade` stops during unit/check on
 the emission adapter's collision with the SDK's fortified `snprintf` macro.
 The [host-only repair](EL0-DARWIN-ADAPTER-20260911.md) redirects one extracted
 call without changing SDK macros, fortification, `-Werror` or the compiler.
