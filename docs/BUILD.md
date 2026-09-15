@@ -13,6 +13,13 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Missing-image handoff: the user authorizes a fresh test image/account/profile
+if the original disk and account backups cannot be recovered. Use
+[the unique-directory fresh-baseline procedure](FIREFOX-FRESH-BASELINE.md),
+not the old missing filename or a rewritten manifest. Supported packaging and
+all runtime gates remain unchanged; the Mac testing agent must build and
+qualify the new artifact. Generated disks are not restored by pulling Git.
+
 Firefox evidence update (2026-09-15): Mac `9614841` passes unit/check, image,
 EL0, self-host, SMP-role fixtures, cursor and Firefox preflight; real Firefox
 fails with captured serial ending at the fatal prefix, before its reason.

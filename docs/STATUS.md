@@ -4,6 +4,14 @@ Last updated: 2026-09-15.
 
 ## Current qualification update
 
+The user now reports the Mac integrated image and preserved account/private
+data images are absent, with only a manifest remaining. A fresh test baseline
+is authorized if no backup is recoverable; see
+[the supported procedure](FIREFOX-FRESH-BASELINE.md). This is a missing-input
+blocker, not a new runtime result. Old accounts/profiles are not restored by
+building a new image. The authorization/handoff changes documentation only;
+runtime gates, provenance and the still-unknown guest fatal are unchanged.
+
 User-reported Mac/HVF `9614841ffb349cfa235fd7348a27b4c7f42843ad` passes
 unit/check, image, EL0 (contiguous record, 96 calls, three AP entries/joins),
 self-host, Native/Python-role and Firefox-role SMP fixtures, cursor and

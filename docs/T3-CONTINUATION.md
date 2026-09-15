@@ -27,6 +27,22 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### Authorized missing-image recovery / fresh baseline
+
+After the `f8a273d5ed955d8323f492b9721d318650dcc30b` evidence repair, the user
+reports the Mac integrated image is missing (manifest only), with preserved
+account/private data images also absent. Firefox qualification is blocked by
+missing input; no new runtime failure or pass is reported. The user explicitly
+authorizes a fresh test image/account/profile if no backup is recoverable.
+Follow [the Mac fresh-baseline procedure](FIREFOX-FRESH-BASELINE.md): preserve
+all surviving evidence, create only a unique new source/output directory, use
+supported release/integration/provenance paths, and record the new identity.
+Do not apply the old image hash to a new baseline or fabricate restored data.
+No guest/runtime/gate changes are needed. The underlying fatal remains
+unknown; stop on the first qualification failure. The Pi cannot create files
+on the Mac; creation and strict Firefox qualification belong to its testing
+agent. Earlier Pi runtime evidence below is historical, not rerun evidence.
+
 ### 2026-09-15 Firefox fatal evidence repair (current handoff)
 
 The user reports Mac/HVF `9614841ffb349cfa235fd7348a27b4c7f42843ad`
@@ -55,8 +71,9 @@ run locally. These results do not qualify the unknown Mac guest fatal.
 
 Rebuild the boot image and restart the unchanged sequential
 [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) at the exact pushed commit in
-chat. Keep the qualified `c23395ff4644b183` integrated image after exact hash
-and provenance verification. Stop on the first failure and preserve raw
+chat. Reuse the qualified `c23395ff4644b183` image only if recovered and its
+exact hash/provenance pass; otherwise follow the authorized fresh-baseline
+procedure above. Stop on the first failure and preserve raw
 serial, especially `MAKOS_FAILURE_DETAIL:` preceding any fatal prefix. No
 final visible login until strict real Firefox passes. Audit Partial/Missing
 rows remain unchanged; Pi results are not Mac/HVF qualification.

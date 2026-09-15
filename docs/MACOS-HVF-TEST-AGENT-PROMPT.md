@@ -16,6 +16,7 @@ Branch: main
 Previous exact Mac-tested baseline: 9614841ffb349cfa235fd7348a27b4c7f42843ad
 
 Use the exact full Firefox fatal-evidence repair commit supplied in chat,
+or its explicitly supplied documentation-only fresh-baseline handoff commit,
 descending from this baseline; do not test the baseline again or choose an
 arbitrary future descendant. The last run passed all earlier gates and
 Firefox preflight, then stopped at a kernel fatal whose captured serial ended
@@ -36,6 +37,7 @@ remote main to match, and record the exact tested commit.
    docs/EL0-EVIDENCE-ATOMICITY-20260911.md and
    docs/EL0-DARWIN-ADAPTER-20260911.md and
    docs/FIREFOX-FATAL-CAPTURE-20260915.md.
+   Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
    average, free/used memory, swap/compressor state, and every QEMU process.
@@ -234,6 +236,15 @@ remote main to match, and record the exact tested commit.
 4. The September 9 Mac run successfully published and preflighted
    `build/makos-integrated-c23395ff4644b183.img`, SHA-256
    `c23395ff4644b183991f2508bdd475ad2120110019f134ebd2b5af0c550a12dc`.
+   The user now reports that image and preserved account/private images are
+   missing; only the manifest remains. If recovery from available backups
+   fails, the user authorizes a fresh test image/account/profile. Follow
+   docs/FIREFOX-FRESH-BASELINE.md for a unique source/output directory and
+   explicitly label the result a new baseline, not recovered user data.
+   Do not run the old-path hash/preflight commands below if that file remains
+   absent; use the supported build/integration path and verify the newly
+   published image instead. A present candidate that fails verification is
+   still a stop-on-failure blocker, not permission to substitute another disk.
    This kernel diagnostic/capture repair does not change Firefox source or provenance.
    Prefer reuse of that preserved image after exact hash and unchanged
    preflight verification:
@@ -302,7 +313,9 @@ remote main to match, and record the exact tested commit.
    and five audited build hashes. Do not manually create, copy from another
    build, or edit the provenance record.
 
-   Set `SOURCE_DATA_IMAGE` to the intended existing MakOS data image. Never
+   Set `SOURCE_DATA_IMAGE` to the intended existing MakOS data image, or use
+   the authorized unique fresh-source procedure if no backup is recoverable.
+   For the fresh case, use its INTEGRATED_OUTPUT_DIR as well. Never
    overwrite it. Build the package and a new content-addressed clone with:
 
        test -f "$SOURCE_DATA_IMAGE"

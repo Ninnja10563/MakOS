@@ -4,6 +4,12 @@
 existing 1 GiB MakOS data image. It never changes the source image and never
 starts QEMU.
 
+If the original integrated and account/profile images are missing, a manifest
+cannot recreate them. The user has authorized a fresh test baseline when no
+backup is recoverable: follow [the fresh-image procedure](FIREFOX-FRESH-BASELINE.md).
+It creates a new sparse source in a unique directory and uses this same
+supported integrator and all provenance checks; it does not restore old data.
+
 ```sh
 make integrated-data-aarch64 \
   SOURCE_DATA_IMAGE=build/my-existing-data.img

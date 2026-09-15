@@ -19,6 +19,12 @@ retains immediate fatal rejection and all runtime thresholds. It does not
 fix an identified guest cause or qualify Firefox. Strict real Firefox and
 final visible login remain unqualified. No Partial/Missing row is upgraded.
 
+Subsequent input blocker: the user reports the integrated image and preserved
+account/private disks are missing. A manifest cannot restore their contents.
+The user authorizes a [fresh test baseline](FIREFOX-FRESH-BASELINE.md) if no
+backup is recoverable. This is new test data, not recovered user state or a
+new runtime pass. Existing provenance, assertions and thresholds remain.
+
 Earlier qualification: Mac `2413aded422057bf345faf1a800c58d51c956656`
 stops at unit/check on a host-adapter collision with the SDK's fortified
 `snprintf` macro. Check and every later gate were not run; this is not a guest
