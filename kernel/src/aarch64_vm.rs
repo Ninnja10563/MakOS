@@ -29,6 +29,7 @@ struct ProcessVm {
     root: u64,
     break_base: u64,
     current_break: u64,
+    generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -67,10 +68,12 @@ impl ProcessVm {
         root: 0,
         break_base: 0,
         current_break: 0,
+        generation: 0,
     };
 }
 
 struct VmState {
+    next_generation: u64,
     processes: [ProcessVm; MAX_PROCESSES],
     regions: RegionTable<MAX_REGIONS>,
     file_backings: [FileBacking; MAX_FILE_BACKINGS],
@@ -79,6 +82,7 @@ struct VmState {
 impl VmState {
     const fn new() -> Self {
         Self {
+            next_generation: 0,
             processes: [ProcessVm::EMPTY; MAX_PROCESSES],
             regions: RegionTable::new(),
             file_backings: [FileBacking::EMPTY; MAX_FILE_BACKINGS],
@@ -99,6 +103,9 @@ static VM: LockedVm = LockedVm {
 };
 
 fn with_state<R>(function: impl FnOnce(&mut VmState) -> R) -> R {
+    // Scheduler/IRQ paths can consult VM metadata on this CPU too. Never
+    // allow them to interrupt an owner and recursively wait for this lock.
+    let _interrupts = crate::arch::LocalInterruptMask::acquire();
     while VM
         .lock
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -115,6 +122,7 @@ pub fn initialize() {
     // VmState is hundreds of KiB. Constructing it as one temporary overflows
     // the 64 KiB boot stack and corrupts neighboring kernel statics.
     with_state(|state| {
+        state.next_generation = 0;
         for process in &mut state.processes {
             *process = ProcessVm::EMPTY;
         }
@@ -145,6 +153,7 @@ pub fn attach_process(pid: u64, root: u64, image_end: u64) -> bool {
         if state.processes.iter().any(|process| process.pid == pid) {
             return false;
         }
+        let generation = next_generation(state);
         let Some(slot) = state.processes.iter_mut().find(|process| process.pid == 0) else {
             return false;
         };
@@ -153,6 +162,7 @@ pub fn attach_process(pid: u64, root: u64, image_end: u64) -> bool {
             root,
             break_base,
             current_break: break_base,
+            generation,
         };
         true
     })
@@ -217,6 +227,7 @@ pub fn clone_process(parent_pid: u64, child_pid: u64, child_root: u64) -> bool {
                 ..backing
             };
         }
+        let generation = next_generation(state);
         let slot = state
             .processes
             .iter_mut()
@@ -227,6 +238,7 @@ pub fn clone_process(parent_pid: u64, child_pid: u64, child_root: u64) -> bool {
             root: child_root,
             break_base: parent.break_base,
             current_break: parent.current_break,
+            generation,
         };
         true
     })
@@ -279,6 +291,7 @@ pub fn replace_process(pid: u64, root: u64, image_end: u64) -> Option<(u64, usiz
             root,
             break_base,
             current_break: break_base,
+            generation: next_generation(state),
         };
         Some((previous_root, regions, pages))
     })
@@ -323,13 +336,12 @@ pub fn map_file(
         {
             return None;
         }
-        let covered = with_state(|state| range_covered(&state.regions, pid, requested, pages));
-        if covered && !unmap(pid, requested, pages as u64 * PAGE_SIZE) {
-            return None;
-        }
     }
     let base = with_state(|state| {
         process_root(state, pid)?;
+        if fixed && !unmap_locked(state, pid, requested, pages) {
+            return None;
+        }
         let base = if fixed {
             state
                 .regions
@@ -417,14 +429,11 @@ pub fn map_shared(
     {
         return None;
     }
-    if fixed {
-        let covered = with_state(|state| range_covered(&state.regions, pid, requested, pages));
-        if covered && !unmap(pid, requested, pages as u64 * PAGE_SIZE) {
-            return None;
-        }
-    }
     let base = with_state(|state| {
         process_root(state, pid)?;
+        if fixed && !unmap_locked(state, pid, requested, pages) {
+            return None;
+        }
         let base = if fixed {
             state
                 .regions
@@ -516,17 +525,17 @@ pub fn map_anonymous_fixed(pid: u64, base: u64, length: u64, protection: u64) ->
     // MAP_FIXED replaces every existing mapping in range.  This includes
     // low user mappings (for example ELF/brk guard pages), metadata-backed
     // VMAs, resident legacy mappings, and holes.
-    if !unmap(pid, base, pages as u64 * PAGE_SIZE) {
-        crate::serial_println!(
-            "MAKOS_AARCH64_ANON_FIXED_FAIL reason=unmap pid={} base={:#x} length={:#x} prot={}",
-            pid,
-            base,
-            length,
-            protection,
-        );
-        return None;
-    }
     with_state(|state| {
+        if !unmap_locked(state, pid, base, pages) {
+            crate::serial_println!(
+                "MAKOS_AARCH64_ANON_FIXED_FAIL reason=unmap pid={} base={:#x} length={:#x} prot={}",
+                pid,
+                base,
+                length,
+                protection,
+            );
+            return None;
+        }
         if process_root(state, pid).is_none() {
             crate::serial_println!(
                 "MAKOS_AARCH64_ANON_FIXED_FAIL reason=process pid={} base={:#x} length={:#x} prot={}",
@@ -580,27 +589,61 @@ pub(crate) fn executable_region_in(root: u64, address: u64) -> bool {
     })
 }
 
-pub fn handle_page_fault(pid: u64, address: u64, write: bool, execute: bool) -> bool {
-    let page = address & !(PAGE_SIZE - 1);
-    let Some((root, protection, backing)) = with_state(|state| {
-        let root = process_root(state, pid)?;
-        let region = state.regions.find(pid, page, PAGE_SIZE)?;
-        let backing = state.file_backings.iter().copied().find(|backing| {
-            backing.pid == pid
-                && page >= backing.base
-                && page < backing.end().unwrap_or(backing.base)
-        });
-        Some((root, u64::from(region.protection), backing))
-    }) else {
-        return false;
+#[derive(Clone, Copy)]
+struct FaultSnapshot {
+    root: u64,
+    generation: u64,
+    protection: u64,
+    backing: Option<FileBacking>,
+}
+
+enum FaultPreparation {
+    Complete(bool),
+    Populate(FaultSnapshot),
+}
+
+enum FaultCommit {
+    Installed,
+    Resolved(bool),
+    Retry,
+}
+
+fn access_allowed(protection: u64, write: bool, execute: bool) -> bool {
+    (!execute || protection & PROT_EXEC != 0)
+        && (!write || protection & PROT_WRITE != 0)
+        && (write || execute || protection & PROT_READ != 0)
+}
+
+fn prepare_fault(
+    state: &mut VmState,
+    pid: u64,
+    page: u64,
+    write: bool,
+    execute: bool,
+) -> FaultPreparation {
+    let Some(process) = state.processes.iter().find(|process| process.pid == pid) else {
+        return FaultPreparation::Complete(false);
     };
-    if (execute && protection & PROT_EXEC == 0)
-        || (write && protection & PROT_WRITE == 0)
-        || (!write && !execute && protection & PROT_READ == 0)
-        || crate::arch::user_page_physical_in(root, page).is_some()
-    {
-        return false;
+    let Some(region) = state.regions.find(pid, page, PAGE_SIZE) else {
+        return FaultPreparation::Complete(false);
+    };
+    let root = process.root;
+    let generation = process.generation;
+    let protection = u64::from(region.protection);
+    if !access_allowed(protection, write, execute) {
+        return FaultPreparation::Complete(false);
     }
+    // Another CPU may have resolved this translation after hardware raised
+    // our exception. A resident page is a success only when both the live VMA
+    // and the actual descriptor permit this access, never simply on presence.
+    if crate::arch::user_page_physical_in(root, page).is_some() {
+        return FaultPreparation::Complete(crate::arch::user_page_access_permitted_in(
+            root, page, write, execute,
+        ));
+    }
+    let backing = state.file_backings.iter().copied().find(|backing| {
+        backing.pid == pid && page >= backing.base && page < backing.end().unwrap_or(backing.base)
+    });
     if let Some(FileBacking {
         base,
         file_offset,
@@ -608,28 +651,39 @@ pub fn handle_page_fault(pid: u64, address: u64, write: bool, execute: bool) -> 
         ..
     }) = backing
     {
-        let offset = file_offset.checked_add(page.checked_sub(base).unwrap_or(0));
+        // Object page allocation performs no device I/O. Keep the VM lock
+        // across it and PTE commit so unmap cannot drop the object's last
+        // mapping reference and recycle a frame before publication.
+        let offset = file_offset.checked_add(page - base);
         let Some(frame) =
             offset.and_then(|offset| crate::aarch64_shmem::page_frame(shared.object, offset))
         else {
-            return false;
+            return FaultPreparation::Complete(false);
         };
-        crate::arch::map_user_page_permissions_in(
+        let installed = crate::arch::map_user_page_permissions_if_absent_in(
             root,
             page,
             frame,
             protection & PROT_READ != 0,
             protection & PROT_WRITE != 0,
             protection & PROT_EXEC != 0,
+        )
+        .is_ok();
+        // The object owns this frame, including on a losing commit.
+        return FaultPreparation::Complete(
+            installed || crate::arch::user_page_access_permitted_in(root, page, write, execute),
         );
-        return true;
     }
-    let Some(frame) = crate::mm::allocate_frame() else {
-        return false;
-    };
-    unsafe { ptr::write_bytes(frame as *mut u8, 0, PAGE_SIZE as usize) };
-    let output = unsafe { core::slice::from_raw_parts_mut(frame as *mut u8, PAGE_SIZE as usize) };
-    let loaded = match backing {
+    FaultPreparation::Populate(FaultSnapshot {
+        root,
+        generation,
+        protection,
+        backing,
+    })
+}
+
+fn load_fault_page(backing: Option<FileBacking>, page: u64, output: &mut [u8]) -> bool {
+    match backing {
         None => Some(0),
         Some(backing) => {
             let file_offset = backing
@@ -651,23 +705,81 @@ pub fn handle_page_fault(pid: u64, address: u64, write: bool, execute: bool) -> 
                 FileBackingSource::Shared(_) => None,
             }
         }
-    };
-    if loaded.is_none() {
-        let _ = crate::mm::free_frame(frame);
-        return false;
     }
-    if protection & PROT_EXEC != 0 {
-        crate::arch::sync_user_code(frame);
+    .is_some()
+}
+
+pub fn handle_page_fault(pid: u64, address: u64, write: bool, execute: bool) -> bool {
+    let page = address & !(PAGE_SIZE - 1);
+    loop {
+        let snapshot = match with_state(|state| prepare_fault(state, pid, page, write, execute)) {
+            FaultPreparation::Complete(resolved) => return resolved,
+            FaultPreparation::Populate(snapshot) => snapshot,
+        };
+        let Some(frame) = crate::mm::allocate_frame() else {
+            return false;
+        };
+        unsafe { ptr::write_bytes(frame as *mut u8, 0, PAGE_SIZE as usize) };
+        let output =
+            unsafe { core::slice::from_raw_parts_mut(frame as *mut u8, PAGE_SIZE as usize) };
+        // No VM or page-table lock is held while reading package storage.
+        // AP block requests require CPU0 service; making CPU0 wait for an AP
+        // holding either lock here would deadlock that service path.
+        let loaded = load_fault_page(snapshot.backing, page, output);
+        if loaded && snapshot.protection & PROT_EXEC != 0 {
+            crate::arch::sync_user_code(frame);
+        }
+        let commit = with_state(|state| {
+            if !state.processes.iter().any(|process| {
+                process.pid == pid
+                    && process.root == snapshot.root
+                    && process.generation == snapshot.generation
+            }) {
+                return FaultCommit::Retry;
+            }
+            if !loaded {
+                // A competing CPU can still have supplied the page while
+                // this private read failed. Accept only its permitted live
+                // translation; otherwise report the original I/O failure.
+                return FaultCommit::Resolved(crate::arch::user_page_access_permitted_in(
+                    snapshot.root,
+                    page,
+                    write,
+                    execute,
+                ));
+            }
+            match crate::arch::map_user_page_permissions_if_absent_in(
+                snapshot.root,
+                page,
+                frame,
+                snapshot.protection & PROT_READ != 0,
+                snapshot.protection & PROT_WRITE != 0,
+                snapshot.protection & PROT_EXEC != 0,
+            ) {
+                Ok(()) => FaultCommit::Installed,
+                Err(_) => FaultCommit::Resolved(crate::arch::user_page_access_permitted_in(
+                    snapshot.root,
+                    page,
+                    write,
+                    execute,
+                )),
+            }
+        });
+        if matches!(commit, FaultCommit::Installed) {
+            return true;
+        }
+        if crate::mm::free_frame(frame).is_err() {
+            crate::fatal("AArch64 unused fault frame release failed");
+        }
+        match commit {
+            FaultCommit::Resolved(resolved) => return resolved,
+            // A process-wide revision can change for an unrelated VMA too.
+            // Resnapshot instead of turning benign concurrent mmap activity
+            // into an unhandled user exception. No stale data is installed.
+            FaultCommit::Retry => continue,
+            FaultCommit::Installed => unreachable!(),
+        }
     }
-    crate::arch::map_user_page_permissions_in(
-        root,
-        page,
-        frame,
-        protection & PROT_READ != 0,
-        protection & PROT_WRITE != 0,
-        protection & PROT_EXEC != 0,
-    );
-    true
 }
 
 /// Resolve lazy mappings before kernel copies into/out of user buffers.
@@ -732,39 +844,48 @@ pub fn unmap(pid: u64, base: u64, length: u64) -> bool {
     if base < crate::arch::USER_ADDRESS_BASE || end > crate::arch::USER_MMAP_LIMIT {
         return false;
     }
-    let Some(root) = with_state(|state| {
-        let root = process_root(state, pid)?;
-        let mut cursor = base;
-        while cursor < end {
-            if let Some(region) = state.regions.find(pid, cursor, PAGE_SIZE) {
-                let chunk_end = region.end(PAGE_SIZE)?.min(end);
-                let chunk_pages = ((chunk_end - cursor) / PAGE_SIZE) as usize;
-                if !state.regions.remove(pid, cursor, chunk_pages, PAGE_SIZE) {
-                    crate::fatal("AArch64 VM range metadata removal failed");
-                }
-                cursor = chunk_end;
-            } else {
-                cursor += PAGE_SIZE;
-            }
-        }
-        Some(root)
-    }) else {
+    with_state(|state| unmap_locked(state, pid, base, pages))
+}
+
+// Metadata removal, PTE removal and backing-reference release are one VM
+// transaction. A fault may perform I/O outside it, but cannot publish across
+// this generation change or race a new MAP_FIXED occupant of the range.
+fn unmap_locked(state: &mut VmState, pid: u64, base: u64, pages: usize) -> bool {
+    let Some(root) = process_root(state, pid) else {
         return false;
     };
+    let Some(end) = base.checked_add(pages as u64 * PAGE_SIZE) else {
+        return false;
+    };
+    invalidate_faults(state, pid);
+    let mut cursor = base;
+    while cursor < end {
+        if let Some(region) = state.regions.find(pid, cursor, PAGE_SIZE) {
+            let chunk_end = region
+                .end(PAGE_SIZE)
+                .unwrap_or_else(|| crate::fatal("AArch64 VM region overflow"))
+                .min(end);
+            let chunk_pages = ((chunk_end - cursor) / PAGE_SIZE) as usize;
+            if !state.regions.remove(pid, cursor, chunk_pages, PAGE_SIZE) {
+                crate::fatal("AArch64 VM range metadata removal failed");
+            }
+            cursor = chunk_end;
+        } else {
+            cursor += PAGE_SIZE;
+        }
+    }
     for page in 0..pages {
         let address = base + page as u64 * PAGE_SIZE;
-        let shared = with_state(|state| shared_backing_at(state, pid, address).is_some());
+        let shared = shared_backing_at(state, pid, address).is_some();
         if let Some(frame) = crate::arch::unmap_user_page_in(root, address) {
             if !shared && crate::mm::free_frame(frame).is_err() {
                 crate::fatal("AArch64 VM frame release failed");
             }
         }
     }
-    with_state(|state| {
-        if !remove_file_backing_range(state, pid, base, pages) {
-            crate::fatal("AArch64 file backing split capacity exhausted");
-        }
-    });
+    if !remove_file_backing_range(state, pid, base, pages) {
+        crate::fatal("AArch64 file backing split capacity exhausted");
+    }
     true
 }
 
@@ -802,38 +923,40 @@ pub fn advise(pid: u64, base: u64, length: u64, advice: u64) -> bool {
     let Some(pages) = exact_pages(base, length) else {
         return false;
     };
-    let Some(root) = with_state(|state| {
-        let root = process_root(state, pid)?;
+    with_state(|state| {
+        let Some(root) = process_root(state, pid) else {
+            return false;
+        };
         if !range_covered(&state.regions, pid, base, pages) {
-            return None;
+            return false;
         }
         if advice == MADV_FREE {
-            let end = base.checked_add(pages as u64 * PAGE_SIZE)?;
+            let Some(end) = base.checked_add(pages as u64 * PAGE_SIZE) else {
+                return false;
+            };
             if state.file_backings.iter().any(|backing| {
                 backing.pid == pid
                     && backing.base < end
                     && backing.end().is_some_and(|backing_end| base < backing_end)
             }) {
-                return None;
+                return false;
             }
         }
-        Some(root)
-    }) else {
-        return false;
-    };
-    if !matches!(advice, MADV_DONTNEED | MADV_FREE) {
-        return true;
-    }
-    for page in 0..pages {
-        let address = base + page as u64 * PAGE_SIZE;
-        let shared = with_state(|state| shared_backing_at(state, pid, address).is_some());
-        if let Some(frame) = crate::arch::unmap_user_page_in(root, address) {
-            if !shared && crate::mm::free_frame(frame).is_err() {
-                crate::fatal("AArch64 madvise frame release failed");
+        if !matches!(advice, MADV_DONTNEED | MADV_FREE) {
+            return true;
+        }
+        invalidate_faults(state, pid);
+        for page in 0..pages {
+            let address = base + page as u64 * PAGE_SIZE;
+            let shared = shared_backing_at(state, pid, address).is_some();
+            if let Some(frame) = crate::arch::unmap_user_page_in(root, address) {
+                if !shared && crate::mm::free_frame(frame).is_err() {
+                    crate::fatal("AArch64 madvise frame release failed");
+                }
             }
         }
-    }
-    true
+        true
+    })
 }
 
 pub fn protect(pid: u64, base: u64, length: u64, protection: u64) -> bool {
@@ -843,96 +966,108 @@ pub fn protect(pid: u64, base: u64, length: u64, protection: u64) -> bool {
     if !valid_protection(protection) {
         return false;
     }
-    let Some(root) = with_state(|state| {
-        let root = process_root(state, pid)?;
-        if !range_covered(&state.regions, pid, base, pages) {
-            let end = base.checked_add(pages as u64 * PAGE_SIZE)?;
-            if base < crate::arch::USER_ADDRESS_BASE
-                || end > crate::arch::USER_MMAP_LIMIT
-                || (0..pages).any(|page| {
-                    crate::arch::user_page_physical_in(root, base + page as u64 * PAGE_SIZE)
-                        .is_none()
-                })
+    with_state(|state| {
+        let Some(root) = protect_metadata(state, pid, base, pages, protection) else {
+            return false;
+        };
+        invalidate_faults(state, pid);
+        let writable = protection & PROT_WRITE != 0;
+        let executable = protection & PROT_EXEC != 0;
+        for page in 0..pages {
+            let address = base + page as u64 * PAGE_SIZE;
+            if executable {
+                if let Some(frame) = crate::arch::user_page_physical_in(root, address) {
+                    crate::arch::sync_user_code(frame);
+                }
+            }
+            if crate::arch::user_page_physical_in(root, address).is_some()
+                && !crate::arch::protect_user_page_permissions_in(
+                    root,
+                    address,
+                    protection & PROT_READ != 0,
+                    writable,
+                    executable,
+                )
             {
-                return None;
+                crate::fatal("AArch64 VM metadata/page-table mismatch on protect");
             }
-            return Some(root);
         }
-        let end = base + pages as u64 * PAGE_SIZE;
-        let mut cursor = base;
-        let mut extra_slots = 0usize;
-        while cursor < end {
-            let region = state.regions.find(pid, cursor, PAGE_SIZE)?;
-            let chunk_end = region.end(PAGE_SIZE)?.min(end);
-            if region.protection != protection as u8 {
-                extra_slots += usize::from(cursor != region.base);
-                extra_slots += usize::from(chunk_end != region.end(PAGE_SIZE)?);
-            }
-            cursor = chunk_end;
-        }
-        if state.regions.free_slots() < extra_slots {
-            crate::serial_println!(
-                "MAKOS_AARCH64_PROTECT_FAIL reason=slots pid={} base={:#x} length={:#x} prot={} needed={} regions={} free_slots={}",
-                pid,
-                base,
-                length,
-                protection,
-                extra_slots,
-                state.regions.count(pid),
-                state.regions.free_slots(),
-            );
+        true
+    })
+}
+
+fn protect_metadata(
+    state: &mut VmState,
+    pid: u64,
+    base: u64,
+    pages: usize,
+    protection: u64,
+) -> Option<u64> {
+    let root = process_root(state, pid)?;
+    if !range_covered(&state.regions, pid, base, pages) {
+        let end = base.checked_add(pages as u64 * PAGE_SIZE)?;
+        if base < crate::arch::USER_ADDRESS_BASE
+            || end > crate::arch::USER_MMAP_LIMIT
+            || (0..pages).any(|page| {
+                crate::arch::user_page_physical_in(root, base + page as u64 * PAGE_SIZE).is_none()
+            })
+        {
             return None;
         }
-        cursor = base;
-        while cursor < end {
-            let region = state.regions.find(pid, cursor, PAGE_SIZE)?;
-            let chunk_end = region.end(PAGE_SIZE)?.min(end);
-            let chunk_pages = ((chunk_end - cursor) / PAGE_SIZE) as usize;
-            if region.protection != protection as u8
-                && !state
-                    .regions
-                    .protect(pid, cursor, chunk_pages, protection as u8, PAGE_SIZE)
-            {
-                crate::fatal("AArch64 VM range metadata protection failed");
-            }
-            cursor = chunk_end;
-        }
-        Some(root)
-    }) else {
-        return false;
-    };
-    let writable = protection & PROT_WRITE != 0;
-    let executable = protection & PROT_EXEC != 0;
-    for page in 0..pages {
-        let address = base + page as u64 * PAGE_SIZE;
-        if executable {
-            if let Some(frame) = crate::arch::user_page_physical_in(root, address) {
-                crate::arch::sync_user_code(frame);
-            }
-        }
-        if crate::arch::user_page_physical_in(root, address).is_some()
-            && !crate::arch::protect_user_page_permissions_in(
-                root,
-                address,
-                protection & PROT_READ != 0,
-                writable,
-                executable,
-            )
-        {
-            crate::fatal("AArch64 VM metadata/page-table mismatch on protect");
-        }
+        return Some(root);
     }
-    true
+    let end = base + pages as u64 * PAGE_SIZE;
+    let mut cursor = base;
+    let mut extra_slots = 0usize;
+    while cursor < end {
+        let region = state.regions.find(pid, cursor, PAGE_SIZE)?;
+        let chunk_end = region.end(PAGE_SIZE)?.min(end);
+        if region.protection != protection as u8 {
+            extra_slots += usize::from(cursor != region.base);
+            extra_slots += usize::from(chunk_end != region.end(PAGE_SIZE)?);
+        }
+        cursor = chunk_end;
+    }
+    if state.regions.free_slots() < extra_slots {
+        crate::serial_println!(
+            "MAKOS_AARCH64_PROTECT_FAIL reason=slots pid={} base={:#x} length={:#x} prot={} needed={} regions={} free_slots={}",
+            pid,
+            base,
+            pages as u64 * PAGE_SIZE,
+            protection,
+            extra_slots,
+            state.regions.count(pid),
+            state.regions.free_slots(),
+        );
+        return None;
+    }
+    cursor = base;
+    while cursor < end {
+        let region = state.regions.find(pid, cursor, PAGE_SIZE)?;
+        let chunk_end = region.end(PAGE_SIZE)?.min(end);
+        let chunk_pages = ((chunk_end - cursor) / PAGE_SIZE) as usize;
+        if region.protection != protection as u8
+            && !state
+                .regions
+                .protect(pid, cursor, chunk_pages, protection as u8, PAGE_SIZE)
+        {
+            crate::fatal("AArch64 VM range metadata protection failed");
+        }
+        cursor = chunk_end;
+    }
+    Some(root)
 }
 
 pub fn brk(pid: u64, requested: u64) -> Option<u64> {
-    let process = with_state(|state| {
-        state
-            .processes
-            .iter()
-            .copied()
-            .find(|process| process.pid == pid)
-    })?;
+    with_state(|state| brk_locked(state, pid, requested))
+}
+
+fn brk_locked(state: &mut VmState, pid: u64, requested: u64) -> Option<u64> {
+    let process = state
+        .processes
+        .iter()
+        .copied()
+        .find(|process| process.pid == pid)?;
     if requested == 0 {
         return Some(process.current_break);
     }
@@ -941,6 +1076,7 @@ pub fn brk(pid: u64, requested: u64) -> Option<u64> {
     }
     let old_limit = align_up(process.current_break);
     let new_limit = align_up(requested);
+    invalidate_faults(state, pid);
     if new_limit > old_limit {
         let pages = ((new_limit - old_limit) / PAGE_SIZE) as usize;
         let mut mapped = 0usize;
@@ -970,15 +1106,31 @@ pub fn brk(pid: u64, requested: u64) -> Option<u64> {
             }
         }
     }
-    with_state(|state| {
-        let process = state
-            .processes
-            .iter_mut()
-            .find(|process| process.pid == pid)
-            .unwrap_or_else(|| crate::fatal("AArch64 brk process disappeared"));
-        process.current_break = requested;
-    });
+    let process = state
+        .processes
+        .iter_mut()
+        .find(|process| process.pid == pid)
+        .unwrap_or_else(|| crate::fatal("AArch64 brk process disappeared"));
+    process.current_break = requested;
     Some(requested)
+}
+
+fn next_generation(state: &mut VmState) -> u64 {
+    state.next_generation = state
+        .next_generation
+        .checked_add(1)
+        .unwrap_or_else(|| crate::fatal("AArch64 VM generation exhausted"));
+    state.next_generation
+}
+
+fn invalidate_faults(state: &mut VmState, pid: u64) {
+    let generation = next_generation(state);
+    let process = state
+        .processes
+        .iter_mut()
+        .find(|process| process.pid == pid)
+        .unwrap_or_else(|| crate::fatal("AArch64 VM mutation owner absent"));
+    process.generation = generation;
 }
 
 fn process_root(state: &VmState, pid: u64) -> Option<u64> {

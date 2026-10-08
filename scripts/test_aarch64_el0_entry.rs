@@ -58,6 +58,7 @@ mod aarch64_vm {
             state.processes[index] = ProcessVm {
                 pid,
                 root,
+                generation: 0,
                 break_base: 0,
                 current_break: 0,
             };

@@ -43,6 +43,7 @@ functions = "\n".join(
         "fn user_page_slot(",
         "fn user_page_slot_from_low(",
         "fn table_child(",
+        "fn read_table_entry(",
     )
 )
 mapping = "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n" + item(ARCH, "enum UserInstructionMapping")

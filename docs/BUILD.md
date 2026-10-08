@@ -13,14 +13,35 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Missing-image handoff: the user authorizes a fresh test image/account/profile
+Concurrent VM fault repair (2026-10-08): the attached Mac report at
+`172975dc7d1e9a55d820ba3e7f34d8f51032756d` identifies a duplicate-page mapping
+fatal before Firefox paint. Rebuild the kernel and dynamic-musl fixture with
+`make image-aarch64`. The normal `make unit check` includes production-code
+page-table/fault concurrency tests and negative controls. Add
+`make test-aarch64-vm-fault-runtime` after the unchanged EL0 gate in the
+sequential [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md). The added gate uses
+one private guest, retains its session/disks/serial, and checks 16 same-page
+rounds, 48 distinct pages in fresh 2 MiB subtrees, and 288 coherent reads on
+AP1-3. It is not Firefox execution; old gate deadlines/assertions are unchanged.
+See [the repair report](FIREFOX-VM-FAULT-20261008.md) for locking and scope.
+
+The Mac has already completed the authorized fresh release/integration:
+`build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img`,
+SHA-256 `3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`.
+Preserve it, its manifest/provenance, and the release caches. Reuse it after
+the exact hash and unchanged image preflight pass; no Firefox rebuild/restamp
+is required for this kernel/probe repair. The new account/profile was created
+in the retained private runtime clone, not the master or recovered old state.
+Strict Firefox and final login remain Mac/HVF work.
+
+Historical missing-image handoff: the user authorizes a fresh test image/account/profile
 if the original disk and account backups cannot be recovered. Use
 [the unique-directory fresh-baseline procedure](FIREFOX-FRESH-BASELINE.md),
 not the old missing filename or a rewritten manifest. Supported packaging and
 all runtime gates remain unchanged; the Mac testing agent must build and
 qualify the new artifact. Generated disks are not restored by pulling Git.
 
-Firefox evidence update (2026-09-15): Mac `9614841` passes unit/check, image,
+Historical Firefox evidence update (2026-09-15): Mac `9614841` passes unit/check, image,
 EL0, self-host, SMP-role fixtures, cursor and Firefox preflight; real Firefox
 fails with captured serial ending at the fatal prefix, before its reason.
 The [capture repair](FIREFOX-FATAL-CAPTURE-20260915.md) requires a new boot

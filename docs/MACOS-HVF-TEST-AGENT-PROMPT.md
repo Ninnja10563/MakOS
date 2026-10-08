@@ -13,17 +13,18 @@ gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 9614841ffb349cfa235fd7348a27b4c7f42843ad
+Previous exact Mac-tested baseline: 172975dc7d1e9a55d820ba3e7f34d8f51032756d
 
-Use the exact full Firefox fatal-evidence repair commit supplied in chat,
-or its explicitly supplied documentation-only fresh-baseline handoff commit,
+Use the exact full concurrent-VM-fault repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
-arbitrary future descendant. The last run passed all earlier gates and
-Firefox preflight, then stopped at a kernel fatal whose captured serial ended
-exactly at MAKOS_FATAL: without its reason. The guest cause remains unknown.
-This evidence repair emits its reason before the unchanged fatal marker and
-preserves queued raw bytes during cleanup; it does not claim to fix that
-guest failure. Do not change fatal assertions, timeouts, thresholds, SDK
+arbitrary future descendant. The last run passed all earlier gates, a fresh
+supported Mac release/integration, and Firefox preflight, then stopped before
+paint with complete raw `duplicate AArch64 user-page mapping` fatal evidence.
+Its precise offending VA/caller was not captured. The repair serializes page
+table creation/publication and validates VM generations at fault commit;
+private losing/stale frames are reclaimed and resident permissions checked.
+It retains the strict duplicate guard. Pi functional tests do not qualify
+Firefox on this Mac. Do not change fatal assertions, timeouts, thresholds, SDK
 macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
 HOST_CC to substitute another compiler. It retains
 the preceding whole-record emission, executable-context and futex repairs;
@@ -36,7 +37,8 @@ remote main to match, and record the exact tested commit.
    docs/FIREFOX-PACKAGING-20260908.md, docs/FIREFOX-EL0-ENTRY-20260910.md,
    docs/EL0-EVIDENCE-ATOMICITY-20260911.md and
    docs/EL0-DARWIN-ADAPTER-20260911.md and
-   docs/FIREFOX-FATAL-CAPTURE-20260915.md.
+   docs/FIREFOX-FATAL-CAPTURE-20260915.md and
+   docs/FIREFOX-VM-FAULT-20261008.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -53,6 +55,7 @@ remote main to match, and record the exact tested commit.
        make unit check
        make image-aarch64
        make test-aarch64-el0-entry-runtime
+       make test-aarch64-vm-fault-runtime
        make test-aarch64-selfhost-runtime
        make test-aarch64-native-smp-runtime
        make test-aarch64-production-smp-runtime
@@ -73,6 +76,20 @@ remote main to match, and record the exact tested commit.
    Preserve its printed session directory, session.json/PID/inherited QMP fd,
    private boot/data/vars, and serial.log on success or failure. This fixture
    is not Firefox and cannot replace its unchanged strict gate.
+
+   The added VM-fault gate must report
+   `MAKOS_AARCH64_VM_FAULT_RUNTIME_OK accel=hvf fixture=dynamic-musl-pthread`,
+   the same three AP workers as its own unchanged EL0 proof,
+   `rounds=16 same_page_rounds=16 distinct_pages=48 table_stride=2097152`,
+   `coherent_checks=288 first_touch=barrier-released`, status-42 joins,
+   `cleanup=unmapped boot=unchanged`, and exactly one complete guest
+   `MAKOS_MUSL_VM_FAULT_OK` record. Preserve its printed nested session,
+   private boot/data/vars, session.json/PID/QMP descriptor and final serial.
+   This exercises genuine concurrent first touches but deliberately reports
+   `kernel_loser_interleaving=not-counted firefox=not-tested`; do not claim a
+   deterministic losing kernel interleaving or browser pass from the marker.
+   Deterministic host tests force that race separately. The added wrapper
+   launches one EL0 harness, with its original deadlines and checks intact.
 
    Record the boot-image SHA-256 both before and immediately after the
    self-host run, because its phony image prerequisite rebuilds that file;
@@ -233,33 +250,36 @@ remote main to match, and record the exact tested commit.
    cursor, `completion=fast-plus-bounded-recovery`, and zero GPU timeouts or
    errors. Every delayed completion, if any, must have a matching recovered
    record with the same queue and command.
-4. The September 9 Mac run successfully published and preflighted
-   `build/makos-integrated-c23395ff4644b183.img`, SHA-256
-   `c23395ff4644b183991f2508bdd475ad2120110019f134ebd2b5af0c550a12dc`.
-   The user now reports that image and preserved account/private images are
-   missing; only the manifest remains. If recovery from available backups
-   fails, the user authorizes a fresh test image/account/profile. Follow
-   docs/FIREFOX-FRESH-BASELINE.md for a unique source/output directory and
-   explicitly label the result a new baseline, not recovered user data.
-   Do not run the old-path hash/preflight commands below if that file remains
-   absent; use the supported build/integration path and verify the newly
-   published image instead. A present candidate that fails verification is
-   still a stop-on-failure blocker, not permission to substitute another disk.
-   This kernel diagnostic/capture repair does not change Firefox source or provenance.
-   Prefer reuse of that preserved image after exact hash and unchanged
-   preflight verification:
+4. The October 8 Mac report successfully published and preflighted
+   `build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img`,
+   SHA-256
+   `3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`.
+   Its matching manifest SHA-256 is
+   `a9615cc28c989bfee754a1f4b448800fa22f5a4cd40f5b8a85d0eb743db0c7a1`.
+   This is the authorized fresh packaged master, not recovery of the missing
+   September image. Its runtime created NEW account/profile state in the
+   retained private data clone, leaving this master unchanged. Preserve this image, its manifest/provenance,
+   private test disks and release caches. The kernel/probe repair does not
+   change Firefox source, patches, package identity or provenance. Prefer
+   reuse after exact hash and unchanged preflight verification:
 
-       shasum -a 256 build/makos-integrated-c23395ff4644b183.img
-       python3 scripts/verify_firefox_runtime_image.py build/makos-integrated-c23395ff4644b183.img
+       INTEGRATED_IMAGE=build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img
+       shasum -a 256 "$INTEGRATED_IMAGE"
+       test "$(shasum -a 256 "$INTEGRATED_IMAGE" | awk '{print $1}')" = 3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3
+       python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
 
-   If both pass, set INTEGRATED_IMAGE to that exact image and proceed to step
-   5 without rebuilding/restamping Firefox. The boot image must be rebuilt
+   Only if the exact hash comparison and preflight pass, proceed to step 5
+   without rebuilding/restamping Firefox. The boot image must be rebuilt
    from the repair (the Make runtime targets do this); do not reuse the old
    kernel. Record the new boot hash independently of the preserved data hash.
 
-   If that image is unavailable, use only the supported release/integration
-   path below; if it exists but fails verification, preserve it and stop with
-   the exact blocker. Do not bypass preflight or replace evidence silently.
+   If that image is unavailable, stop and report the missing artifact before
+   starting a new expensive release/integration attempt. A manifest or the
+   evidence ZIP cannot restore its bytes; the ZIP does not contain the large
+   image. The supported fallback below and docs/FIREFOX-FRESH-BASELINE.md
+   remain available after direction to create another baseline. If the image
+   exists but fails verification, preserve it and stop with the exact blocker.
+   Do not bypass preflight or replace evidence silently.
    The historical `build/makos-integrated-a9c604254f094de2.img` predates
    Firefox patch `0060` and is not valid for this increment. The September 8
    report qualified the earlier 59-patch release build but found Mozilla's
@@ -393,7 +413,8 @@ remote main to match, and record the exact tested commit.
    On a fatal, preserve the final raw serial file after the harness exits,
    not just the exception's earlier snapshot. Include the complete
    MAKOS_FAILURE_DETAIL: record that precedes the unchanged MAKOS_FATAL:
-   marker, and the exact preceding thread/CPU/root records. Do not infer a
+   marker, any MAKOS_AARCH64_DUPLICATE_MAPPING record (CPU/root/VA/candidate
+   physical/existing entry), and the exact preceding thread/CPU/root records. Do not infer a
    missing reason, join fragments into successful evidence, retry after the
    first failure, or launch the final visible login. Capture any temporary
    session paths/PID/QMP descriptors while the harness is running; where its

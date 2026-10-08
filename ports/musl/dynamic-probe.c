@@ -11,13 +11,19 @@
 #include <unistd.h>
 
 enum { WORKERS = 3, RX_CALLS = 32, PAGE_BYTES = 4096 };
+enum { FAULT_ROUNDS = 16, TABLE_BYTES = 2 * 1024 * 1024,
+	FAULT_BYTES = (FAULT_ROUNDS * 2 + 1) * TABLE_BYTES };
 static atomic_uint ready_workers;
 static atomic_uint failed_worker;
+static atomic_uint fault_arrivals;
+static atomic_uint fault_generation;
 
 struct worker_result {
 	unsigned cpu;
 	long tid;
 	unsigned completed;
+	unsigned fault_rounds;
+	uintptr_t fault_base;
 	int (*resume_probe)(void);
 };
 
@@ -38,6 +44,85 @@ static int emit_el0_result(const struct worker_result results[WORKERS],
 	 * not permission to retry a suffix around another CPU's diagnostics. */
 	return write(STDOUT_FILENO, record, (size_t)length) == (ssize_t)length
 		? 0 : -1;
+}
+
+static int emit_fault_result(const struct worker_result results[WORKERS])
+{
+	char record[512];
+	int length = snprintf(record, sizeof record,
+		"MAKOS_MUSL_VM_FAULT_OK loader=musl threads=3 "
+		"singleton=0x2,0x4,0x8 tids=%ld,%ld,%ld rounds=16 "
+		"same_page_rounds=16 distinct_pages=48 table_stride=2097152 "
+		"base=%p coherent_checks=288 first_touch=barrier-released "
+		"statuses=42,42,42 cleanup=unmapped\n",
+		results[0].tid, results[1].tid, results[2].tid,
+		(void *)results[0].fault_base);
+	if (length <= 0 || (size_t)length >= sizeof record)
+		return -1;
+	return write(STDOUT_FILENO, record, (size_t)length) == (ssize_t)length
+		? 0 : -1;
+}
+
+/* The last arrival publishes every participant's writes before releasing
+ * the next generation. Each worker is pinned to a different application
+ * processor. This is a real access race, not proof that every round takes
+ * the losing-fault kernel path: that interleaving has a separate host test. */
+static int fault_barrier(void)
+{
+	unsigned generation = atomic_load_explicit(&fault_generation,
+		memory_order_acquire);
+	if (atomic_fetch_add_explicit(&fault_arrivals, 1,
+		memory_order_acq_rel) == WORKERS - 1) {
+		atomic_store_explicit(&fault_arrivals, 0, memory_order_relaxed);
+		atomic_fetch_add_explicit(&fault_generation, 1, memory_order_release);
+	} else {
+		while (atomic_load_explicit(&fault_generation,
+			memory_order_acquire) == generation) {
+			if (atomic_load_explicit(&failed_worker, memory_order_acquire))
+				return -1;
+			sched_yield();
+		}
+	}
+	return atomic_load_explicit(&failed_worker, memory_order_acquire) ? -1 : 0;
+}
+
+static uint64_t fault_value(unsigned round, unsigned worker)
+{
+	return ((uint64_t)(round + 1) << 32) | (worker + 1);
+}
+
+static int concurrent_first_touches(struct worker_result *result)
+{
+	unsigned worker = result->cpu - 1;
+	for (unsigned round = 0; round < FAULT_ROUNDS; round++) {
+		uintptr_t base = result->fault_base + (uintptr_t)round * 2 * TABLE_BYTES;
+		volatile uint64_t *shared = (volatile uint64_t *)base;
+		volatile uint64_t *distinct = (volatile uint64_t *)(base + TABLE_BYTES);
+		if (fault_barrier())
+			return -1;
+		/* The parent never touches this reservation. Disjoint words on
+		 * one fresh page exercise competing first faults to one leaf. */
+		shared[worker] = fault_value(round, worker);
+		if (fault_barrier())
+			return -1;
+		for (unsigned peer = 0; peer < WORKERS; peer++)
+			if (shared[peer] != fault_value(round, peer))
+				return -1;
+		if (fault_barrier())
+			return -1;
+		/* A different untouched 2 MiB subtree tests concurrent table
+		 * creation for distinct leaves, not just a shared-page winner. */
+		distinct[worker * PAGE_BYTES / sizeof *distinct] =
+			fault_value(round, worker) ^ UINT64_C(0x5a5a000000000000);
+		if (fault_barrier())
+			return -1;
+		for (unsigned peer = 0; peer < WORKERS; peer++)
+			if (distinct[peer * PAGE_BYTES / sizeof *distinct] !=
+			    (fault_value(round, peer) ^ UINT64_C(0x5a5a000000000000)))
+				return -1;
+		result->fault_rounds++;
+	}
+	return 0;
 }
 
 static void *dynamic_worker(void *argument)
@@ -63,6 +148,10 @@ static void *dynamic_worker(void *argument)
 		if (atomic_load_explicit(&failed_worker, memory_order_acquire))
 			return (void *)(uintptr_t)123;
 		sched_yield();
+	}
+	if (concurrent_first_touches(result)) {
+		atomic_store_explicit(&failed_worker, 1, memory_order_release);
+		return (void *)(uintptr_t)134;
 	}
 	for (unsigned index = 0; index < RX_CALLS; index++) {
 		if (result->resume_probe() != 42)
@@ -115,10 +204,26 @@ int main(int argc, char **argv)
 	if (mprotect(code, PAGE_BYTES * 2, PROT_READ | PROT_EXEC))
 		return 129;
 
+	/* Reserve virtual space only: 16 shared pages and 48 distinct pages
+	 * will demand 256 KiB of physical storage, plus page tables. Starting
+	 * each phase in a fresh aligned 2 MiB subtree exposes table publication
+	 * races as well as duplicate leaf installation. */
+	void *fault_region = mmap(0, FAULT_BYTES, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (fault_region == MAP_FAILED)
+		return 135;
+	uintptr_t fault_base = ((uintptr_t)fault_region + TABLE_BYTES - 1) &
+		~(uintptr_t)(TABLE_BYTES - 1);
+	if (fault_base < UINT64_C(0x80000000) ||
+	    fault_base + (uintptr_t)FAULT_ROUNDS * 2 * TABLE_BYTES >
+		(uintptr_t)fault_region + FAULT_BYTES)
+		return 136;
+
 	pthread_t threads[WORKERS];
 	struct worker_result results[WORKERS] = {0};
 	for (unsigned index = 0; index < WORKERS; index++) {
 		results[index].cpu = index + 1;
+		results[index].fault_base = fault_base;
 		results[index].resume_probe = (int (*)(void))
 			((char *)code + PAGE_BYTES - 20);
 		if (pthread_create(&threads[index], 0, dynamic_worker, &results[index]))
@@ -128,6 +233,7 @@ int main(int argc, char **argv)
 		void *status = 0;
 		if (pthread_join(threads[index], &status) ||
 		    (uintptr_t)status != 42 || results[index].completed != RX_CALLS ||
+		    results[index].fault_rounds != FAULT_ROUNDS ||
 		    results[index].tid == syscall(SYS_gettid))
 			return 131;
 		for (unsigned previous = 0; previous < index; previous++)
@@ -137,6 +243,8 @@ int main(int argc, char **argv)
 	if (emit_el0_result(results, thread_entry, code) ||
 	    munmap(code, PAGE_BYTES * 2))
 		return 133;
+	if (munmap(fault_region, FAULT_BYTES) || emit_fault_result(results))
+		return 137;
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1)
 		return 122;
 	return 42;

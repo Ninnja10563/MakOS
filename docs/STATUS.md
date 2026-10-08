@@ -1,8 +1,42 @@
 # Implementation status
 
-Last updated: 2026-09-15.
+Last updated: 2026-10-08.
 
 ## Current qualification update
+
+The attached Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF evidence for
+`172975dc7d1e9a55d820ba3e7f34d8f51032756d` passes the supported fresh Mac
+Firefox release/integration and all gates before real Firefox. The prior
+missing-image blocker is resolved with a new packaged master and a test
+account/profile created in its private runtime clone, not recovered user
+data. Final raw serial now identifies
+`duplicate AArch64 user-page mapping` before browser paint. The exact
+offending VA/caller/interleaving is not known from that trace.
+
+The kernel repair adds IRQ-safe page-table mutation and versioned VM fault
+commit with permission checks, coherent metadata/PTE changes, and private
+loser/stale-frame reclamation. Storage I/O stays outside those locks; the
+strict duplicate guard remains. New host concurrency/negative-control tests
+and a three-AP dynamic-musl first-touch runtime gate cover the repair. See
+[the evidence and implementation report](FIREFOX-VM-FAULT-20261008.md).
+
+The Mac's fresh image `makos-integrated-3b68500032eec2d4.img` is reusable only
+after its exact hash and unchanged provenance preflight. Rebuild the kernel
+boot image and run the sequential [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md).
+No Firefox source/provenance, existing assertions, or timing thresholds change.
+Pi functional results are not Mac/HVF qualification. Real Firefox and final
+visible login still need that qualification; audit Partial/Missing rows remain.
+
+Local Pi/Debian passes full unit/check and image build; sequential Pi/TCG
+EL0, added VM-fault, self-host, Native/Python-role, Firefox-role input/SMP,
+and cursor gates pass. The real AP fault workload checks 16 shared-page
+rounds, 48 distinct pages, 288 reads and cleanup. Self-host retains all
+20-build/21-process/eight-graph/parallel proofs with 30 migrations and zero
+drops. Cursor retains seven positions and zero changed pixels/errors/timeouts.
+Existing gate scripts are unchanged. Private evidence and previous artifacts
+are preserved as detailed in the report; no QEMU/build/test remains.
+
+### Earlier missing image and fatal capture evidence
 
 The user now reports the Mac integrated image and preserved account/private
 data images are absent, with only a manifest remaining. A fresh test baseline

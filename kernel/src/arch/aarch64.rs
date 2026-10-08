@@ -91,6 +91,11 @@ static GIC_CPU_BASE: AtomicU64 = AtomicU64::new(0);
 static UNEXPECTED_IRQS: AtomicU64 = AtomicU64::new(0);
 static IRQ_ENTRIES: AtomicU64 = AtomicU64::new(0);
 static KERNEL_ROOT: AtomicU64 = AtomicU64::new(0);
+// Serialize shared-root hierarchy publication and leaf changes. Lock order is
+// VM metadata -> page tables -> physical allocator; never acquire VM/scheduler
+// locks or perform device I/O while holding this guard. Readers use atomic
+// descriptors; process ownership still protects the address-space lifetime.
+static USER_PAGE_TABLE_LOCK: AtomicBool = AtomicBool::new(false);
 static ACTIVE_USER_ROOTS: [AtomicU64; MAX_AARCH64_CPUS] =
     [const { AtomicU64::new(0) }; MAX_AARCH64_CPUS];
 // Bounded evidence: at most one validated high-code page-boundary EL0 re-entry
@@ -623,6 +628,67 @@ pub fn enable_interrupts() {
     unsafe { asm!("msr daifclr, #2", options(nomem, nostack, preserves_flags)) }
 }
 
+/// Short, non-sleeping critical sections must not be interrupted on their
+/// owning CPU and re-enter the same cross-CPU lock. Nested masks restore the
+/// exact prior DAIF state instead of unconditionally enabling interrupts.
+pub(crate) struct LocalInterruptMask {
+    saved_daif: u64,
+}
+
+impl LocalInterruptMask {
+    pub(crate) fn acquire() -> Self {
+        let saved_daif: u64;
+        unsafe {
+            asm!(
+                "mrs {saved}, daif",
+                "msr daifset, #0xf",
+                saved = out(reg) saved_daif,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+        Self { saved_daif }
+    }
+}
+
+impl Drop for LocalInterruptMask {
+    fn drop(&mut self) {
+        unsafe {
+            asm!(
+                "msr daif, {saved}",
+                "isb",
+                saved = in(reg) self.saved_daif,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+    }
+}
+
+struct UserPageTableGuard {
+    _interrupts: LocalInterruptMask,
+}
+
+impl UserPageTableGuard {
+    fn acquire() -> Self {
+        let interrupts = LocalInterruptMask::acquire();
+        while USER_PAGE_TABLE_LOCK
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        Self {
+            _interrupts: interrupts,
+        }
+    }
+}
+
+impl Drop for UserPageTableGuard {
+    fn drop(&mut self) {
+        // Rust drops the mask field only after this release completes.
+        USER_PAGE_TABLE_LOCK.store(false, Ordering::Release);
+    }
+}
+
 pub fn current_el() -> u64 {
     let value: u64;
     unsafe { asm!("mrs {value}, CurrentEL", value = out(reg) value, options(nomem, nostack)) };
@@ -950,13 +1016,13 @@ pub fn clone_user_address_space_eager(source_root: u64) -> Option<(u64, usize)> 
             continue;
         };
         for l2_index in 0..512usize {
-            let descriptor = unsafe { *((source_l2 as *const u64).add(l2_index)) };
+            let descriptor = read_table_entry(source_l2, l2_index);
             if descriptor & 0b11 != TABLE_DESCRIPTOR {
                 continue;
             }
             let source_l3 = descriptor & ADDRESS_MASK;
             for page_index in 0..512usize {
-                let entry = unsafe { *((source_l3 as *const u64).add(page_index)) };
+                let entry = read_table_entry(source_l3, page_index);
                 if entry & 0b11 != TABLE_DESCRIPTOR {
                     continue;
                 }
@@ -1018,16 +1084,57 @@ pub fn map_user_page_permissions_in(
     writable: bool,
     executable: bool,
 ) {
-    if root == kernel_root()
+    if let Err(entry) = map_user_page_permissions_if_absent_in(
+        root,
+        virtual_address,
+        physical_address,
+        readable,
+        writable,
+        executable,
+    ) {
+        // Failure-only evidence, after releasing the page-table guard. Do not
+        // ask the scheduler for a PID while an outer VM lock may be held.
+        crate::serial_println!(
+            "MAKOS_AARCH64_DUPLICATE_MAPPING cpu={} root={:#x} va={:#x} candidate_pa={:#x} existing_entry={:#x}",
+            cpu_index(),
+            root,
+            virtual_address,
+            physical_address,
+            entry,
+        );
+        crate::fatal("duplicate AArch64 user-page mapping");
+    }
+}
+
+/// Commit one fully prepared page without replacing a concurrent winner.
+///
+/// The caller retains ownership of `physical_address` on `Err` and must decide
+/// whether the exact existing descriptor satisfies its current VM/access
+/// policy. A present descriptor is not automatically proof that a fault may
+/// resume. This primitive does no allocation beyond at most two table frames,
+/// performs no I/O, and retains the strict mapping API for all other callers.
+pub fn map_user_page_permissions_if_absent_in(
+    root: u64,
+    virtual_address: u64,
+    physical_address: u64,
+    readable: bool,
+    writable: bool,
+    executable: bool,
+) -> Result<(), u64> {
+    if root == 0
+        || root == kernel_root()
         || root & (PAGE_SIZE - 1) != 0
         || virtual_address & (PAGE_SIZE - 1) != 0
+        || physical_address == 0
         || physical_address & (PAGE_SIZE - 1) != 0
+        || physical_address & !ADDRESS_MASK != 0
         || !(USER_ADDRESS_BASE..USER_ADDRESS_LIMIT).contains(&virtual_address)
         || (!readable && (writable || executable))
         || writable && executable
     {
         crate::fatal("invalid AArch64 user-page mapping");
     }
+    let _guard = UserPageTableGuard::acquire();
     let l1 = table_child(root, 0).unwrap_or_else(|| crate::fatal("AArch64 user L1 table absent"));
     let l1_index = ((virtual_address / L1_SPAN) % 512) as usize;
     let low = table_child(l1, l1_index).unwrap_or_else(|| {
@@ -1036,21 +1143,20 @@ pub fn map_user_page_permissions_in(
         table
     });
     let level2_index = ((virtual_address % L1_SPAN) / BLOCK_SIZE) as usize;
-    let slot = unsafe { (low as *mut u64).add(level2_index) };
-    let mut descriptor = unsafe { slot.read_volatile() };
+    let mut descriptor = read_table_entry(low, level2_index);
     if matches!(descriptor & 0b11, 0 | BLOCK_DESCRIPTOR) {
         let level3 = allocate_table();
         descriptor = level3 | TABLE_DESCRIPTOR;
-        unsafe { slot.write_volatile(descriptor) };
+        unsafe { write_table_entry(low, level2_index, descriptor) };
     }
     if descriptor & 0b11 != TABLE_DESCRIPTOR {
         crate::fatal("AArch64 user L3 table invalid");
     }
     let level3 = descriptor & ADDRESS_MASK;
     let page_index = ((virtual_address % BLOCK_SIZE) / PAGE_SIZE) as usize;
-    let page_slot = unsafe { (level3 as *mut u64).add(page_index) };
-    if unsafe { page_slot.read_volatile() } & 0b11 != 0 {
-        crate::fatal("duplicate AArch64 user-page mapping");
+    let entry = read_table_entry(level3, page_index);
+    if entry & 0b11 != 0 {
+        return Err(entry);
     }
     let permission = if !readable {
         0
@@ -1061,7 +1167,9 @@ pub fn map_user_page_permissions_in(
     };
     let execute_never = if executable { PXN } else { PXN | UXN };
     unsafe {
-        page_slot.write_volatile(
+        write_table_entry(
+            level3,
+            page_index,
             physical_address
                 | TABLE_DESCRIPTOR
                 | ATTR_NORMAL
@@ -1072,15 +1180,17 @@ pub fn map_user_page_permissions_in(
         )
     };
     invalidate_user_page_if_active(root, virtual_address);
+    Ok(())
 }
 
 pub fn unmap_user_page_in(root: u64, virtual_address: u64) -> Option<u64> {
+    let _guard = UserPageTableGuard::acquire();
     let slot = user_page_slot(root, virtual_address)?;
-    let entry = unsafe { slot.read_volatile() };
+    let entry = read_table_entry(slot as u64, 0);
     if entry & 0b11 != TABLE_DESCRIPTOR {
         return None;
     }
-    unsafe { slot.write_volatile(0) };
+    unsafe { write_table_entry(slot as u64, 0, 0) };
     invalidate_user_page_if_active(root, virtual_address);
     Some(entry & ADDRESS_MASK)
 }
@@ -1104,10 +1214,11 @@ pub fn protect_user_page_permissions_in(
     if (!readable && (writable || executable)) || writable && executable {
         return false;
     }
+    let _guard = UserPageTableGuard::acquire();
     let Some(slot) = user_page_slot(root, virtual_address) else {
         return false;
     };
-    let entry = unsafe { slot.read_volatile() };
+    let entry = read_table_entry(slot as u64, 0);
     if entry & 0b11 != TABLE_DESCRIPTOR {
         return false;
     }
@@ -1120,18 +1231,58 @@ pub fn protect_user_page_permissions_in(
     };
     let execute_never = if executable { PXN } else { PXN | UXN };
     let updated = (entry & !((0b11 << 6) | PXN | UXN)) | permission | execute_never;
-    unsafe { slot.write_volatile(updated) };
+    unsafe { write_table_entry(slot as u64, 0, updated) };
     invalidate_user_page_if_active(root, virtual_address);
     true
 }
 
 pub fn user_page_physical_in(root: u64, virtual_address: u64) -> Option<u64> {
     let slot = user_page_slot(root, virtual_address)?;
-    let entry = unsafe { slot.read_volatile() };
+    let entry = read_table_entry(slot as u64, 0);
     if entry & 0b11 != TABLE_DESCRIPTOR {
         return None;
     }
     Some(entry & ADDRESS_MASK)
+}
+
+/// Check a resident translation before treating a concurrent fault as solved.
+/// Never use VM metadata to override missing/privileged/non-executable pages.
+pub fn user_page_access_permitted_in(root: u64, address: u64, write: bool, execute: bool) -> bool {
+    if write && execute {
+        return false;
+    }
+    if execute {
+        return user_instruction_mapping_in(root, address) == UserInstructionMapping::Executable;
+    }
+    if root == 0
+        || root == kernel_root()
+        || root & (PAGE_SIZE - 1) != 0
+        || !(USER_ADDRESS_BASE..USER_ADDRESS_LIMIT).contains(&address)
+    {
+        return false;
+    }
+    let mut table = root;
+    for shift in [39, 30, 21] {
+        let entry = read_table_entry(table, ((address >> shift) & 511) as usize);
+        const AP_TABLE_NO_EL0: u64 = 1 << 61;
+        const AP_TABLE_READ_ONLY: u64 = 1 << 62;
+        if entry & 0b11 != TABLE_DESCRIPTOR
+            || entry & AP_TABLE_NO_EL0 != 0
+            || (write && entry & AP_TABLE_READ_ONLY != 0)
+            || entry & ADDRESS_MASK == 0
+        {
+            return false;
+        }
+        table = entry & ADDRESS_MASK;
+    }
+    let entry = read_table_entry(table, ((address >> 12) & 511) as usize);
+    let permission = entry & (0b11 << 6);
+    entry & 0b11 == TABLE_DESCRIPTOR
+        && entry & ADDRESS_MASK != 0
+        && entry & (ACCESS_FLAG | PXN) == (ACCESS_FLAG | PXN)
+        && matches!(permission, AP_USER_RO | AP_USER_RW)
+        && (permission != AP_USER_RW || entry & UXN != 0)
+        && (!write || permission == AP_USER_RW)
 }
 
 pub fn switch_address_space(root: u64) {
@@ -1240,7 +1391,7 @@ fn user_stack_pointer_valid_in(root: u64, stack_pointer: u64) -> bool {
     let Some(slot) = user_page_slot(root, stack_page) else {
         return false;
     };
-    let entry = unsafe { slot.read_volatile() };
+    let entry = read_table_entry(slot as u64, 0);
     entry & 0b11 == TABLE_DESCRIPTOR && entry & (0b11 << 6) == AP_USER_RW && entry & UXN != 0
 }
 
@@ -1257,13 +1408,13 @@ pub fn destroy_user_address_space(root: u64) -> usize {
             continue;
         };
         for level2_index in 0..512usize {
-            let descriptor = unsafe { *((level2 as *const u64).add(level2_index)) };
+            let descriptor = read_table_entry(level2, level2_index);
             if descriptor & 0b11 != TABLE_DESCRIPTOR {
                 continue;
             }
             let level3 = descriptor & ADDRESS_MASK;
             for page_index in 0..512usize {
-                let entry = unsafe { *((level3 as *const u64).add(page_index)) };
+                let entry = read_table_entry(level3, page_index);
                 if entry & 0b11 == TABLE_DESCRIPTOR {
                     free_table_frame(entry & ADDRESS_MASK);
                     freed += 1;
@@ -1299,13 +1450,13 @@ pub fn user_resident_pages(root: u64) -> Option<usize> {
             continue;
         };
         for level2_index in 0..512usize {
-            let descriptor = unsafe { *((level2 as *const u64).add(level2_index)) };
+            let descriptor = read_table_entry(level2, level2_index);
             if descriptor & 0b11 != TABLE_DESCRIPTOR {
                 continue;
             }
             let level3 = descriptor & ADDRESS_MASK;
             for page_index in 0..512usize {
-                let entry = unsafe { *((level3 as *const u64).add(page_index)) };
+                let entry = read_table_entry(level3, page_index);
                 if entry & 0b11 == TABLE_DESCRIPTOR {
                     pages = pages.saturating_add(1);
                 }
@@ -1347,7 +1498,7 @@ pub(crate) fn user_range_readable(address: u64, length: usize) -> bool {
         let Some(slot) = user_page_slot(root, page) else {
             return false;
         };
-        let entry = unsafe { slot.read_volatile() };
+        let entry = read_table_entry(slot as u64, 0);
         if entry & 0b11 != TABLE_DESCRIPTOR || entry & (1 << 6) == 0 {
             return false;
         }
@@ -1376,7 +1527,7 @@ pub(crate) fn user_range_mapped(address: u64, length: usize) -> bool {
         let Some(slot) = user_page_slot(root, page) else {
             return false;
         };
-        if unsafe { slot.read_volatile() } & 0b11 != TABLE_DESCRIPTOR {
+        if read_table_entry(slot as u64, 0) & 0b11 != TABLE_DESCRIPTOR {
             return false;
         }
         page += PAGE_SIZE;
@@ -1404,7 +1555,7 @@ pub(crate) fn user_range_writable(address: u64, length: usize) -> bool {
         let Some(slot) = user_page_slot(root, page) else {
             return false;
         };
-        let entry = unsafe { slot.read_volatile() };
+        let entry = read_table_entry(slot as u64, 0);
         if entry & 0b11 != TABLE_DESCRIPTOR || entry & (0b11 << 6) != AP_USER_RW {
             return false;
         }
@@ -1439,7 +1590,7 @@ fn user_instruction_mapping_in(root: u64, address: u64) -> UserInstructionMappin
     let mut table = root;
     for shift in [39, 30, 21] {
         let index = ((address >> shift) & 511) as usize;
-        let entry = unsafe { (table as *const u64).add(index).read_volatile() };
+        let entry = read_table_entry(table, index);
         if entry == 0 {
             return UserInstructionMapping::Absent;
         }
@@ -1454,7 +1605,7 @@ fn user_instruction_mapping_in(root: u64, address: u64) -> UserInstructionMappin
         table = entry & ADDRESS_MASK;
     }
     let index = ((address >> 12) & 511) as usize;
-    let entry = unsafe { (table as *const u64).add(index).read_volatile() };
+    let entry = read_table_entry(table, index);
     if entry == 0 {
         UserInstructionMapping::Absent
     } else if entry & 0b11 == TABLE_DESCRIPTOR
@@ -1504,7 +1655,7 @@ fn user_page_slot(root: u64, virtual_address: u64) -> Option<*mut u64> {
 
 fn user_page_slot_from_low(low: u64, virtual_address: u64) -> Option<*mut u64> {
     let level2_index = ((virtual_address % L1_SPAN) / BLOCK_SIZE) as usize;
-    let descriptor = unsafe { *((low as *const u64).add(level2_index)) };
+    let descriptor = read_table_entry(low, level2_index);
     if descriptor & 0b11 != TABLE_DESCRIPTOR {
         return None;
     }
@@ -1533,8 +1684,17 @@ fn invalidate_user_page_if_active(root: u64, virtual_address: u64) {
 }
 
 fn table_child(table: u64, index: usize) -> Option<u64> {
-    let entry = unsafe { *((table as *const u64).add(index)) };
+    let entry = read_table_entry(table, index);
     (entry & 0b11 == TABLE_DESCRIPTOR).then_some(entry & ADDRESS_MASK)
+}
+
+fn read_table_entry(table: u64, index: usize) -> u64 {
+    // A newly published child is zeroed before its Release descriptor store.
+    // Readers never race non-atomic accesses to live user-table descriptors.
+    unsafe {
+        (&*(table as *const core::sync::atomic::AtomicU64).add(index))
+            .load(core::sync::atomic::Ordering::Acquire)
+    }
 }
 
 fn allocate_table() -> u64 {
@@ -1545,7 +1705,9 @@ fn allocate_table() -> u64 {
 }
 
 unsafe fn write_table_entry(table: u64, index: usize, value: u64) {
-    unsafe { (table as *mut u64).add(index).write_volatile(value) }
+    unsafe {
+        (&*(table as *const AtomicU64).add(index)).store(value, Ordering::Release);
+    }
 }
 
 fn free_table_frame(frame: u64) {

@@ -5,7 +5,8 @@ mod x86_64;
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::{
-    ExceptionFrame, UserContext, counter_deadline_expired, counter_deadline_millis, cpu_index,
+    ExceptionFrame, LocalInterruptMask, UserContext, counter_deadline_expired,
+    counter_deadline_millis, cpu_index,
     disable_smp_probe_scheduler, enable_production_userspace_scheduler,
     enable_smp_probe_scheduler, enable_virtio_mmio_interrupt, enter_user_context,
     idle_secondary_after_smp_probe, input_service_affinity_evidence, network_irq_evidence,
@@ -21,9 +22,11 @@ pub use aarch64::{
     USER_MMAP_LIMIT, USER_STACK_BOTTOM, USER_STACK_TOP, clone_user_address_space_eager,
     destroy_user_address_space, disable_interrupts, enable_interrupts, exception_self_test,
     halt_forever, init_exceptions, init_mmu, init_smp, init_timer, kernel_root, map_user_page_in,
-    map_user_page_permissions_in, monotonic_ticks, new_user_address_space, protect_user_page_in,
+    map_user_page_permissions_if_absent_in, map_user_page_permissions_in, monotonic_ticks,
+    new_user_address_space, protect_user_page_in,
     protect_user_page_permissions_in, switch_address_space, sync_user_code, unmap_user_page_in,
-    uptime_millis, user_address_executable, user_page_physical_in, user_resident_pages,
+    uptime_millis, user_address_executable, user_page_access_permitted_in, user_page_physical_in,
+    user_resident_pages,
 };
 
 #[cfg(target_arch = "x86_64")]

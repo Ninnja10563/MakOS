@@ -27,7 +27,51 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### Authorized missing-image recovery / fresh baseline
+### 2026-10-08 concurrent VM fault repair
+
+The attached Mac/HVF evidence at
+`172975dc7d1e9a55d820ba3e7f34d8f51032756d` supersedes the missing-image
+blocker and unknown fatal below. The authorized fresh supported Mac release
+and integration passed, as did unit/check, image, EL0, self-host, role-SMP,
+and cursor. Real Firefox failed before paint with a complete raw reason:
+`duplicate AArch64 user-page mapping`. The exact failing VA/caller was not
+captured. Do not infer it from the preceding TID 8 stack/TLS record.
+
+The current repair serializes page-table creation/publication and makes
+demand faults validate a VM generation before committing. Private losing or
+stale frames are reclaimed; only an actually permitted concurrent mapping
+can resolve the fault. Unmap/protect/fixed replacement/discard/brk keep
+metadata and PTE changes coherent. No VM/PTE lock spans storage I/O; the
+strict duplicate guard remains. See [the repair and regression scope](FIREFOX-VM-FAULT-20261008.md).
+
+The new `make test-aarch64-vm-fault-runtime` adds real three-AP concurrent
+first-touch/coherence proof using the unchanged EL0 harness. Existing gates,
+deadlines, latency limits, and Firefox provenance are unchanged. Pi validation
+and Mac qualification are separate; strict Firefox and final visible login
+remain unqualified. No Partial/Missing audit row is upgraded.
+
+Local Pi/Debian full `make unit check` and image build pass. Sequential
+Pi/TCG EL0, added VM-fault, self-host, Native/Python-role, Firefox-role
+input/SMP, and cursor gates all pass. VM proof is 16 same-page rounds,
+48 distinct pages and 288 coherent checks; self-host retains 20 builds,
+21 processes, eight graphs and 30 migrations with zero drops; cursor retains
+seven positions and zero changed pixels/errors/timeouts. Original gate
+scripts are unchanged. The report records exact durations, images, retained
+private sessions and cleanup limitations. No QEMU/build/test remains; no
+local real-Firefox or final visible-login run is claimed.
+
+Preserve and reuse the Mac's new
+`build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img`
+after exact SHA-256
+`3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`
+and unchanged preflight verification. The account/profile created during that
+run is new, not restored, and resides in its retained private data clone;
+the integrated master was unchanged.
+This kernel/probe repair needs a boot rebuild, not a Firefox rebuild/restamp.
+Use the exact pushed commit supplied in chat and the sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md); stop on the first failure.
+
+### Historical authorized missing-image recovery / fresh baseline
 
 After the `f8a273d5ed955d8323f492b9721d318650dcc30b` evidence repair, the user
 reports the Mac integrated image is missing (manifest only), with preserved
@@ -43,7 +87,7 @@ unknown; stop on the first qualification failure. The Pi cannot create files
 on the Mac; creation and strict Firefox qualification belong to its testing
 agent. Earlier Pi runtime evidence below is historical, not rerun evidence.
 
-### 2026-09-15 Firefox fatal evidence repair (current handoff)
+### Historical 2026-09-15 Firefox fatal evidence repair
 
 The user reports Mac/HVF `9614841ffb349cfa235fd7348a27b4c7f42843ad`
 passes unit/check, image, EL0, self-host, Native/Python-role SMP,
