@@ -27,7 +27,38 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-10-09 saved branch state repair
+### 2026-10-09 network owner progress repair
+
+Attached Mac/HVF evidence for
+`20346e154bc2ef1a10d85e908633757940e01c33` passes its then-required pre-Firefox gates,
+including genuine BTYPE migration and unchanged image/provenance preflight.
+Real Firefox progresses to native surface blits and Mozilla TLS but fails
+with `AArch64 network TX owner request timeout`. Strict first paint is not
+complete; input/Ctrl-A/navigation and final visible login are not qualified.
+The exact failing request/slot/interleaving is not in that trace.
+
+The [network repair](FIREFOX-NET-OWNER-20261009.md) breaks a source-proven
+AP-held socket-lock/CPU0-TX circular wait through TX-only owner service at
+socket contention, adds guarded current-EL timer TX progress and atomic
+request-state timeout diagnostics. It retains the 5,000 ms deadline, socket
+serialization, CPU0-only device ownership and every existing Firefox gate.
+An additive guest gate and production-code host negative controls cover the
+progress paths. Use the exact pushed HEAD and sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md); preserve the provenance-verified
+`3b68500032eec2d4` integrated image and retained private accounts/evidence.
+Pi results are not Mac qualification, and no audit row is upgraded.
+The report also preserves an intermediate Pi EL0 timeout and a passing
+diagnostic-only run. A separately source-proven AP idle lost-wake window
+is repaired by masking IRQs through WFI, but is not claimed as the observed
+cause of either the Pi timeout or the Mac network failure.
+Final Pi/Debian `make unit check` and image build pass; all ten sequential
+Pi/TCG runtime gates in the Mac protocol through cursor also pass. Full
+logs, ten PID/session/QMP records, private disks and hashes are retained at
+`build/net-owner-repair-20261009-KJU8r6/`; see the repair report's exact table.
+No QEMU remains. Real Firefox and final visible login still require Mac/HVF;
+the required integrated image is on the Mac, not in this Pi workspace.
+
+### Historical 2026-10-09 saved branch state repair
 
 The attached Mac/HVF evidence at
 `2bafc9c779f95ea9a4675b8c8c3c72b52aa88481` passes unit/check, image,

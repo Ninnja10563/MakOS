@@ -13,19 +13,24 @@ gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 2bafc9c779f95ea9a4675b8c8c3c72b52aa88481
+Previous exact Mac-tested baseline: 20346e154bc2ef1a10d85e908633757940e01c33
 
-Use the exact full saved-BTYPE repair commit supplied in chat,
+Use the exact full network-owner progress repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
 arbitrary future descendant. The last run passed all earlier gates, including
-VM-fault and preserved-image Firefox preflight, then stopped before paint:
-`AArch64 EL0 entry precondition failed`, executable PC 0x8423cba8, matching
-roots, valid stack, SPSR 0x80000400. Its exact rejected TID was not recorded.
-The repair recognizes architectural BTYPE[11:10] only on a destination CPU
-advertising FEAT_BTI; every other SPSR bit and root/PC/stack check remains.
-Saved branch bits must be preserved, not sanitized. A genuine branch-loop
-timer/migration fixture covers the outer entry path. The preceding VM and
-strict duplicate-mapping guards remain. Pi functional tests do not qualify
+BTYPE and preserved-image Firefox preflight, then failed during real Firefox:
+`AArch64 network TX owner request timeout`. Partial blits and Mozilla TLS
+traffic did not complete strict JIT/client-pixel first-paint acceptance.
+The exact failed request/slot/interleaving is unknown. The repair addresses a
+source-proven AP-held socket-lock/CPU0-owner circular wait with TX-only lock
+contention service and guarded EL1 timer TX progress. Socket publication,
+CPU0-only device ownership and the 5000ms timeout remain; timeout diagnostics
+now report slot/kind/state and owner progress. Earlier BTYPE/VM/EL0 guards
+and evidence remain unchanged. AP idle also retains IRQ masking through WFI
+to close a source-proven lost-wake race. An intermediate Pi EL0 timeout was
+intermittent; no live failure snapshot attributes it to this race. Preserve
+any recurrence on the Mac and do not count a retry as a fix.
+Pi functional tests do not qualify
 Firefox on this Mac. Do not change fatal assertions, timeouts, thresholds, SDK
 macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
 HOST_CC to substitute another compiler. It retains
@@ -40,7 +45,8 @@ remote main to match, and record the exact tested commit.
    docs/EL0-EVIDENCE-ATOMICITY-20260911.md and
    docs/EL0-DARWIN-ADAPTER-20260911.md and
    docs/FIREFOX-FATAL-CAPTURE-20260915.md and
-   docs/FIREFOX-VM-FAULT-20261008.md and docs/FIREFOX-BTYPE-20261009.md.
+   docs/FIREFOX-VM-FAULT-20261008.md, docs/FIREFOX-BTYPE-20261009.md and
+   docs/FIREFOX-NET-OWNER-20261009.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -59,6 +65,9 @@ remote main to match, and record the exact tested commit.
        make test-aarch64-el0-entry-runtime
        make test-aarch64-vm-fault-runtime
        make test-aarch64-btype-runtime
+       make test-aarch64-net-owner-runtime
+       make test-aarch64-smp-tcp-runtime
+       make test-aarch64-smp-input-runtime
        make test-aarch64-selfhost-runtime
        make test-aarch64-native-smp-runtime
        make test-aarch64-production-smp-runtime
@@ -107,6 +116,27 @@ remote main to match, and record the exact tested commit.
    reject state-clearing mutations. UNSUPPORTED is not a qualifying pass.
    Preserve the nested private boot/data/vars, session.json/PID/QMP and final
    raw serial. The wrapper also requires every unchanged EL0 harness check.
+
+   The new network-owner gate must prove three real AP1 UDP socket sends
+   received byte-exactly by its host fixture and emit
+   `MAKOS_AARCH64_NET_OWNER_RUNTIME_OK accel=hvf` with
+   `timer_completions=2 lock_wait_completions=1`, positive `busy_deferrals`,
+   `udp_host_received=3 payloads=exact` and `statuses=42,42,42`.
+   Require IRQ-masked CPU0 socket
+   contention completed by production lock-wait TX service, a separate
+   current-EL timer completion with no manual owner service, and a timer
+   deferral while the actual network-device lock is held with a request READY,
+   followed by completion after unlock. Require three exact status-42 reaps,
+   balanced frames, CPU0-only virtio-net ownership, and unchanged master and
+   private boot hashes (the private clone has only its opt-in config changed).
+   Preserve the printed session, private boot/data/vars, session.json/PID/QMP,
+   full final serial and exact host datagrams. This is a driver/scheduler
+   fixture, not Firefox. The unchanged SMP TCP gate must retain its real
+   SYN/SYNACK/ACK, exact request/response, FIN, AP idle/SGI wake, locked socket
+   publication, owner-only rings and frame-balance proofs. No gate may be
+   replaced by host-only tests or manually drained test queues.
+   The unchanged SMP-input gate also retains its real AP UDP/DNS RX interrupt
+   and wake proof alongside its existing input, GPU and block assertions.
 
    Record the boot-image SHA-256 both before and immediately after the
    self-host run, because its phony image prerequisite rebuilds that file;
@@ -430,7 +460,9 @@ remote main to match, and record the exact tested commit.
    On a fatal, preserve the final raw serial file after the harness exits,
    not just the exception's earlier snapshot. Include the complete
    MAKOS_FAILURE_DETAIL: record that precedes the unchanged MAKOS_FATAL:
-   marker, any MAKOS_AARCH64_DUPLICATE_MAPPING record (CPU/root/VA/candidate
+   marker, any MAKOS_AARCH64_NET_TX_TIMEOUT record (CPU/slot/kind/state,
+   length/device lock/owner-active and service counters), any
+   MAKOS_AARCH64_DUPLICATE_MAPPING record (CPU/root/VA/candidate
    physical/existing entry), and the exact preceding thread/CPU/root records. Do not infer a
    missing reason, join fragments into successful evidence, retry after the
    first failure, or launch the final visible login. Capture any temporary

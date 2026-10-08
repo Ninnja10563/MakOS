@@ -5,6 +5,36 @@ Last updated: 2026-10-09.
 ## Current qualification update
 
 Attached Mac/HVF evidence at
+`20346e154bc2ef1a10d85e908633757940e01c33` passes its then-required pre-Firefox gates,
+including the BTYPE repair and unchanged image/provenance checks. Real
+Firefox creates its surface, blits and reaches Mozilla TLS, then fails with
+`AArch64 network TX owner request timeout`. The required JIT/client-pixel
+first-paint phase does not complete; there are no input/Ctrl-A or later
+interaction results. The trace does not identify the exact request or cause.
+
+The [network owner repair](FIREFOX-NET-OWNER-20261009.md) addresses a concrete
+socket-lock/owner-service circular wait, adds guarded EL1 timer TX progress
+and reports request state on timeout. CPU0 device ownership, locked socket
+publication, the 5,000 ms deadline and all existing gates remain. Added host
+and guest regressions are not a Mac browser pass. AP idle now also keeps
+IRQs masked through WFI to close a source-proven lost-wake window. An
+intermediate Pi EL0 timeout and a passing diagnostic run are retained in
+the repair report; that timeout's exact interleaving is unproven.
+Rebuild the kernel boot
+image and follow the [sequential Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md)
+using the preserved `3b68500032eec2d4` integrated image after exact preflight.
+Real Firefox and final visible login remain unqualified. All audit
+Partial/Missing rows remain.
+
+Final Pi/Debian image and full unit/check pass. The ten sequential Pi/TCG
+gates through cursor pass, including new network progress and unchanged
+EL0/VM/BTYPE, TCP/input, self-host and application-role scheduling gates.
+The repair report records exact results, retained failures, disks and PIDs;
+no QEMU remains running. These do not qualify real Firefox on Mac/HVF.
+
+### Earlier saved branch state repair
+
+Attached Mac/HVF evidence at
 `2bafc9c779f95ea9a4675b8c8c3c72b52aa88481` passes all pre-Firefox gates,
 including the VM-fault regression and unchanged image/provenance checks.
 Real Firefox stops before paint with `spsr=0x80000400`, matching roots,

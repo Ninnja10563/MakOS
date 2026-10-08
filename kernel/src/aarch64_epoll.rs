@@ -153,6 +153,12 @@ fn with_table<R>(function: impl FnOnce(&mut Table<MAX_INSTANCES, MAX_WATCHES>) -
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
+        // A readiness callback can hold epoll state while an AP waits for
+        // socket or VFS state, whose owner in turn awaits copied CPU0 I/O.
+        // A masked CPU0 syscall cannot rely on the timer to break that chain.
+        // These helpers touch only copied requests and low-level drivers.
+        crate::aarch64_virtio_net::service_tx_requests_while_waiting();
+        crate::aarch64_virtio_blk::service_requests_while_waiting();
         core::hint::spin_loop();
     }
     let result = function(unsafe { &mut *STATE.table.get() });

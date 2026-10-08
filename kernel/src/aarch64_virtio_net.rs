@@ -172,6 +172,10 @@ static UDP6_SEND_REPORTED: AtomicBool = AtomicBool::new(false);
 static TCP6_CONNECT_REPORTED: AtomicBool = AtomicBool::new(false);
 static TX_NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static TX_OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TX_OWNER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static TX_TIMER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TX_LOCK_WAIT_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
+static TX_BUSY_DEFERRALS: AtomicU64 = AtomicU64::new(0);
 static TCP_TX_NONOWNER_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static TCP_TX_OWNER_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
 static TCP_TX_CONNECT_COMPLETIONS: AtomicU64 = AtomicU64::new(0);
@@ -606,24 +610,90 @@ fn queue_tx_request(request: TxServiceRequest, tcp: bool) -> Option<TxServiceRes
     if tcp {
         TCP_TX_NONOWNER_REQUESTS.fetch_add(1, Ordering::AcqRel);
     }
+    let probe_payload = &request.payload[..usize::from(request.length).min(TX_SERVICE_PAYLOAD)];
+    crate::aarch64_net_progress_probe::before_tx_publish(request.kind, probe_payload);
     slot.state.store(TX_SLOT_READY, Ordering::Release);
-    unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+    crate::aarch64_net_progress_probe::after_tx_publish(request.kind, probe_payload);
+    notify_tx_waiters();
 
     let deadline = crate::arch::counter_deadline_millis(5_000);
     while slot.state.load(Ordering::Acquire) != TX_SLOT_DONE {
         if crate::arch::counter_deadline_expired(deadline) {
+            report_tx_timeout(slot, &request);
             crate::fatal("AArch64 network TX owner request timeout");
         }
-        unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+        wait_for_tx_event();
     }
     let result = unsafe { slot.result.get().read() };
     slot.state.store(TX_SLOT_FREE, Ordering::Release);
     Some(result)
 }
 
+fn notify_tx_waiters() {
+    unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+}
+
+fn wait_for_tx_event() {
+    unsafe { core::arch::asm!("wfe", options(nomem, nostack)) };
+}
+
+fn report_tx_timeout(slot: &TxServiceSlot, request: &TxServiceRequest) {
+    // Only atomics and the requester's private copy: timeout reporting must
+    // not acquire socket/scheduler/device locks or expose application bytes.
+    let index = TX_SERVICE.iter().position(|entry| core::ptr::eq(entry, slot));
+    crate::serial_println!(
+        "MAKOS_AARCH64_NET_TX_TIMEOUT cpu={} slot={} kind={} state={} length={} device_locked={} owner_active={} requests={} completions={} timer_completions={} lock_wait_completions={} busy_deferrals={}",
+        crate::arch::cpu_index(),
+        index.unwrap_or(usize::MAX),
+        request.kind,
+        slot.state.load(Ordering::Acquire),
+        request.length,
+        u8::from(STATE.lock.load(Ordering::Acquire)),
+        u8::from(TX_OWNER_ACTIVE.load(Ordering::Acquire)),
+        TX_NONOWNER_REQUESTS.load(Ordering::Acquire),
+        TX_OWNER_COMPLETIONS.load(Ordering::Acquire),
+        TX_TIMER_COMPLETIONS.load(Ordering::Acquire),
+        TX_LOCK_WAIT_COMPLETIONS.load(Ordering::Acquire),
+        TX_BUSY_DEFERRALS.load(Ordering::Acquire),
+    );
+}
+
 pub fn service_tx_requests() -> usize {
+    service_tx_requests_inner(0)
+}
+
+/// IRQ-safe TX-only progress, including a timer interrupt taken from EL1.
+/// Never enter RX demultiplexing or acquire socket/scheduler state here.
+pub fn service_tx_requests_from_timer() -> usize {
+    service_tx_requests_inner(1)
+}
+
+/// An AP may hold socket state while awaiting a copied TX result. If CPU0
+/// contends for that state with IRQs masked, it must complete the request
+/// before it can acquire the socket lock. Only the low-level driver is used;
+/// pumping RX here would recursively acquire the contested socket state.
+pub fn service_tx_requests_while_waiting() -> usize {
+    if crate::arch::cpu_index() != 0 {
+        return 0;
+    }
+    service_tx_requests_inner(2)
+}
+
+fn service_tx_requests_inner(source: u8) -> usize {
     if crate::arch::cpu_index() != 0 {
         crate::fatal("AArch64 network TX service attempted from non-owner CPU");
+    }
+    // A current-EL timer can interrupt either a direct CPU0 transport call or
+    // a service invocation between its per-request driver acquisitions. Do
+    // not recurse into either. AP config readers may briefly own STATE, but
+    // never wait for CPU0 while holding it. Deferring that tick is also safe.
+    if STATE.lock.load(Ordering::Acquire)
+        || TX_OWNER_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+    {
+        TX_BUSY_DEFERRALS.fetch_add(1, Ordering::Relaxed);
+        return 0;
     }
     let mut completed = 0usize;
     for slot in &TX_SERVICE {
@@ -770,8 +840,18 @@ pub fn service_tx_requests() -> usize {
         slot.state.store(TX_SLOT_DONE, Ordering::Release);
         completed += 1;
     }
+    match source {
+        1 => {
+            TX_TIMER_COMPLETIONS.fetch_add(completed as u64, Ordering::AcqRel);
+        }
+        2 => {
+            TX_LOCK_WAIT_COMPLETIONS.fetch_add(completed as u64, Ordering::AcqRel);
+        }
+        _ => {}
+    }
+    TX_OWNER_ACTIVE.store(false, Ordering::Release);
     if completed != 0 {
-        unsafe { core::arch::asm!("dsb ish", "sev", options(nostack)) };
+        notify_tx_waiters();
     }
     completed
 }
@@ -779,12 +859,34 @@ pub fn service_tx_requests() -> usize {
 pub fn reset_tx_affinity_evidence() {
     TX_NONOWNER_REQUESTS.store(0, Ordering::Release);
     TX_OWNER_COMPLETIONS.store(0, Ordering::Release);
+    TX_TIMER_COMPLETIONS.store(0, Ordering::Release);
+    TX_LOCK_WAIT_COMPLETIONS.store(0, Ordering::Release);
+    TX_BUSY_DEFERRALS.store(0, Ordering::Release);
     TCP_TX_NONOWNER_REQUESTS.store(0, Ordering::Release);
     TCP_TX_OWNER_COMPLETIONS.store(0, Ordering::Release);
     TCP_TX_CONNECT_COMPLETIONS.store(0, Ordering::Release);
     TCP_TX_DATA_COMPLETIONS.store(0, Ordering::Release);
     TCP_TX_ACK_COMPLETIONS.store(0, Ordering::Release);
     TCP_TX_FIN_COMPLETIONS.store(0, Ordering::Release);
+}
+
+pub fn progress_evidence() -> (u64, u64, u64) {
+    (
+        TX_TIMER_COMPLETIONS.load(Ordering::Acquire),
+        TX_LOCK_WAIT_COMPLETIONS.load(Ordering::Acquire),
+        TX_BUSY_DEFERRALS.load(Ordering::Acquire),
+    )
+}
+
+/// Only the explicitly armed boot probe may interrupt a real driver critical
+/// section to verify timer deferral. No userspace ABI exposes this operation.
+pub(crate) fn with_progress_probe_state_lock<R>(function: impl FnOnce() -> R) -> R {
+    if crate::arch::cpu_index() != 0
+        || !crate::aarch64_net_progress_probe::state_lock_phase_armed()
+    {
+        crate::fatal("AArch64 network progress device-lock probe not armed");
+    }
+    with_state(|_| function())
 }
 
 pub fn tcp_tx_affinity_evidence() -> (u64, u64, u64, u64, u64, u64) {
@@ -805,9 +907,11 @@ pub fn tx_affinity_evidence() -> (u64, u64) {
     )
 }
 
-/// A requester owns the copied result until it publishes its updated socket
-/// state and releases the slot. CPU0 must not demultiplex a response into the
-/// old socket state during that interval.
+/// Avoid unnecessary RX/socket contention while a requester consumes its
+/// copied result. This is a hint, not synchronization: publication can race
+/// the check and the slot is freed before socket-state updates finish. The
+/// callers retaining the socket lock use its TX-only contention service for
+/// serialization; this hint cannot protect an unlocked connect/publication.
 pub fn tx_request_publication_pending() -> bool {
     TX_SERVICE
         .iter()

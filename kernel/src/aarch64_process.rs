@@ -109,6 +109,8 @@ static SMP_LOAD_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-load-probe.elf"));
 static BTYPE_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-btype-probe.elf"));
+static NET_OWNER_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-net-owner-probe.elf"));
 
 const BTYPE_PROBE_LOOP_A: u64 = 0x1000_0080;
 const BTYPE_PROBE_LOOP_B: u64 = BTYPE_PROBE_LOOP_A + 4;
@@ -2328,6 +2330,78 @@ pub fn run_smp_input_device_self_test() {
         resumed,
     );
     SMP_PROBE_INPUT_WAIT_TID.store(0, Ordering::Release);
+    reset_scheduler();
+}
+
+/// Three sequential immutable AP processes exercise real UDP/socket paths.
+/// No CPU0 EL0 sentinel or explicit TX drain may supply this probe's progress.
+pub fn run_network_owner_progress_self_test() {
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+    crate::aarch64_virtio_net::reset_tx_affinity_evidence();
+    crate::serial_println!("MAKOS_AARCH64_NET_OWNER_ARMED config=test.net-owner=required");
+    // Boot's preceding enter_user_context calls stop CPU0's timer on return.
+    // This controller stays in EL1, so arm the real periodic scheduler timer
+    // explicitly; unmasking DAIF alone cannot generate its interrupts.
+    crate::arch::start_scheduler_timer();
+    let mut tids = [0u64; 3];
+    for phase in 1u8..=3 {
+        SMP_PROBE_TIDS[1].store(0, Ordering::Release);
+        let (pid, process) = spawn_process(0, NET_OWNER_PROBE_ELF, u64::from(phase), ProcessRole::SmpProbe)
+            .unwrap_or_else(|| crate::fatal("AArch64 network owner probe spawn failed"));
+        tids[usize::from(phase - 1)] = pid;
+        crate::aarch64_net_progress_probe::arm(pid, phase);
+        SMP_PROBE_AFFINITY[1].store(pid, Ordering::Release);
+        crate::arch::enable_smp_probe_scheduler();
+        notify_idle_cpus();
+        crate::aarch64_net_progress_probe::run_phase(pid, process.root, phase);
+        let deadline = crate::arch::counter_deadline_millis(5_000);
+        loop {
+            let complete = with_state(|state| state.table.get(pid).is_some_and(|info|
+                info.state == makos_process_table::ProcessState::Zombie));
+            if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            if crate::arch::counter_deadline_expired(deadline) {
+                crate::fatal("AArch64 network owner probe exit timeout");
+            }
+            core::hint::spin_loop();
+        }
+        crate::arch::disable_smp_probe_scheduler();
+        crate::aarch64_net_progress_probe::disarm();
+        let (resource, status) = with_state(|state| {
+            let WaitResult::Reaped { resource, exit_status, .. } = state.table.wait(0, pid) else {
+                crate::fatal("AArch64 network owner probe reap failed");
+            };
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) {
+                *slot = ContextSlot::EMPTY;
+            }
+            (resource, exit_status)
+        });
+        cleanup_reaped(pid, resource, status);
+        if status != 42 || resource != process.root
+            || SMP_PROBE_TIDS[1].load(Ordering::Acquire) != pid
+            || crate::aarch64_virtio_net::tx_affinity_evidence() != (u64::from(phase), u64::from(phase))
+            || crate::mm::free_frames() != free_before
+        {
+            crate::fatal("AArch64 network owner probe lifecycle proof failed");
+        }
+        SMP_PROBE_AFFINITY[1].store(0, Ordering::Release);
+    }
+    crate::arch::stop_scheduler_timer();
+    let (timer, lock_wait, busy) = crate::aarch64_virtio_net::progress_evidence();
+    if timer != 2 || lock_wait != 1 || busy == 0 || crate::mm::free_frames() != free_before {
+        crate::fatal("AArch64 network owner aggregate progress proof failed");
+    }
+    crate::serial_println!(
+        "MAKOS_AARCH64_NET_OWNER_OK tids={},{},{} phases=1,2,3 requester_cpu=1 service_cpu=0 owner_completions=3 ap_requests=3 timer_completions={} lock_wait_completions={} busy_deferrals={} statuses=42,42,42 cleanup=reaped free_balance=1 transport=virtio-net-udp4 scope=immutable-boot-probe",
+        tids[0], tids[1], tids[2], timer, lock_wait, busy,
+    );
     reset_scheduler();
 }
 
@@ -4854,6 +4928,12 @@ pub(crate) fn run_secondary_scheduler() -> ! {
         crate::fatal("AArch64 secondary dispatcher entered on BSP");
     }
     loop {
+        // The first entry follows AP timer initialization with IRQs enabled;
+        // subsequent EL0 returns are already masked. Protect every readiness
+        // check through WFI, including that first iteration. The fence pairs
+        // the nomem DAIF helper with the following scheduler memory accesses.
+        crate::arch::disable_interrupts();
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
         let cpu_bit = 1u64 << cpu;
         SMP_PROBE_SCHEDULER_LOOP_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
         if !crate::arch::smp_probe_scheduler_enabled() {
@@ -4882,14 +4962,11 @@ pub(crate) fn run_secondary_scheduler() -> ! {
                 })
         });
         let Some((pid, group_pid, role, context, surface_priority)) = selected else {
-            // The EL1 return trampoline leaves IRQs masked. Unmask around the
-            // idle instruction so a scheduler SGI is acknowledged rather than
-            // depending on implementation-specific masked-WFI behavior, then
-            // mask again before touching scheduler state.
+            // Keep IRQs masked until WFI observes the pending wake. Unmasking
+            // first could acknowledge the only SGI and then sleep indefinitely
+            // with a Ready task, since the EL0 return stopped this AP's timer.
             SMP_PROBE_SCHEDULER_IDLE_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
-            crate::arch::enable_interrupts();
-            unsafe { asm!("wfi", options(nomem, nostack)) };
-            crate::arch::disable_interrupts();
+            crate::arch::wait_for_scheduler_interrupt();
             SMP_PROBE_SCHEDULER_WAKE_MASK.fetch_or(cpu_bit, Ordering::AcqRel);
             continue;
         };

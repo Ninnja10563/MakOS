@@ -169,6 +169,10 @@ test-aarch64-vm-fault-runtime: image-aarch64
 test-aarch64-btype-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_btype.py
 
+.PHONY: test-aarch64-net-owner-runtime
+test-aarch64-net-owner-runtime: image-aarch64
+	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_net_owner.py
+
 test-aarch64-selfhost-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_selfhost.py
 
@@ -283,6 +287,9 @@ unit:
 	python3 scripts/test_aarch64_clear_child_tid.py
 	python3 scripts/test_aarch64_futex_wait_atomic.py
 	python3 scripts/test_aarch64_block_owner.py
+	python3 scripts/test_aarch64_net_owner.py
+	python3 scripts/test_aarch64_net_owner_runtime.py
+	python3 scripts/test_aarch64_scheduler_idle.py
 	python3 scripts/test_aarch64_application_balance.py
 	python3 scripts/test_aarch64_selfhost.py
 	python3 scripts/test_aarch64_selfhost_parallel.py
@@ -358,6 +365,9 @@ check:
 	python3 scripts/test_aarch64_clear_child_tid.py
 	python3 scripts/test_aarch64_futex_wait_atomic.py
 	python3 scripts/test_aarch64_block_owner.py
+	python3 scripts/test_aarch64_net_owner.py
+	python3 scripts/test_aarch64_net_owner_runtime.py
+	python3 scripts/test_aarch64_scheduler_idle.py
 	python3 scripts/test_aarch64_application_balance.py
 	python3 scripts/test_aarch64_selfhost.py
 	python3 scripts/test_aarch64_selfhost_parallel.py

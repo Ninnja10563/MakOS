@@ -1063,6 +1063,8 @@ fn with_state<R>(function: impl FnOnce(&mut State) -> R) -> R {
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
+        crate::aarch64_net_progress_probe::on_owner_socket_wait();
+        crate::aarch64_virtio_net::service_tx_requests_while_waiting();
         core::hint::spin_loop();
     }
     let result = function(unsafe { &mut *STATE.value.get() });

@@ -13,7 +13,22 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Saved branch state repair (2026-10-09): Mac `2bafc9c` passes all earlier
+Network owner repair (2026-10-09): Mac `20346e1` passes all earlier gates,
+including BTYPE, but strict Firefox stops on a network TX owner timeout.
+The [repair](FIREFOX-NET-OWNER-20261009.md) preserves the 5,000 ms deadline
+and CPU0 ownership while providing TX-only progress during socket contention
+and guarded EL1 timer service. Run full `make unit check`, rebuild with
+`make image-aarch64`, and add `make test-aarch64-net-owner-runtime` plus the
+unchanged `make test-aarch64-smp-tcp-runtime` and
+`make test-aarch64-smp-input-runtime` to the sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md). The new opt-in gate retains
+private disks and checks real AP UDP transport, masked contention, EL1 timer
+progress, recursive-driver deferral, reaps and frame balance. Reuse the
+verified integrated master below; no Firefox rebuild/restamp is required.
+The increment also closes an AP idle check-to-WFI lost-wake window; retained
+intermediate Pi failures and their evidentiary limits are in the repair report.
+
+Historical saved branch state repair (2026-10-09): Mac `2bafc9c` passes all earlier
 gates, but real Firefox rejects `spsr=0x80000400` at EL0 re-entry. The
 [architecture repair](FIREFOX-BTYPE-20261009.md) recognizes BTYPE only on a
 BTI-capable destination CPU without changing root, mapping, stack or other

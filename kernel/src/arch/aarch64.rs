@@ -628,6 +628,25 @@ pub fn enable_interrupts() {
     unsafe { asm!("msr daifclr, #2", options(nomem, nostack, preserves_flags)) }
 }
 
+/// Idle after a scheduler lookup performed with IRQs masked and its lock
+/// released. A PSTATE-masked pending interrupt wakes WFI; do not acknowledge
+/// the only wake SGI before WFI, especially while the AP timer is stopped.
+/// After waking, allow the IRQ handler to acknowledge it, then return masked
+/// before the caller examines scheduler state again. Omitting `nomem` also
+/// keeps that state lookup ordered before sleep and the next lookup after it.
+pub(crate) fn wait_for_scheduler_interrupt() {
+    unsafe {
+        asm!(
+            "dsb sy",
+            "wfi",
+            "msr daifclr, #2",
+            "isb",
+            "msr daifset, #0xf",
+            options(nostack, preserves_flags),
+        )
+    }
+}
+
 /// Short, non-sleeping critical sections must not be interrupted on their
 /// owning CPU and re-enter the same cross-CPU lock. Nested masks restore the
 /// exact prior DAIF state instead of unconditionally enabling interrupts.
@@ -6058,6 +6077,10 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
             // driver defers a tick if this IRQ interrupted a direct CPU0
             // request, avoiding recursive acquisition of the device lock.
             crate::aarch64_virtio_blk::service_requests_from_timer();
+            // TX requests are copied and need no socket/scheduler locks.
+            // Service them even when this tick interrupted EL1; the driver
+            // defers recursively interrupted ownership. RX stays EL0-only.
+            crate::aarch64_virtio_net::service_tx_requests_from_timer();
         }
         if kind == 9 {
             // Socket/net state uses non-recursive locks. Only run the RX

@@ -44,6 +44,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../user/aarch64_smp_tcp_owner_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_migration_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_btype_probe.S");
+    println!("cargo:rerun-if-changed=../user/aarch64_net_owner_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_smp_load_probe.S");
     println!("cargo:rerun-if-changed=../user/aarch64_textedit.c");
     println!("cargo:rerun-if-changed=../user/aarch64_browser.c");
@@ -652,6 +653,11 @@ fn build_aarch64_init() {
             "aarch64_btype_probe.S",
             "aarch64-btype-probe",
             "AArch64 hardware BTYPE saved-context probe",
+        ),
+        (
+            "aarch64_net_owner_probe.S",
+            "aarch64-net-owner-probe",
+            "AArch64 network owner EL1 progress probe",
         ),
         (
             "aarch64_smp_load_probe.S",

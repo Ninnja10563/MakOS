@@ -15,6 +15,7 @@ pub(crate) use aarch64::{
     send_scheduler_ipi,
     service_input_on_owner_cpu, service_network_rx_on_owner_cpu, smp_probe_scheduler_enabled,
     start_scheduler_timer, stop_scheduler_timer, user_cpu_features, user_range_readable, user_range_writable,
+    wait_for_scheduler_interrupt,
 };
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{

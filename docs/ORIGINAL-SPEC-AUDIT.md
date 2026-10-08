@@ -10,6 +10,18 @@ Last audit: 2026-10-09. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: attached Mac/HVF evidence for
+`20346e154bc2ef1a10d85e908633757940e01c33` passes all earlier gates,
+including BTYPE, and unchanged Firefox preflight. Real Firefox blits and
+reaches Mozilla TLS but fails before strict first-paint acceptance on
+`AArch64 network TX owner request timeout`. The exact stalled request is
+unobserved. The [network repair](FIREFOX-NET-OWNER-20261009.md) addresses a
+source-proven socket/owner circular wait, adds guarded EL1 timer TX progress
+and request-state diagnostics without relaxing deadlines, ownership or
+socket serialization. New regressions do not replace idle Mac/HVF Firefox
+qualification. No Partial/Missing row is upgraded; browser latency and final
+visible login remain unqualified.
+
+Earlier qualification: attached Mac/HVF evidence for
 `2bafc9c779f95ea9a4675b8c8c3c72b52aa88481` passes every pre-Firefox gate,
 including concurrent VM faults and unchanged provenance. Real Firefox fails
 before paint because the EL0 guard rejects architectural BTYPE saved in
