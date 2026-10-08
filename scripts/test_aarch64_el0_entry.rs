@@ -11,9 +11,13 @@ fn kernel_root() -> u64 {
 
 thread_local! {
     static ACTIVE_ROOT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static CPU_PFR1: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 fn cached_active_root() -> u64 {
     ACTIVE_ROOT.get()
+}
+fn user_cpu_features() -> u64 {
+    CPU_PFR1.get()
 }
 
 mod arch {
@@ -88,6 +92,7 @@ struct Tables {
 impl Tables {
     fn new() -> Self {
         aarch64_vm::reset();
+        CPU_PFR1.set(0);
         Self {
             pages: vec![Box::new(HostTable([0; 512]))],
         }
@@ -480,5 +485,212 @@ fn legacy_stack_and_nzcv_policy_are_preserved() {
             !user_context_entry_valid(&context, tables.root()),
             "spsr bit={bit}"
         );
+    }
+}
+
+#[test]
+fn all_nzcv_and_btype_combinations_are_valid_on_a_bti_pe() {
+    let mut tables = Tables::new();
+    let mut context = tables.context(0x8423_cba8);
+    // Unrelated feature fields must neither enable nor disable BTI.
+    for pfr1 in [1, 0xffff_ffff_ffff_fff1] {
+        CPU_PFR1.set(pfr1);
+        for nzcv in 0..16u64 {
+            for btype in 0..4u64 {
+                context.spsr = nzcv << 28 | btype << 10;
+                assert!(
+                    user_spsr_valid_for_features(context.spsr, pfr1),
+                    "defined NZCV/BTYPE rejected: pfr1={pfr1:#x} spsr={:#x}",
+                    context.spsr
+                );
+                assert!(user_context_entry_valid(&context, tables.root()));
+                assert_eq!(context.spsr, nzcv << 28 | btype << 10);
+            }
+        }
+    }
+}
+
+#[test]
+fn mac_firefox_saved_branch_state_is_valid_only_with_bti() {
+    let mut tables = Tables::new();
+    let mut context = tables.context(0x8423_cba8);
+    context.sp_el0 = 0x896b_7ff0;
+    tables.leaf(
+        context.sp_el0 - 1,
+        0x1000 | TABLE_DESCRIPTOR | AP_USER_RW | ACCESS_FLAG | PXN | UXN,
+    );
+    context.spsr = 0x8000_0400;
+    assert!(!user_context_entry_valid(&context, tables.root()));
+    CPU_PFR1.set(1);
+    assert!(
+        user_context_entry_valid(&context, tables.root()),
+        "legitimate Mac Firefox saved branch state rejected"
+    );
+    assert_eq!(context.spsr, 0x8000_0400, "validation changed saved SPSR");
+}
+
+#[test]
+fn unsupported_and_reserved_bti_ids_do_not_authorize_branch_state() {
+    let mut tables = Tables::new();
+    let mut context = tables.context(0x8423_cba8);
+    for bt in 0..16u64 {
+        if bt == 1 {
+            continue;
+        }
+        for other_features in [0, 0xffff_ffff_ffff_fff0] {
+            let pfr1 = other_features | bt;
+            CPU_PFR1.set(pfr1);
+            for nzcv in 0..16u64 {
+                context.spsr = nzcv << 28;
+                assert!(user_spsr_valid_for_features(context.spsr, pfr1));
+                assert!(user_context_entry_valid(&context, tables.root()));
+                for btype in 1..4u64 {
+                    context.spsr = nzcv << 28 | btype << 10;
+                    assert!(
+                        !user_spsr_valid_for_features(context.spsr, pfr1),
+                        "unsupported BTYPE accepted: pfr1={pfr1:#x} spsr={:#x}",
+                        context.spsr
+                    );
+                    assert!(!user_context_entry_valid(&context, tables.root()));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bti_does_not_authorize_any_other_spsr_bit() {
+    let mut tables = Tables::new();
+    let mut context = tables.context(0x8423_cba8);
+    CPU_PFR1.set(1);
+    for nzcv in 0..16u64 {
+        for btype in 0..4u64 {
+            for bit in 0..64 {
+                if (28..32).contains(&bit) || (10..12).contains(&bit) {
+                    continue;
+                }
+                context.spsr = nzcv << 28 | btype << 10 | 1u64 << bit;
+                assert!(
+                    !user_spsr_valid_for_features(context.spsr, 1),
+                    "privileged or unsupported SPSR bit accepted: bit={bit} spsr={:#x}",
+                    context.spsr
+                );
+                assert!(!user_context_entry_valid(&context, tables.root()));
+            }
+        }
+    }
+}
+
+#[test]
+fn btype_never_bypasses_selected_root_pc_or_stack_checks() {
+    for btype in 1..4u64 {
+        let mut tables = Tables::new();
+        let mut valid = tables.context(0x8423_cba8);
+        valid.spsr = 0x8000_0000 | btype << 10;
+        CPU_PFR1.set(1);
+        assert!(user_context_entry_valid(&valid, tables.root()));
+
+        assert!(!user_context_entry_valid(&valid, 0));
+        assert!(!user_context_entry_valid(&valid, tables.root() + PAGE_SIZE));
+        for root in [0, kernel_root(), tables.root() + 1] {
+            let mut invalid = valid;
+            invalid.ttbr0 = root;
+            assert!(!user_context_entry_valid(&invalid, root));
+        }
+
+        for pc in [0, USER_ADDRESS_BASE - 4, USER_ADDRESS_LIMIT, valid.elr + 1] {
+            let mut invalid = valid;
+            invalid.elr = pc;
+            assert!(!user_context_entry_valid(&invalid, tables.root()));
+        }
+        for descriptor in [
+            0,
+            executable_leaf() | UXN,
+            (executable_leaf() & !(0b11 << 6)) | AP_USER_RW,
+            executable_leaf() & !PXN,
+        ] {
+            tables.leaf(valid.elr, descriptor);
+            assert!(!user_context_entry_valid(&valid, tables.root()));
+        }
+        tables.leaf(valid.elr, executable_leaf());
+
+        for sp in [
+            0,
+            valid.sp_el0 + 1,
+            valid.sp_el0 + 8,
+            valid.sp_el0 + PAGE_SIZE,
+        ] {
+            let mut invalid = valid;
+            invalid.sp_el0 = sp;
+            assert!(!user_context_entry_valid(&invalid, tables.root()));
+        }
+        for descriptor in [
+            0,
+            executable_leaf(),
+            0x1000 | TABLE_DESCRIPTOR | AP_USER_RO | ACCESS_FLAG | PXN | UXN,
+            0x1000 | TABLE_DESCRIPTOR | AP_USER_RW | ACCESS_FLAG | PXN,
+        ] {
+            tables.leaf(valid.sp_el0 - 1, descriptor);
+            assert!(!user_context_entry_valid(&valid, tables.root()));
+        }
+    }
+}
+
+#[test]
+fn saved_branch_state_survives_production_capture_and_restore() {
+    assert_eq!(core::mem::offset_of!(ExceptionFrame, spsr), 256);
+    assert_eq!(core::mem::offset_of!(UserContext, spsr), 256);
+    let mut tables = Tables::new();
+    let template = tables.context(0x8423_cba8);
+    CPU_PFR1.set(1);
+    assert_eq!(
+        UserContext::initial(template.elr, template.sp_el0, tables.root(), 42).spsr,
+        0
+    );
+    for nzcv in 0..16u64 {
+        for btype in 0..4u64 {
+            let saved = nzcv << 28 | btype << 10;
+            let frame = ExceptionFrame {
+                registers: core::array::from_fn(|index| 0x4000 + index as u64),
+                elr: template.elr,
+                spsr: saved,
+                esr: 0x9200_0007,
+                far: 0x8100_0000,
+                sp_el0: template.sp_el0,
+                ttbr0: tables.root(),
+                tpidr_el0: 0x9000_0000,
+                vector_registers: core::array::from_fn(|index| u128::MAX - index as u128),
+                fpcr: 0x0040_0000,
+                fpsr: 0x0000_0010,
+            };
+            let context = UserContext::capture(&frame);
+            assert_eq!(context.spsr, saved, "capture changed saved SPSR");
+            assert!(user_context_entry_valid(&context, tables.root()));
+            let mut restored = ExceptionFrame {
+                registers: [0; 31],
+                elr: 0,
+                spsr: 0,
+                esr: 0,
+                far: 0,
+                sp_el0: 0,
+                ttbr0: 0,
+                tpidr_el0: 0,
+                vector_registers: [0; 32],
+                fpcr: 0,
+                fpsr: 0,
+            };
+            context.restore(&mut restored);
+            assert_eq!(restored.spsr, saved, "restore changed saved SPSR");
+            assert_eq!(restored.registers, frame.registers);
+            assert_eq!(restored.elr, frame.elr);
+            assert_eq!(restored.esr, frame.esr);
+            assert_eq!(restored.far, frame.far);
+            assert_eq!(restored.sp_el0, frame.sp_el0);
+            assert_eq!(restored.ttbr0, frame.ttbr0);
+            assert_eq!(restored.tpidr_el0, frame.tpidr_el0);
+            assert_eq!(restored.vector_registers, frame.vector_registers);
+            assert_eq!(restored.fpcr, frame.fpcr);
+            assert_eq!(restored.fpsr, frame.fpsr);
+        }
     }
 }

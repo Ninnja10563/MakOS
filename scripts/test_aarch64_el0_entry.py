@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Execute production AArch64 EL0-entry policy with real host page tables.
 
-Only physical-memory allocation and VM-state storage are host adapters. The
-page-table walk, context predicate, and executable-reservation predicate are
+Physical-memory allocation, CPU feature identification, and VM-state storage
+are host adapters. The page-table walk, context predicate, and
+executable-reservation predicate are
 extracted from the kernel; the reservation table is the production Rust crate.
 This is a policy regression, not execution of AArch64 instructions or Firefox.
 """
@@ -32,6 +33,7 @@ constants = "\n".join(
     re.findall(r"^(?:pub )?const [A-Z_0-9]+: u64 = .*;$", ARCH.split("const GICD_CTLR", 1)[0], re.M)
 )
 context_guard = item(ARCH, "fn user_context_entry_valid(")
+spsr_guard = item(ARCH, "fn user_spsr_valid_for_features(")
 functions = "\n".join(
     item(ARCH, declaration)
     for declaration in (
@@ -47,7 +49,11 @@ functions = "\n".join(
     )
 )
 mapping = "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n" + item(ARCH, "enum UserInstructionMapping")
-context = "#[repr(C)]\n#[derive(Clone, Copy)]\n" + item(ARCH, "pub(crate) struct UserContext")
+context = (
+    "#[repr(C)]\n#[derive(Clone, Copy)]\n" + item(ARCH, "pub(crate) struct UserContext")
+    + "\n#[repr(C)]\n" + item(ARCH, "pub(crate) struct ExceptionFrame")
+    + "\n" + item(ARCH, "impl UserContext")
+)
 
 # Protect the actual entry wiring as well as the extracted predicate. Hardware
 # ERET and IRQ instructions remain in the kernel and are not host-simulated.
@@ -72,6 +78,33 @@ assert "handle_page_fault" not in signal_predicate
 assert "executable_region_in" not in signal_predicate
 assert "handle_page_fault" not in functions
 
+# Feature IDs are read from the PE that will perform ERET, not inferred from
+# the boot CPU, host OS, or application. Only the host fixture substitutes it.
+feature_read = item(ARCH, "pub(crate) fn user_cpu_features(")
+assert "ID_AA64PFR1_EL1" in feature_read
+assert "user_spsr_valid_for_features(" in context_guard
+assert "user_cpu_features()" in context_guard
+
+# These are structural assembly checks, not a claim that the host executes
+# ERET. The executable fixture below separately checks the actual Rust copies.
+assembly_entry = ARCH.split("aarch64_enter_user_context:\n", 1)[1].split(
+    ".size aarch64_enter_user_context", 1
+)[0]
+assert re.search(
+    r"ldr x2, \[x9, #256\]\s+ldr x3, \[x9, #280\]\s+"
+    r"msr elr_el1, x1\s+msr spsr_el1, x2",
+    assembly_entry,
+)
+assert re.search(
+    r"mrs x3, spsr_el1\s+mrs x4, esr_el1\s+mrs x5, far_el1\s+"
+    r"stp x2, x3, \[sp, #248\]",
+    ARCH,
+)
+assert re.search(
+    r"ldp x2, x3, \[sp, #248\]\s+msr elr_el1, x2\s+msr spsr_el1, x3",
+    ARCH,
+)
+
 vm_excerpt = "\n".join(
     re.findall(r"^pub const (?:PAGE_SIZE|PROT_READ|PROT_WRITE|PROT_EXEC):.*;$", VM, re.M)
 ) + "\n" + "\n".join(
@@ -95,7 +128,7 @@ with tempfile.TemporaryDirectory(prefix="makos-el0-entry-") as temporary:
          str(ROOT / "crates/vm-space/src/lib.rs"), "-o", str(library)],
         check=True,
     )
-    production = constants + "\n" + mapping + "\n" + context + "\n" + functions
+    production = constants + "\n" + mapping + "\n" + context + "\n" + functions + "\n" + spsr_guard
     (directory / "arch_policy.rs").write_text(production + "\n" + context_guard)
     (directory / "vm_policy.rs").write_text(vm_excerpt)
     (directory / "test.rs").write_text((ROOT / "scripts/test_aarch64_el0_entry.rs").read_text())
@@ -130,6 +163,67 @@ fn user_context_entry_valid(context: &UserContext, active_root: u64) -> bool {
     if negative.returncode == 0 or "legitimate dynamic-loader thread entry rejected" not in negative.stdout + negative.stderr:
         raise SystemExit(f"EL0 old-guard negative control did not reproduce loader rejection:\n{negative.stdout}{negative.stderr}")
 
+    # Mutate generated copies only. Each control must fail a precise behavioral
+    # assertion; compiler failure or an unrelated test failure is not evidence.
+    controls = (
+        (
+            "old-nzcv-only",
+            production.replace(spsr_guard, """
+fn user_spsr_valid_for_features(spsr: u64, _pfr1: u64) -> bool {
+    spsr & !0xf000_0000 == 0
+}
+"""),
+            "mac_firefox_saved_branch_state_is_valid_only_with_bti",
+            "legitimate Mac Firefox saved branch state rejected",
+        ),
+        (
+            "btype-feature-bypass",
+            production.replace(spsr_guard, """
+fn user_spsr_valid_for_features(spsr: u64, _pfr1: u64) -> bool {
+    spsr & !0xf000_0c00 == 0
+}
+"""),
+            "unsupported_and_reserved_bti_ids_do_not_authorize_branch_state",
+            "unsupported BTYPE accepted",
+        ),
+        (
+            "all-spsr-bits-bypass",
+            production.replace(spsr_guard, """
+fn user_spsr_valid_for_features(_spsr: u64, _pfr1: u64) -> bool {
+    true
+}
+"""),
+            "bti_does_not_authorize_any_other_spsr_bit",
+            "privileged or unsupported SPSR bit accepted",
+        ),
+        (
+            "capture-clears-btype",
+            production.replace("spsr: frame.spsr,", "spsr: frame.spsr & !0xc00,"),
+            "saved_branch_state_survives_production_capture_and_restore",
+            "capture changed saved SPSR",
+        ),
+        (
+            "restore-clears-btype",
+            production.replace("frame.spsr = self.spsr;", "frame.spsr = self.spsr & !0xc00;"),
+            "saved_branch_state_survives_production_capture_and_restore",
+            "restore changed saved SPSR",
+        ),
+    )
+    for name, mutated, test_name, failure in controls:
+        assert mutated != production, f"negative control {name} did not mutate production code"
+        (directory / "arch_policy.rs").write_text(mutated + "\n" + context_guard)
+        negative = subprocess.run(
+            [str(compile_fixture(f"el0-entry-{name}")), "--exact", test_name],
+            capture_output=True, text=True, timeout=15,
+        )
+        if negative.returncode == 0 or failure not in negative.stdout + negative.stderr:
+            raise SystemExit(
+                f"EL0 {name} negative control missed expected assertion:\n"
+                f"{negative.stdout}{negative.stderr}"
+            )
+
 print("MAKOS_AARCH64_EL0_ENTRY_HOST_OK policy=production-code page_tables=four-level "
       "loader_pc=0x280adc14 permissions=rx,pxn,af isolation=root-bound "
-      "lazy=rx-reservation-only stack,spsr=preserved negative_control=old-guard-rejected")
+      "lazy=rx-reservation-only stack,spsr=preserved negative_control=old-guard-rejected "
+      "btype=feature-bound-all-four mac_spsr=0x80000400 "
+      "capture_restore=lossless additional_negative_controls=5")

@@ -107,6 +107,35 @@ static SMP_MIGRATION_PROBE_ELF: &[u8] = include_bytes!(concat!(
 ));
 static SMP_LOAD_PROBE_ELF: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-smp-load-probe.elf"));
+static BTYPE_PROBE_ELF: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/aarch64-btype-probe.elf"));
+
+const BTYPE_PROBE_LOOP_A: u64 = 0x1000_0080;
+const BTYPE_PROBE_LOOP_B: u64 = BTYPE_PROBE_LOOP_A + 4;
+const BTYPE_PROBE_SPSR: u64 = 0x8000_0400;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum BtypeProbePhase {
+    Inactive,
+    Armed,
+    Captured,
+    Entered,
+    Completed,
+}
+
+struct BtypeProbeState {
+    tid: u64,
+    phase: BtypeProbePhase,
+    source: crate::arch::UserContext,
+}
+
+impl BtypeProbeState {
+    const EMPTY: Self = Self {
+        tid: 0,
+        phase: BtypeProbePhase::Inactive,
+        source: crate::arch::UserContext::initial(0, 0, 0, 0),
+    };
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessRole {
@@ -235,6 +264,7 @@ struct SchedulerState {
     table: ProcessTable<MAX_PROCESSES>,
     futex: FutexTable<MAX_FUTEX_WAITERS>,
     contexts: [ContextSlot; MAX_PROCESSES],
+    btype_probe: BtypeProbeState,
     session_active: bool,
     self_test_session: bool,
     timer_switches: u64,
@@ -262,6 +292,7 @@ impl SchedulerState {
             table: ProcessTable::new(),
             futex: FutexTable::new(),
             contexts: [ContextSlot::EMPTY; MAX_PROCESSES],
+            btype_probe: BtypeProbeState::EMPTY,
             session_active: false,
             self_test_session: false,
             timer_switches: 0,
@@ -739,6 +770,9 @@ static SMP_PROBE_MIGRATION_DESTINATION: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_MIGRATION_SOURCE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_MIGRATION_COUNT: AtomicU64 = AtomicU64::new(0);
+// Zero outside the bounded immutable boot fixture: production timer and entry
+// paths do not acquire the scheduler lock for this observation hook.
+static BTYPE_PROBE_TID: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_SCHEDULER_LOOP_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_SCHEDULER_IDLE_MASK: AtomicU64 = AtomicU64::new(0);
 static SMP_PROBE_SCHEDULER_WAKE_MASK: AtomicU64 = AtomicU64::new(0);
@@ -1294,6 +1328,205 @@ pub fn run_smp_forced_migration_self_test() {
         target,
     );
     reset_scheduler();
+}
+
+/// Capture real PSTATE.BTYPE in an EL0 timer frame, migrate that exact context
+/// through the outer EL0 guard, and observe another hardware IRQ after ERET.
+/// The immutable fixture is the only task eligible for the hooks below.
+pub fn run_smp_btype_self_test() {
+    let features = crate::arch::user_cpu_features();
+    if features & 0xf != 1 {
+        crate::serial_println!(
+            "MAKOS_AARCH64_BTYPE_UNSUPPORTED id_aa64pfr1={:#x} feature=FEAT_BTI qualification=not-run",
+            features,
+        );
+        return;
+    }
+    let free_before = crate::mm::free_frames();
+    reset_scheduler();
+    SMP_PROBE_ACTIVE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_RELEASE.store(true, Ordering::Release);
+    SMP_PROBE_MIGRATION_SOURCE_MASK.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_TARGET_MASK.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_COUNT.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_DESTINATION.store(0, Ordering::Release);
+    for tid in &SMP_PROBE_AFFINITY {
+        tid.store(0, Ordering::Release);
+    }
+    for tid in &SMP_PROBE_TIDS {
+        tid.store(0, Ordering::Release);
+    }
+    let pid = spawn_process(0, BTYPE_PROBE_ELF, 0, ProcessRole::SmpProbe)
+        .unwrap_or_else(|| crate::fatal("AArch64 BTYPE probe spawn failed"))
+        .0;
+    with_state(|state| {
+        state.btype_probe.tid = pid;
+        state.btype_probe.phase = BtypeProbePhase::Armed;
+    });
+    BTYPE_PROBE_TID.store(pid, Ordering::Release);
+    SMP_PROBE_MIGRATION_TID.store(pid, Ordering::Release);
+    SMP_PROBE_AFFINITY[1].store(pid, Ordering::Release);
+    crate::arch::enable_smp_probe_scheduler();
+    notify_idle_cpus();
+
+    let deadline = crate::arch::counter_deadline_millis(20_000);
+    loop {
+        let complete = with_state(|state| {
+            state.table.get(pid).is_some_and(|info| {
+                info.state == makos_process_table::ProcessState::Zombie
+            })
+        });
+        if complete && SMP_PROBE_ACTIVE_MASK.load(Ordering::Acquire) == 0 {
+            break;
+        }
+        if crate::arch::counter_deadline_expired(deadline) {
+            crate::fatal("AArch64 BTYPE hardware capture/resume timeout");
+        }
+        core::hint::spin_loop();
+    }
+    crate::arch::disable_smp_probe_scheduler();
+    BTYPE_PROBE_TID.store(0, Ordering::Release);
+    let (resource, status, root, completed) = with_state(|state| {
+        let WaitResult::Reaped { resource, exit_status, .. } = state.table.wait(0, pid) else {
+            crate::fatal("AArch64 BTYPE probe reap failed");
+        };
+        if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) {
+            *slot = ContextSlot::EMPTY;
+        }
+        (resource, exit_status, state.btype_probe.source.ttbr0,
+         state.btype_probe.phase == BtypeProbePhase::Completed)
+    });
+    cleanup_reaped(pid, resource, status);
+    if status != 42 || !completed || resource != root
+        || SMP_PROBE_MIGRATION_SOURCE_MASK.load(Ordering::Acquire) != 0b0010
+        || SMP_PROBE_MIGRATION_TARGET_MASK.load(Ordering::Acquire) != 0b0100
+        || SMP_PROBE_MIGRATION_COUNT.load(Ordering::Acquire) != 1
+        || SMP_PROBE_TIDS[1].load(Ordering::Acquire) != pid
+        || SMP_PROBE_TIDS[2].load(Ordering::Acquire) != pid
+        || crate::mm::free_frames() != free_before
+    {
+        crate::fatal("AArch64 BTYPE capture/entry/resume/reap proof failed");
+    }
+    SMP_PROBE_MIGRATION_TID.store(0, Ordering::Release);
+    SMP_PROBE_MIGRATION_DESTINATION.store(0, Ordering::Release);
+    crate::serial_println!(
+        "MAKOS_AARCH64_BTYPE_OK tid={} source_cpu=1 target_cpu=2 root={:#x} spsr={:#x} migrations=1 capture=hardware-timer entry=validated-before-eret resumed=hardware-timer status=42 termination=kernel-after-irq-proof cleanup=reaped free_balance=1 scope=immutable-boot-probe",
+        pid, root, BTYPE_PROBE_SPSR,
+    );
+    reset_scheduler();
+}
+
+fn btype_probe_loop_pc(pc: u64) -> bool {
+    matches!(pc, BTYPE_PROBE_LOOP_A | BTYPE_PROBE_LOOP_B)
+}
+
+fn btype_probe_saved_state_equal(
+    source: &crate::arch::UserContext,
+    observed: &crate::arch::UserContext,
+) -> bool {
+    source.registers == observed.registers
+        && source.spsr == observed.spsr
+        && source.sp_el0 == observed.sp_el0
+        && source.ttbr0 == observed.ttbr0
+        && source.tpidr_el0 == observed.tpidr_el0
+}
+
+/// Returns true only after consuming an IRQ belonging to the armed fixture.
+/// No SPSR, PC, or register is manufactured to make the guard accept a frame.
+pub(crate) fn btype_probe_from_timer(frame: &mut crate::arch::ExceptionFrame) -> bool {
+    let expected = BTYPE_PROBE_TID.load(Ordering::Acquire);
+    if expected == 0 {
+        return false;
+    }
+    let cpu = scheduler_cpu();
+    let captured = crate::arch::UserContext::capture(frame);
+    let phase = with_state(|state| {
+        if state.table.current_pid_on(cpu) != Some(expected)
+            || !btype_probe_loop_pc(captured.elr)
+        {
+            return None;
+        }
+        if state.btype_probe.tid != expected
+            || !state.contexts.iter().any(|slot| slot.pid == expected && slot.role == ProcessRole::SmpProbe)
+            || crate::arch::user_cpu_features() & 0xf != 1
+            || captured.spsr != BTYPE_PROBE_SPSR
+            || captured.registers[0] != 0
+            || captured.registers[16] != BTYPE_PROBE_LOOP_B
+            || captured.registers[17] != BTYPE_PROBE_LOOP_A
+            || captured.registers[19] != 0x1234_5678
+            || captured.registers[20] != 0x89ab_cdef
+            || captured.sp_el0 != crate::arch::USER_STACK_TOP - 16
+            || captured.ttbr0 == 0
+            || captured.tpidr_el0 != 0x1122_3344
+        {
+            crate::fatal("AArch64 BTYPE hardware frame invalid");
+        }
+        match (cpu, state.btype_probe.phase) {
+            (1, BtypeProbePhase::Armed) => {
+                state.btype_probe.source = captured;
+                state.btype_probe.phase = BtypeProbePhase::Captured;
+                Some(BtypeProbePhase::Captured)
+            }
+            (2, BtypeProbePhase::Entered) => {
+                if !btype_probe_saved_state_equal(&state.btype_probe.source, &captured) {
+                    crate::fatal("AArch64 BTYPE post-ERET context changed");
+                }
+                state.btype_probe.phase = BtypeProbePhase::Completed;
+                Some(BtypeProbePhase::Completed)
+            }
+            _ => crate::fatal("AArch64 BTYPE hardware proof out of sequence"),
+        }
+    });
+    let Some(phase) = phase else { return false };
+    if phase == BtypeProbePhase::Captured {
+        crate::serial_println!(
+            "MAKOS_AARCH64_BTYPE_SOURCE_OK cpu=1 tid={} root={:#x} pc={:#x} sp={:#x} tls={:#x} spsr={:#x} btype=1 capture=hardware-timer",
+            expected, captured.ttbr0, captured.elr, captured.sp_el0, captured.tpidr_el0, captured.spsr,
+        );
+        if !migrate_smp_probe_from_exception(2, frame) {
+            crate::fatal("AArch64 BTYPE captured context migration failed");
+        }
+    } else {
+        crate::serial_println!(
+            "MAKOS_AARCH64_BTYPE_TARGET_OK cpu=2 tid={} root={:#x} pc={:#x} sp={:#x} tls={:#x} spsr={:#x} btype=1 proof=hardware-timer-after-eret",
+            expected, captured.ttbr0, captured.elr, captured.sp_el0, captured.tpidr_el0, captured.spsr,
+        );
+        // This is explicit kernel-controlled test termination after genuine
+        // target-CPU execution, not a claimed userspace exit syscall.
+        exit_from_exception(42, frame);
+    }
+    true
+}
+
+/// Called only after the production root/PC/stack/SPSR guard has accepted the
+/// selected context, immediately before the ordinary assembly ERET path.
+pub(crate) fn observe_btype_probe_entry(context: &crate::arch::UserContext) {
+    let expected = BTYPE_PROBE_TID.load(Ordering::Acquire);
+    if expected == 0 || scheduler_cpu() != 2 {
+        return;
+    }
+    let observed = with_state(|state| {
+        if state.table.current_pid_on(2) != Some(expected) {
+            return false;
+        }
+        if state.btype_probe.tid != expected
+            || state.btype_probe.phase != BtypeProbePhase::Captured
+            || !state.contexts.iter().any(|slot| slot.pid == expected && slot.role == ProcessRole::SmpProbe)
+            || !btype_probe_saved_state_equal(&state.btype_probe.source, context)
+            || state.btype_probe.source.elr != context.elr
+            || context.spsr != BTYPE_PROBE_SPSR
+        {
+            crate::fatal("AArch64 BTYPE saved context not retained before ERET");
+        }
+        state.btype_probe.phase = BtypeProbePhase::Entered;
+        true
+    });
+    if observed {
+        crate::serial_println!(
+            "MAKOS_AARCH64_BTYPE_ENTRY_OK cpu=2 tid={} root={:#x} pc={:#x} sp={:#x} tls={:#x} spsr={:#x} btype=1 proof=validated-before-eret",
+            expected, context.ttbr0, context.elr, context.sp_el0, context.tpidr_el0, context.spsr,
+        );
+    }
 }
 
 pub fn run_smp_load_balancing_self_test() {

@@ -1,8 +1,38 @@
 # Implementation status
 
-Last updated: 2026-10-08.
+Last updated: 2026-10-09.
 
 ## Current qualification update
+
+Attached Mac/HVF evidence at
+`2bafc9c779f95ea9a4675b8c8c3c72b52aa88481` passes all pre-Firefox gates,
+including the VM-fault regression and unchanged image/provenance checks.
+Real Firefox stops before paint with `spsr=0x80000400`, matching roots,
+valid stack and an executable PC. The entry predicate incorrectly rejects
+the saved BTYPE branch field. The [repair](FIREFOX-BTYPE-20261009.md) accepts
+it only on a BTI-capable destination CPU while retaining all other state,
+mapping and isolation checks. It adds production-code host regressions and
+a hardware-captured branch-state migration fixture; it does not clear state
+or change Firefox assertions, timeouts, thresholds or provenance.
+
+Rebuild the boot image and follow the sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) at the exact pushed commit.
+The preserved `3b68500032eec2d4` image is reusable after unchanged SHA/preflight
+checks. Pi functional evidence cannot qualify Mac/HVF browser latency.
+Real Firefox and final visible login remain unqualified; all audit
+Partial/Missing rows remain.
+
+Local Pi/Debian full unit/check and image build pass. Sequential Pi/TCG
+EL0, VM-fault, new BTYPE, self-host, Native/Python-role, Firefox-role input/SMP,
+and cursor gates all pass. The new branch loop captures the exact
+`0x80000400` on AP1, passes the real outer guard on AP2, executes there and
+reaps with status 42 and balanced frames. Self-host retains all 20-build,
+21-process and exact-header/parallel proofs; cursor retains seven positions
+and zero changed pixels/errors/timeouts. Logs, prior images and private
+sessions are preserved with the cursor cleanup limitation detailed in the
+report. No QEMU/build/test remains; no local browser pass is claimed.
+
+### Earlier concurrent VM repair
 
 The attached Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF evidence for
 `172975dc7d1e9a55d820ba3e7f34d8f51032756d` passes the supported fresh Mac

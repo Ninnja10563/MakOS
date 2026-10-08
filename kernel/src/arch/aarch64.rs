@@ -1316,8 +1316,27 @@ pub fn switch_address_space(root: u64) {
     ACTIVE_USER_ROOTS[cpu_index()].store(target, Ordering::Release);
 }
 
+pub(crate) fn user_cpu_features() -> u64 {
+    let pfr1: u64;
+    unsafe {
+        asm!("mrs {value}, ID_AA64PFR1_EL1", value = out(reg) pfr1,
+            options(nomem, nostack, preserves_flags));
+    }
+    pfr1
+}
+
+fn user_spsr_valid_for_features(spsr: u64, pfr1: u64) -> bool {
+    const NZCV: u64 = 0xf000_0000;
+    // FEAT_BTI saves PSTATE.BTYPE in SPSR_EL1[11:10], even for branches
+    // from unguarded pages. It is user branch state, not execution privilege.
+    // Preserve all four encodings across ERET; clearing it would silently
+    // change the resumed control-flow state. BT=1 is the defined feature ID;
+    // absent/reserved feature encodings retain the original NZCV-only policy.
+    let btype = if pfr1 & 0xf == 1 { 0xc00 } else { 0 };
+    spsr & !(NZCV | btype) == 0
+}
+
 fn user_context_entry_valid(context: &UserContext, active_root: u64) -> bool {
-    const USER_SPSR_ALLOWED: u64 = 0xf000_0000;
     // USER_IMAGE_LIMIT constrains initial ELF placement, not a saved PC:
     // pthread clone/return can be in the interpreter, a DSO, or JIT text.
     // Validate the selected address space before walking either PC or stack.
@@ -1326,7 +1345,12 @@ fn user_context_entry_valid(context: &UserContext, active_root: u64) -> bool {
         && user_instruction_pointer_valid_in(context.ttbr0, context.elr)
         && (matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
             || user_stack_pointer_valid_in(context.ttbr0, context.sp_el0))
-        && context.spsr & !USER_SPSR_ALLOWED == 0
+        && user_spsr_valid_for_features(
+            context.spsr,
+            // Read the destination PE's feature register, not a boot-CPU
+            // assumption. Ordinary zero-BTYPE entries need no register read.
+            if context.spsr & 0xc00 != 0 { user_cpu_features() } else { 0 },
+        )
 }
 
 pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
@@ -1340,7 +1364,7 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
             && (matches!(context.sp_el0, LEGACY_USER_STACK_TOP | USER_STACK_TOP)
                 || user_stack_pointer_valid_in(context.ttbr0, context.sp_el0));
         crate::serial_println!(
-            "AArch64 EL0 entry rejected cpu={} active_root={:#x} context_root={:#x} elr={:#x} sp={:#x} stack_valid={} spsr={:#x} instruction_mapping={:?}",
+            "AArch64 EL0 entry rejected cpu={} active_root={:#x} context_root={:#x} elr={:#x} sp={:#x} stack_valid={} spsr={:#x} instruction_mapping={:?} tid={} pfr1={:#x}",
             cpu_index(),
             active_root,
             context.ttbr0,
@@ -1353,6 +1377,8 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
             } else {
                 UserInstructionMapping::Denied
             },
+            crate::aarch64_process::current_tid(),
+            user_cpu_features(),
         );
         crate::fatal("AArch64 EL0 entry precondition failed");
     }
@@ -1371,6 +1397,7 @@ pub(crate) fn enter_user_context(context: &UserContext) -> u64 {
             context.elr,
         );
     }
+    crate::aarch64_process::observe_btype_probe_entry(context);
     start_scheduler_timer();
     // Keep EL1 IRQs masked across the assembly restore. The target SPSR
     // unmasks IRQs atomically with ERET; taking an EL1 timer exception while
@@ -6041,6 +6068,11 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
                 // Retain a 100 Hz recovery drain for an edge acknowledged while
                 // it interrupted EL1, or for a transport edge lost in firmware.
                 service_input_on_owner_cpu();
+            }
+            // Only an armed immutable boot probe can consume this IRQ.
+            // Its SPSR comes from the hardware frame, never an injected value.
+            if crate::aarch64_process::btype_probe_from_timer(frame) {
+                return;
             }
             crate::aarch64_process::preempt_from_timer(frame);
             finish_signal_delivery(frame);

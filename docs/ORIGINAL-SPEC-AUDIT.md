@@ -6,10 +6,22 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-08. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-09. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: attached Mac/HVF evidence for
+`2bafc9c779f95ea9a4675b8c8c3c72b52aa88481` passes every pre-Firefox gate,
+including concurrent VM faults and unchanged provenance. Real Firefox fails
+before paint because the EL0 guard rejects architectural BTYPE saved in
+`spsr=0x80000400`; its root, stack and executable mapping checks pass.
+The [branch-state repair](FIREFOX-BTYPE-20261009.md) preserves that field
+only when the destination CPU advertises BTI, retaining all other security
+checks. Added host and genuine guest regressions do not replace strict
+Mac/HVF browser qualification. No Partial/Missing row is upgraded, no
+Firefox latency result exists for this run, and final visible login remains
+unqualified.
+
+Earlier qualification: attached Mac/HVF evidence for
 `172975dc7d1e9a55d820ba3e7f34d8f51032756d` passes a supported fresh release,
 all-five-ELF/60-patch provenance, integration, and all pre-Firefox gates.
 The missing image was replaced through the authorized fresh-baseline path;

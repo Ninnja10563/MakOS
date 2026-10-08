@@ -13,17 +13,19 @@ gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 172975dc7d1e9a55d820ba3e7f34d8f51032756d
+Previous exact Mac-tested baseline: 2bafc9c779f95ea9a4675b8c8c3c72b52aa88481
 
-Use the exact full concurrent-VM-fault repair commit supplied in chat,
+Use the exact full saved-BTYPE repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
-arbitrary future descendant. The last run passed all earlier gates, a fresh
-supported Mac release/integration, and Firefox preflight, then stopped before
-paint with complete raw `duplicate AArch64 user-page mapping` fatal evidence.
-Its precise offending VA/caller was not captured. The repair serializes page
-table creation/publication and validates VM generations at fault commit;
-private losing/stale frames are reclaimed and resident permissions checked.
-It retains the strict duplicate guard. Pi functional tests do not qualify
+arbitrary future descendant. The last run passed all earlier gates, including
+VM-fault and preserved-image Firefox preflight, then stopped before paint:
+`AArch64 EL0 entry precondition failed`, executable PC 0x8423cba8, matching
+roots, valid stack, SPSR 0x80000400. Its exact rejected TID was not recorded.
+The repair recognizes architectural BTYPE[11:10] only on a destination CPU
+advertising FEAT_BTI; every other SPSR bit and root/PC/stack check remains.
+Saved branch bits must be preserved, not sanitized. A genuine branch-loop
+timer/migration fixture covers the outer entry path. The preceding VM and
+strict duplicate-mapping guards remain. Pi functional tests do not qualify
 Firefox on this Mac. Do not change fatal assertions, timeouts, thresholds, SDK
 macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
 HOST_CC to substitute another compiler. It retains
@@ -38,7 +40,7 @@ remote main to match, and record the exact tested commit.
    docs/EL0-EVIDENCE-ATOMICITY-20260911.md and
    docs/EL0-DARWIN-ADAPTER-20260911.md and
    docs/FIREFOX-FATAL-CAPTURE-20260915.md and
-   docs/FIREFOX-VM-FAULT-20261008.md.
+   docs/FIREFOX-VM-FAULT-20261008.md and docs/FIREFOX-BTYPE-20261009.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -56,6 +58,7 @@ remote main to match, and record the exact tested commit.
        make image-aarch64
        make test-aarch64-el0-entry-runtime
        make test-aarch64-vm-fault-runtime
+       make test-aarch64-btype-runtime
        make test-aarch64-selfhost-runtime
        make test-aarch64-native-smp-runtime
        make test-aarch64-production-smp-runtime
@@ -90,6 +93,20 @@ remote main to match, and record the exact tested commit.
    deterministic losing kernel interleaving or browser pass from the marker.
    Deterministic host tests force that race separately. The added wrapper
    launches one EL0 harness, with its original deadlines and checks intact.
+
+   The added BTYPE gate must report `MAKOS_AARCH64_BTYPE_RUNTIME_OK accel=hvf`.
+   Require exactly one complete ordered SOURCE_OK, ENTRY_OK, TARGET_OK and
+   final MAKOS_AARCH64_BTYPE_OK record for the same immutable probe TID/root,
+   source CPU1 and target CPU2, SPSR=0x80000400, BTYPE=1, unchanged SP/TLS,
+   and PCs in its two-instruction BR loop. Entry PC must equal capture PC.
+   Require an actual status-42 reap after target IRQ and before final result,
+   one migration and balanced frames. Termination is kernel-controlled only
+   after the resumed EL0 IRQ, not a userspace exit. The target loop regenerates
+   BTYPE; do not claim that IRQ alone proves its first post-ERET value. The
+   original saved context must match before ERET, and host tests separately
+   reject state-clearing mutations. UNSUPPORTED is not a qualifying pass.
+   Preserve the nested private boot/data/vars, session.json/PID/QMP and final
+   raw serial. The wrapper also requires every unchanged EL0 harness check.
 
    Record the boot-image SHA-256 both before and immediately after the
    self-host run, because its phony image prerequisite rebuilds that file;
@@ -250,7 +267,7 @@ remote main to match, and record the exact tested commit.
    cursor, `completion=fast-plus-bounded-recovery`, and zero GPU timeouts or
    errors. Every delayed completion, if any, must have a matching recovered
    record with the same queue and command.
-4. The October 8 Mac report successfully published and preflighted
+4. The October 8 Mac report published, and October 9 again preflighted,
    `build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img`,
    SHA-256
    `3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`.

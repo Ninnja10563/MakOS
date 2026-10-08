@@ -165,6 +165,10 @@ test-aarch64-el0-entry-runtime: image-aarch64
 test-aarch64-vm-fault-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_vm_fault.py
 
+.PHONY: test-aarch64-btype-runtime
+test-aarch64-btype-runtime: image-aarch64
+	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_btype.py
+
 test-aarch64-selfhost-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_selfhost.py
 
@@ -272,6 +276,7 @@ unit:
 	python3 scripts/test_aarch64_vm_fault_commit.py
 	python3 scripts/test_aarch64_vm_fault_runtime.py
 	python3 scripts/test_aarch64_el0_entry.py
+	python3 scripts/test_aarch64_btype_runtime.py
 	python3 scripts/test_aarch64_el0_entry_runtime.py
 	python3 scripts/test_aarch64_el0_emission.py
 	python3 scripts/test_aarch64_tty_serial_atomic.py
@@ -346,6 +351,7 @@ check:
 	python3 scripts/test_aarch64_vm_fault_commit.py
 	python3 scripts/test_aarch64_vm_fault_runtime.py
 	python3 scripts/test_aarch64_el0_entry.py
+	python3 scripts/test_aarch64_btype_runtime.py
 	python3 scripts/test_aarch64_el0_entry_runtime.py
 	python3 scripts/test_aarch64_el0_emission.py
 	python3 scripts/test_aarch64_tty_serial_atomic.py

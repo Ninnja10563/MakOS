@@ -27,7 +27,42 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-10-08 concurrent VM fault repair
+### 2026-10-09 saved branch state repair
+
+The attached Mac/HVF evidence at
+`2bafc9c779f95ea9a4675b8c8c3c72b52aa88481` passes unit/check, image,
+EL0, VM-fault, self-host, Native/Python-role, Firefox-role, cursor and
+unchanged Firefox preflight. Real Firefox fails before paint on an executable
+PC with matching roots and valid stack: `spsr=0x80000400` is rejected by the
+NZCV-only entry policy. The extra field is architectural BTYPE branch state.
+The exact TID is not in that rejection record; do not infer it from prior exits.
+
+The [branch-state repair](FIREFOX-BTYPE-20261009.md) permits BTYPE only on a
+destination CPU advertising FEAT_BTI, preserving every other SPSR and
+root/PC/stack check and the saved bits themselves. Tests retain the original
+no-BTI policy and add hostile-state negative controls plus a real branch-loop
+timer capture, AP migration, validated outer entry and post-ERET IRQ proof.
+Existing gates, deadlines, Firefox provenance and latency limits stay intact.
+Use the exact pushed HEAD supplied in chat and the updated sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md); Pi results are not Mac/HVF
+qualification. No full Firefox pass or final visible login is yet qualified.
+Audit Partial/Missing labels remain unchanged.
+
+Preserve the Mac's qualified `makos-integrated-3b68500032eec2d4.img` and
+retained private accounts/profiles/evidence. Rebuild the kernel boot image,
+not Firefox; require its unchanged hash/provenance preflight. The previous
+VM-fault repair and its new runtime gate passed on Mac at this baseline.
+
+Local Pi/Debian full unit/check (254.101 s) and image build (118.967 s)
+pass. Sequential Pi/TCG EL0, VM-fault, added BTYPE, self-host,
+Native/Python-role, Firefox-role input/SMP and cursor gates all pass.
+The exact branch-generated `0x80000400` is captured on AP1, validated before
+AP2 ERET, followed by an AP2 IRQ and status-42 reap with frame balance.
+Existing 20-build/21-process/header/parallel and seven-position zero-pixel
+cursor assertions hold. See the report for hashes, PIDs, retained sessions
+and cursor temporary-disk cleanup; no QEMU/build/test remains.
+
+### Historical 2026-10-08 concurrent VM fault repair
 
 The attached Mac/HVF evidence at
 `172975dc7d1e9a55d820ba3e7f34d8f51032756d` supersedes the missing-image

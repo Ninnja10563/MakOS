@@ -13,7 +13,20 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Concurrent VM fault repair (2026-10-08): the attached Mac report at
+Saved branch state repair (2026-10-09): Mac `2bafc9c` passes all earlier
+gates, but real Firefox rejects `spsr=0x80000400` at EL0 re-entry. The
+[architecture repair](FIREFOX-BTYPE-20261009.md) recognizes BTYPE only on a
+BTI-capable destination CPU without changing root, mapping, stack or other
+status-bit restrictions. Rebuild with `make image-aarch64`, run full
+`make unit check`, and add `make test-aarch64-btype-runtime` after VM-fault
+in the sequential [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md). This gate
+requires actual branch-generated hardware state, AP1-to-AP2 migration,
+validated outer ERET entry and subsequent EL0 IRQ proof, followed by reap
+and frame balance. Missing BTI is not a passing qualification. It uses the
+unchanged EL0 harness and retains private disks/session/serial. No musl or
+Firefox source/provenance change is required; reuse the verified master below.
+
+Historical concurrent VM fault repair (2026-10-08): the attached Mac report at
 `172975dc7d1e9a55d820ba3e7f34d8f51032756d` identifies a duplicate-page mapping
 fatal before Firefox paint. Rebuild the kernel and dynamic-musl fixture with
 `make image-aarch64`. The normal `make unit check` includes production-code
