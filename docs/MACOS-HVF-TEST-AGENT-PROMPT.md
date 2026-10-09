@@ -13,30 +13,31 @@ gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 20346e154bc2ef1a10d85e908633757940e01c33
+Previous exact Mac-tested baseline: 44174449e899dfab57625c6fbd14563652d407c7
 
-Use the exact full network-owner progress repair commit supplied in chat,
+Use the exact full Firefox runtime-evidence repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
-arbitrary future descendant. The last run passed all earlier gates, including
-BTYPE and preserved-image Firefox preflight, then failed during real Firefox:
-`AArch64 network TX owner request timeout`. Partial blits and Mozilla TLS
-traffic did not complete strict JIT/client-pixel first-paint acceptance.
-The exact failed request/slot/interleaving is unknown. The repair addresses a
-source-proven AP-held socket-lock/CPU0-owner circular wait with TX-only lock
-contention service and guarded EL1 timer TX progress. Socket publication,
-CPU0-only device ownership and the 5000ms timeout remain; timeout diagnostics
-now report slot/kind/state and owner progress. Earlier BTYPE/VM/EL0 guards
-and evidence remain unchanged. AP idle also retains IRQ masking through WFI
-to close a source-proven lost-wake race. An intermediate Pi EL0 timeout was
-intermittent; no live failure snapshot attributes it to this race. Preserve
-any recurrence on the Mac and do not count a retry as a fix.
-Pi functional tests do not qualify
-Firefox on this Mac. Do not change fatal assertions, timeouts, thresholds, SDK
+arbitrary future descendant. The last run passed all twelve ordered commands
+through cursor and preserved-image preflight, then failed after the full
+600-second Firefox probe: `Firefox did not paint browser chrome within probe window`.
+The idle Mac produced eight blits and five TLS successes, no fatal, and no
+required JIT-pool or chrome-document paint record. No Firefox screenshot or
+interaction result exists. The current 60-patch source had neither required
+emitter. Patch0061 adds truthful records after successful executable-pool
+registration and successful nonempty WebRender document submission. Neither
+proves JIT execution or completed scanout; the independent real-pixel and
+interaction checks remain mandatory. The build/package/image audit now
+rejects libxul without either required loaded literal. Preserve all prior
+images/provenance/accounts/evidence, but a new supported Firefox release
+build/package/integrated clone is REQUIRED for this source change. Never
+restamp the historical 60-patch build or relax preflight to reuse it.
+
+Pi source/host/cross-build checks do not qualify Firefox on this Mac.
+Do not change fatal assertions, timeouts, thresholds, SDK
 macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
-HOST_CC to substitute another compiler. It retains
-the preceding whole-record emission, executable-context and futex repairs;
-Firefox patches remain at the qualified
-60-patch identity. Require checked-out HEAD, local main, origin/main, and
+HOST_CC to substitute another compiler. Preserve all preceding kernel,
+whole-record emission, executable-context and futex repairs. Require
+checked-out HEAD, local main, origin/main, and
 remote main to match, and record the exact tested commit.
 
 1. Read AGENTS.md, docs/T3-CONTINUATION.md, docs/ORIGINAL-SPEC-AUDIT.md,
@@ -46,7 +47,8 @@ remote main to match, and record the exact tested commit.
    docs/EL0-DARWIN-ADAPTER-20260911.md and
    docs/FIREFOX-FATAL-CAPTURE-20260915.md and
    docs/FIREFOX-VM-FAULT-20261008.md, docs/FIREFOX-BTYPE-20261009.md and
-   docs/FIREFOX-NET-OWNER-20261009.md.
+   docs/FIREFOX-NET-OWNER-20261009.md and
+   docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -303,40 +305,21 @@ remote main to match, and record the exact tested commit.
    `3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`.
    Its matching manifest SHA-256 is
    `a9615cc28c989bfee754a1f4b448800fa22f5a4cd40f5b8a85d0eb743db0c7a1`.
-   This is the authorized fresh packaged master, not recovery of the missing
-   September image. Its runtime created NEW account/profile state in the
-   retained private data clone, leaving this master unchanged. Preserve this image, its manifest/provenance,
-   private test disks and release caches. The kernel/probe repair does not
-   change Firefox source, patches, package identity or provenance. Prefer
-   reuse after exact hash and unchanged preflight verification:
+   Preserve this historical master, its matching manifest/provenance, private
+   account/profile disks, all five release outputs and package auxiliary
+   files before supported build/packaging refreshes them. Use independent
+   copies/reflinks, not hard links to files a build can truncate in place.
+   The previous runtime created NEW test state in a private clone; do not
+   claim recovered old profiles. The old integrated master is no longer a
+   qualification input: its 60-patch identity and missing emitters are
+   expected to fail the strengthened preflight. Do not run it or restamp it.
+   A manifest or compact evidence ZIP cannot restore missing disk bytes.
+   If intended source account data is absent, stop for direction or use only
+   the already-authorized fresh baseline described in
+   docs/FIREFOX-FRESH-BASELINE.md; explicitly label it new account/profile data.
 
-       INTEGRATED_IMAGE=build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img
-       shasum -a 256 "$INTEGRATED_IMAGE"
-       test "$(shasum -a 256 "$INTEGRATED_IMAGE" | awk '{print $1}')" = 3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3
-       python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
-
-   Only if the exact hash comparison and preflight pass, proceed to step 5
-   without rebuilding/restamping Firefox. The boot image must be rebuilt
-   from the repair (the Make runtime targets do this); do not reuse the old
-   kernel. Record the new boot hash independently of the preserved data hash.
-
-   If that image is unavailable, stop and report the missing artifact before
-   starting a new expensive release/integration attempt. A manifest or the
-   evidence ZIP cannot restore its bytes; the ZIP does not contain the large
-   image. The supported fallback below and docs/FIREFOX-FRESH-BASELINE.md
-   remain available after direction to create another baseline. If the image
-   exists but fails verification, preserve it and stop with the exact blocker.
-   Do not bypass preflight or replace evidence silently.
-   The historical `build/makos-integrated-a9c604254f094de2.img` predates
-   Firefox patch `0060` and is not valid for this increment. The September 8
-   report qualified the earlier 59-patch release build but found Mozilla's
-   MakOS package manifest omitted plugin-container and xpcshell. Patch0060
-   adds both under the existing XP_MAKOS configure define. Preserve the prior
-   outputs and logs; never manually copy either executable into dist/firefox.
-   An old 59-patch source/patch identity requires the supported full release
-   wrapper again, even if the existing incremental cache can reuse binaries.
-   Never restamp the old 59-patch build by hand or exempt this source change.
-   A developer build
+   Rebuild using append-only patch0061 through the supported full release
+   wrapper; retain all prior 60 patches unchanged. A developer build
    is compile/link evidence only and cannot be packaged. With
    `MAKOS_FIREFOX_DEVELOPER_BUILD` unset, run the supported release path, never
    a bare make/relink inside the object directory. Preserve the previously
@@ -347,6 +330,7 @@ remote main to match, and record the exact tested commit.
 
        ports/firefox/test-widget.sh
        python3 ports/firefox/test-package-manifest.py --source-dir build/ports/firefox/source
+       python3 ports/firefox/test-runtime-evidence.py --source-dir build/ports/firefox/source
        env -u MAKOS_FIREFOX_DEVELOPER_BUILD ports/firefox/build-makos.sh -j1
 
    Set the documented Python 3.11/3.12 and `MAKOS_*` LLVM/libclang variables
@@ -375,18 +359,23 @@ remote main to match, and record the exact tested commit.
    `MAKOS_FIREFOX_BUILD_OK developer=0`. It must then create the canonical
    release build stamp for Firefox 140.13.0esr source commit
    `90ad18aabeaa9cbd63a1f749a57f266e758e50da`. The release build/package
-   markers must report 60 patches with exact ordered series SHA-256
-   `4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe`,
+   markers must report 61 patches with exact ordered series SHA-256
+   `770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab`,
    and five audited build hashes. Do not manually create, copy from another
    build, or edit the provenance record.
 
    Set `SOURCE_DATA_IMAGE` to the intended existing MakOS data image, or use
    the authorized unique fresh-source procedure if no backup is recoverable.
-   For the fresh case, use its INTEGRATED_OUTPUT_DIR as well. Never
-   overwrite it. Build the package and a new content-addressed clone with:
+   Do not use a forensic private disk as a live writable guest. Integration
+   reads its source and preserves account/profile regions; hash that source
+   before and after. Use a unique output directory and never overwrite an
+   existing image. Build the package and new content-addressed clone with:
 
        test -f "$SOURCE_DATA_IMAGE"
-       make integrated-data-aarch64 SOURCE_DATA_IMAGE="$SOURCE_DATA_IMAGE"
+       INTEGRATED_OUTPUT_DIR=$(mktemp -d "$PWD/build/makos-firefox-evidence-XXXXXX")
+       shasum -a 256 "$SOURCE_DATA_IMAGE" > "$INTEGRATED_OUTPUT_DIR/source-before.sha256"
+       make integrated-data-aarch64 SOURCE_DATA_IMAGE="$SOURCE_DATA_IMAGE" INTEGRATED_OUTPUT_DIR="$INTEGRATED_OUTPUT_DIR"
+       shasum -a 256 -c "$INTEGRATED_OUTPUT_DIR/source-before.sha256"
 
    Require `MAKOS_FIREFOX_PACKAGE_OK` and `MAKOS_INTEGRATED_DATA_OK`. Record
    Mozilla's successful stage-package output and both regular executable
@@ -398,14 +387,19 @@ remote main to match, and record the exact tested commit.
    exact stripped runtime hashes, and package/image semantic identity. If any
    release, package, or integration prerequisite fails, return the exact
    blocker and do not run the historical image.
+   Set INTEGRATED_IMAGE to the exact newly published content-addressed path,
+   require its SHA-256 to match its own generated manifest, and run
+   `python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"`.
+   Do not require the new image to match the historical 3b68500032eec2d4 hash.
    The packager must use its five stamp-authorized private snapshots, mode-0700
    package root, actual package plus Firefox/all-five-ELF candidate preflight,
    canonical/alias rejection, and image-last publication. Its six auxiliary
    files are individually atomic but explicitly not a transaction. If the
    command is interrupted between those publications, retain the prior image
-   as authoritative and rerun the exact unchanged packaging command; do not
-   copy, edit, or manually reconcile the possibly mixed old/candidate
-   auxiliary set.
+   as authoritative, preserve the possibly mixed auxiliary set as evidence,
+   and stop/report the interruption. Do not retry during this qualification
+   or manually reconcile files. A later explicitly authorized continuation
+   can rerun the exact unchanged supported packaging command.
 
 5. Run the strict real-Firefox gate only against that verified current image,
    only when `uptime`, `vm_stat`, `sysctl vm.swapusage`, and `memory_pressure`
@@ -425,7 +419,7 @@ remote main to match, and record the exact tested commit.
    assertions. Do not weaken or reinterpret any of them.
 
    Before QEMU, the target must print `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the
-   pinned source, 60-patch series identity above,
+   pinned source, 61-patch series identity above,
    `artifacts=build-audited,runtime-sha256-matched`, and
    `elf=aarch64-pie,libxul
    all_five_elf=aarch64-et-dyn,interp-and-deps-by-kind`. Missing provenance,
@@ -439,7 +433,8 @@ remote main to match, and record the exact tested commit.
    `MAKOS_FIREFOX_SUSTAINED_INTERACTION_OK`,
    `MAKOS_FIREFOX_SMP_OVERLAP_OK`, `MAKOS_FIREFOX_SMP_AUTOBALANCE_OK`, and
    `MAKOS_FIREFOX_GUEST_PROBE_OK`. Fallback-only handoff is a failure. The
-   first-paint phase proves JIT/blit and client pixels before the first Firefox
+   first-paint phase requires a registered executable pool, the actual browser
+   document's successful WebRender submission, blit and client pixels before the first Firefox
    key; the post-enqueue syscall-149 markers are required only after the timed
    Ctrl-A produces raw 132. Do not move them back ahead of the event that
    creates them or move them after the latency decision. The

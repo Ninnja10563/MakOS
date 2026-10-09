@@ -6,10 +6,24 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-09. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-10. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: attached Mac/HVF evidence for
+`44174449e899dfab57625c6fbd14563652d407c7` passes all twelve ordered commands
+through cursor and the unchanged image preflight. One idle-host Firefox run
+exhausts its 600-second probe without required chrome-paint evidence; eight
+blits and five TLS successes do not qualify first paint. No fatal recurs,
+but there is no Firefox screenshot, input/selection latency or final visible
+login result. The [runtime evidence repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md)
+adds two absent production emitters at actual successful JIT-pool registration
+and nonempty WebRender document submission, and rejects binaries without the
+required loaded literals. It preserves every existing runtime assertion and
+threshold. A new supported 61-patch Firefox release/integrated image and strict
+Mac/HVF run are required; source/host checks do not qualify browser rendering.
+No Partial/Missing row is upgraded.
+
+Earlier qualification: attached Mac/HVF evidence for
 `20346e154bc2ef1a10d85e908633757940e01c33` passes all earlier gates,
 including BTYPE, and unchanged Firefox preflight. Real Firefox blits and
 reaches Mozilla TLS but fails before strict first-paint acceptance on

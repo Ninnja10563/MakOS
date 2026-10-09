@@ -1,8 +1,47 @@
 # Implementation status
 
-Last updated: 2026-10-09.
+Last updated: 2026-10-10.
 
 ## Current qualification update
+
+Attached Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF evidence at
+`44174449e899dfab57625c6fbd14563652d407c7` passes all twelve ordered commands
+through cursor and the preserved image's provenance preflight. One idle-host
+real-Firefox run then exhausts the unchanged 600-second probe without the
+required browser-chrome paint record. There is no fatal or network-owner
+timeout; eight blits and five TLS records are partial evidence only. No
+Firefox screenshot, input/Ctrl-A latency result or final visible login exists.
+
+Source inspection identifies a definite evidence-production gap: the current
+60-patch Firefox series emits neither required `MAKOS_JIT_POOL_OK` nor
+`MAKOS_PRES_PAINT` record. The
+[Firefox runtime evidence repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md) adds
+truthful records at successful executable-pool registration and successful
+nonempty WebRender document submission, with failure-path regressions and a
+build/package/image check for the actual loaded libxul literals. These records
+are not proof of generated-code execution or scanout; the unchanged strict
+gate still requires real client pixels and every interaction assertion.
+
+Preserve the old `3b68500032eec2d4` master, private accounts/profiles and all
+evidence. Unlike the earlier kernel-only repairs, this source change requires
+a supported Firefox release rebuild, new 61-patch provenance, packaging and a
+new integrated clone before Mac/HVF retesting. Never restamp the old binaries.
+The [sequential Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) retains every
+runtime command, deadline and latency limit. Browser rendering/performance
+and final visible login remain unqualified; all audit Partial/Missing rows
+remain. The observed SQLite, IndexedDB and idle-service errors are not
+established causes of this timeout.
+
+Pi/Debian final full `make unit check` passes (309.251 s), as do 27 emitter host
+cases/eight behavioral negative controls and actual AArch64 cross-compiles of
+both changed Gecko units using generated headers/backend flags. The old
+cached libxul is rejected for both absent emitters. Offline package-coherence
+regressions also pass. Original Firefox caches,
+boot/kernel bytes and existing runtime scripts are unchanged. No local QEMU
+or full Firefox release/package/runtime was run for this increment; the new
+browser still needs Mac/HVF qualification.
+
+### Earlier network owner progress repair
 
 Attached Mac/HVF evidence at
 `20346e154bc2ef1a10d85e908633757940e01c33` passes its then-required pre-Firefox gates,

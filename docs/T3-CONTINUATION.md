@@ -27,7 +27,47 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-10-09 network owner progress repair
+### 2026-10-10 Firefox runtime evidence repair
+
+Attached Mac/HVF qualification of
+`44174449e899dfab57625c6fbd14563652d407c7` passes all twelve commands through
+cursor, including the network-owner regression, and unchanged image/provenance
+preflight. Real Firefox then fails the unchanged 600-second first-paint probe
+on an idle Apple M3. The final raw serial contains eight Firefox blits and
+five TLS successes but neither required JIT-pool nor browser-document paint
+record, and no fatal/network-TX-timeout/duplicate-mapping record. No Firefox
+screenshot or interaction result exists; final visible login was not run.
+
+The [repair report](FIREFOX-RUNTIME-EVIDENCE-20261010.md) identifies both
+missing production emitters in the 60-patch source. Append-only patch0061
+reports actual successful pool registration and successful nonempty WebRender
+document submission. Host failure-path and binary-byte regressions protect
+the records; the existing strict pixel, URI, latency and SMP gates are unchanged.
+This repairs a necessary evidence path, not a demonstrated browser rendering
+or performance defect. Other observed errors and source-level I/O/scheduler
+leads remain unproven as causes of the Mac timeout.
+
+The next Mac qualification requires a supported full release build with the
+new 61-patch identity, all-five-artifact audit, normal packaging and a new
+content-addressed integrated clone. Preserve the old `3b68500032eec2d4` master,
+private account/profile disks and provenance as historical artifacts; they
+cannot satisfy the new source identity. Do not hand-edit stamps or transplant
+executables. Use the exact pushed commit supplied in chat and the sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md), stopping at the first failure.
+Pi checks are not Mac/HVF qualification. All audit Partial/Missing rows remain.
+
+Local Pi/Debian final full `make unit check` exits 0 in 309.251 s. The new host
+suite passes 27 cases and eight defect-restoring behavioral controls; both
+actual patched Gecko units compile to AArch64 objects against the existing
+generated configuration. The old cached libxul fails the strengthened audit
+specifically for both absent emitters. Logs/private compile evidence are in
+`build/firefox-evidence-repair-20261010-wxsur4/`, with focused host artifacts in
+`build/firefox-runtime-evidence-host-20261010-003/`. Offline package-coherence
+regressions also pass. Existing source/object
+caches, boot/kernel bytes and all runtime harnesses are unchanged. No QEMU
+or new full Firefox release/package/runtime ran locally for this increment.
+
+### Historical 2026-10-09 network owner progress repair
 
 Attached Mac/HVF evidence for
 `20346e154bc2ef1a10d85e908633757940e01c33` passes its then-required pre-Firefox gates,
@@ -1731,21 +1771,23 @@ stage, integrated Firefox image, or browser runtime is implied.
 
 ## Next actions
 
-1. Run the supported default release build with integrated print patch 0058,
-   Rust errno patch 0059, and the exact 59-patch provenance; do not package or
-   reuse the completed developer outputs. Require qualification code baseline
-   `5a49af108452983bf4809c12a2a8307582fa5955` (which contains package-coherence
-   baseline `817602513ccae985f1ca1d1159587520dfba7529`), then package that release build
-   and create a new provenance-validated integrated image on the intended
-   macOS/HVF host. If any of the six auxiliary publications is interrupted,
-   keep the prior image authoritative and rerun the unchanged command; do not
-   treat a mixed old/candidate auxiliary set as a transaction or repair it by
-   hand. The historical
-   `a9c604254f094de2` image is not valid for this increment. When no visible
-   QEMU runs and host load/memory pressure is low, run unchanged
-   `make test-aarch64-firefox-runtime`; diagnose code only if strict Ctrl-A
-   still exceeds 10000 ms under an idle host. Never weaken Gate 3 thresholds
-   or substitute Pi/TCG timing evidence.
+1. Use the exact pushed runtime-evidence repair commit supplied in chat,
+   descending from Mac-tested `44174449e899dfab57625c6fbd14563652d407c7`.
+   Follow the sequential Mac protocol from unit/check, preserving all previous
+   images, private accounts/profiles, release outputs and provenance. Rebuild
+   Firefox through the supported default release wrapper with append-only
+   patch0061 and exact 61-patch provenance, then package and publish a new
+   integrated clone. The historical `3b68500032eec2d4` master cannot qualify
+   these new emitters; do not restamp it or package developer outputs.
+   Stop/report the first failed or interrupted command, retaining old image
+   authority and any mixed package auxiliaries as evidence rather than
+   reconciling them manually. Only after current preflight passes and the Mac
+   is idle with normal memory pressure and no QEMU, run unchanged
+   `make test-aarch64-firefox-runtime` with the new image. Required records
+   alone do not prove visible chrome; retain all pixel, interaction and SMP
+   assertions, the 600-second probe, <500 ms first character and <10000 ms
+   Ctrl-A. Pi checks never substitute for Mac/HVF qualification. Final visible
+   login is allowed only after the strict browser gate passes.
 2. The strict target now requires overlapping distinct Firefox TIDs on multiple
    guest CPUs; inspect that plus the new kernel-owned placement/migration
    evidence in the next genuine macOS/HVF run. Firefox/Native role fixtures now

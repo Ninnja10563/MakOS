@@ -1,0 +1,180 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] runtime: emit real bounded executable-pool and chrome proofs
+
+The strict Firefox gate already requires these two records, but no previous
+supported patch emitted them. Report an executable pool only after allocation,
+object creation and registration succeed. Report chrome only after successful
+submission of a real nonempty on-screen WebRender display list belonging to
+the active, unsuppressed browser document; background, empty and failed
+transactions cannot qualify. A dialog retains its own document identity.
+
+Neither record proves JIT execution or completed rasterization/scanout.
+Keep the existing independent pixel and interaction gates unchanged. Emit a
+bounded newline-terminated record with one checked unbuffered write, once per
+kind, under the kernel's complete-TTY-write serial boundary. Never retry or
+join a partial write.
+
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+new file mode 100644
+--- /dev/null
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -0,0 +1,33 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_MakOSRuntimeEvidence_h
++#define mozilla_MakOSRuntimeEvidence_h
++
++#ifdef XP_MAKOS
++#  include <stddef.h>
++#  include <unistd.h>
++#  include "mozilla/Atomics.h"
++
++namespace mozilla::makos {
++
++// MakOS's validated fd-2 TTY write is all-or-error and holds SerialGuard
++// across the complete record, including newline translation. Bypass stdio
++// buffering so another CPU cannot splice a kernel diagnostic into this record.
++// Do not retry a short/error write on another transport: joining fragments
++// would manufacture evidence. The one attempt is consumed even on failure.
++template <size_t Size>
++inline bool WriteRuntimeEvidenceOnce(Atomic<bool>& aAttempted,
++                                     const char (&aRecord)[Size]) {
++  static_assert(Size > 1 && Size <= 256, "bounded runtime evidence record");
++  if (aAttempted.exchange(true)) {
++    return false;
++  }
++  const ssize_t written = write(STDERR_FILENO, aRecord, Size - 1);
++  return written == static_cast<ssize_t>(Size - 1);
++}
++
++}  // namespace mozilla::makos
++#endif  // XP_MAKOS
++#endif  // mozilla_MakOSRuntimeEvidence_h
+diff --git a/mfbt/moz.build b/mfbt/moz.build
+--- a/mfbt/moz.build
++++ b/mfbt/moz.build
+@@ -65,3 +65,4 @@
+     "MacroForEach.h",
++    "MakOSRuntimeEvidence.h",
+     "MathAlgorithms.h",
+     "Maybe.h",
+diff --git a/js/src/jit/ExecutableAllocator.cpp b/js/src/jit/ExecutableAllocator.cpp
+--- a/js/src/jit/ExecutableAllocator.cpp
++++ b/js/src/jit/ExecutableAllocator.cpp
+@@ -27,5 +27,8 @@
+
+ #include "jit/ExecutableAllocator.h"
++#ifdef XP_MAKOS
++#  include "mozilla/MakOSRuntimeEvidence.h"
++#endif
+
+ #include "js/MemoryMetrics.h"
+ #include "util/Poison.h"
+@@ -170,25 +173,31 @@
+ ExecutablePool* ExecutableAllocator::createPool(size_t n) {
+   size_t allocSize = roundUpAllocationSize(n, ExecutableCodePageSize);
+   if (allocSize == OVERSIZE_ALLOCATION) {
+     return nullptr;
+   }
+
+   ExecutablePool::Allocation a = systemAlloc(allocSize);
+   if (!a.pages) {
+     return nullptr;
+   }
+
+   ExecutablePool* pool = js_new<ExecutablePool>(this, a);
+   if (!pool) {
+     systemRelease(a);
+     return nullptr;
+   }
+
+   if (!m_pools.put(pool)) {
+     // Note: this will call |systemRelease(a)|.
+     js_delete(pool);
+     return nullptr;
+   }
++#ifdef XP_MAKOS
++  // A registered executable allocation, not a claim of generated-code execution.
++  static mozilla::Atomic<bool> attempted(false);
++  static constexpr char record[] = "MAKOS_JIT_POOL_OK\n";
++  (void)mozilla::makos::WriteRuntimeEvidenceOnce(attempted, record);
++#endif
+
+   return pool;
+ }
+diff --git a/gfx/layers/wr/WebRenderLayerManager.cpp b/gfx/layers/wr/WebRenderLayerManager.cpp
+--- a/gfx/layers/wr/WebRenderLayerManager.cpp
++++ b/gfx/layers/wr/WebRenderLayerManager.cpp
+@@ -23,4 +23,11 @@
+ #include "LayerUserData.h"
++#ifdef XP_MAKOS
++#  include "mozilla/MakOSRuntimeEvidence.h"
++#  include "mozilla/PresShell.h"
++#  include "mozilla/dom/Document.h"
++#  include "nsIURI.h"
++#  include "nsPresContext.h"
++#endif
+
+ #ifdef XP_WIN
+ #  include "gfxDWriteFonts.h"
+@@ -36,4 +44,46 @@
+ namespace layers {
++#ifdef XP_MAKOS
++// This reports a successful, nonempty frame display-list IPC submission.
++// It does not claim rasterization, scanout, or usable browser pixels; the
++// independent guest blit and framebuffer/interaction tests remain mandatory.
++static void ReportMakOSPaintSubmission(
++    nsDisplayList* aDisplayList, nsDisplayListBuilder* aDisplayListBuilder,
++    bool aSubmitted, bool aOffscreen, const LayoutDeviceIntSize& aSize) {
++  if (!aSubmitted || !aDisplayList || aDisplayList->IsEmpty() ||
++      !aDisplayListBuilder || !aDisplayListBuilder->IsPaintingToWindow() ||
++      aOffscreen || aSize.IsEmpty()) {
++    return;
++  }
++  nsIFrame* root = aDisplayListBuilder->RootReferenceFrame();
++  if (!root) {
++    return;
++  }
++  PresShell* shell = root->PresContext()->PresShell();
++  if (!shell || !shell->IsActive() || shell->IsPaintingSuppressed()) {
++    return;
++  }
++  dom::Document* document = shell->GetDocument();
++  nsIURI* uri = document ? document->GetDocumentURI() : nullptr;
++  nsAutoCString spec;
++  if (!uri || NS_FAILED(uri->GetSpec(spec))) {
++    return;
++  }
++
++  // Use this frame's document, never the primary content URL used by the
++  // profiler. Exact fixed strings also prevent untrusted URL log injection.
++  if (spec.EqualsLiteral("chrome://browser/content/browser.xhtml")) {
++    static Atomic<bool> attempted(false);
++    static constexpr char record[] =
++        "MAKOS_PRES_PAINT uri=chrome://browser/content/browser.xhtml\n";
++    (void)makos::WriteRuntimeEvidenceOnce(attempted, record);
++  } else if (spec.EqualsLiteral("chrome://global/content/commonDialog.xhtml")) {
++    static Atomic<bool> attempted(false);
++    static constexpr char record[] =
++        "MAKOS_PRES_PAINT uri=chrome://global/content/commonDialog.xhtml\n";
++    (void)makos::WriteRuntimeEvidenceOnce(attempted, record);
++  }
++}
++#endif  // XP_MAKOS
+
+ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
+     : mWidget(aWidget),
+@@ -471,7 +522,11 @@
+     if (!ret) {
+       // Failed to send display list, reset display item cache state.
+       mDisplayItemCache.Clear();
+     }
++#ifdef XP_MAKOS
++    ReportMakOSPaintSubmission(aDisplayList, aDisplayListBuilder, ret,
++                              aRenderOffscreen, size);
++#endif
+
+     WrBridge()->SendSetFocusTarget(mFocusTarget);
+     mFocusTarget = FocusTarget();

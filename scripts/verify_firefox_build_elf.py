@@ -27,6 +27,7 @@ def verify(bin_dir: pathlib.Path) -> None:
             contract.interpreter,
             contract.dependencies,
             contract.soname,
+            contract.required_literals,
         )
 
 

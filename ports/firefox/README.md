@@ -35,7 +35,31 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
-Current qualification (2026-09-10): the user's Mac/HVF report at `1b24354`
+Current qualification (2026-10-10): attached Mac/HVF evidence at `44174449`
+passes all twelve commands through cursor and the old integrated-image
+preflight. The unchanged 600-second Firefox probe then fails without required
+chrome-paint evidence. The 60-patch source lacks both required production
+emitters; append-only `0061-makos-runtime-evidence.patch` adds truthful,
+bounded whole-record output after real executable-pool registration and
+successful nonempty WebRender document submission. These records do not
+claim generated-code execution or completed scanout. All strict pixel and
+interaction assertions remain mandatory. Build/package/image audits now
+reject libxul without either loaded emitter literal.
+
+The exact current 61-patch SHA-256 is
+`770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab`.
+Preserve previous images/provenance, private account/profile data and release
+caches. Run the supported release wrapper with developer mode unset and
+normal package/integration again; old 59/60-patch outputs cannot be restamped
+or reused as qualification input. See [the evidence repair](../../docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md)
+and [the sequential Mac protocol](../../docs/MACOS-HVF-TEST-AGENT-PROMPT.md).
+`test-runtime-evidence.py` adds host success/failure/negative-control coverage;
+`--source-dir` replays the exact upstream files privately. The optional
+`test-runtime-evidence-compile.py` cross-compiles both actual patched Gecko
+units against an existing generated configuration without changing its cache.
+Neither is a full release build or Mac/HVF runtime pass.
+
+Historical qualification (2026-09-10): the user's Mac/HVF report at `1b24354`
 passes the supported 60-patch release, both staged process executables, all
 five artifact/provenance audits, and integrated-image publication. Real
 Firefox then hit the kernel's main-image-only EL0 PC guard in the dynamic
@@ -50,7 +74,7 @@ Mozilla's MakOS manifest omitted `plugin-container` and `xpcshell` from
 `stage-package`, although both stamped `dist/bin` inputs existed. Patch `0060`
 adds both under the existing target `XP_MAKOS` define, using the normal flat
 Unix package layout. No host-copy workaround or package/provenance exemption
-is introduced. The ordered 60-patch SHA-256 is
+is introduced. The historical ordered 60-patch SHA-256 is
 `4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe`.
 Rerun the supported release wrapper with developer mode unset before
 integration; it must regenerate current provenance, even if it reuses cached

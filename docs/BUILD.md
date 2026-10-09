@@ -13,7 +13,23 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Network owner repair (2026-10-09): Mac `20346e1` passes all earlier gates,
+Firefox runtime evidence repair (2026-10-10): Mac `44174449` passes all twelve
+commands through cursor and old-image preflight, but real Firefox exhausts
+the 600-second probe without required chrome-paint evidence. The
+[repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md) adds two missing production
+emitters and checks their loaded literals during build/package/image audit.
+Unlike earlier kernel-only increments, this requires the supported full
+Firefox release wrapper, 61-patch provenance and a new packaged integrated
+clone. Preserve old images, private profiles and release caches; do not
+restamp or try to qualify the old 60-patch image. Follow the
+[sequential Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md); runtime commands,
+all assertions and deadlines remain unchanged. Host regression commands are
+`python3 ports/firefox/test-runtime-evidence.py` and
+`python3 scripts/test_integrated_data.py`, also included in `make unit check`.
+With a local pinned checkout, require the full-source check using
+`python3 ports/firefox/test-runtime-evidence.py --source-dir build/ports/firefox/source`.
+
+Historical network owner repair (2026-10-09): Mac `20346e1` passes all earlier gates,
 including BTYPE, but strict Firefox stops on a network TX owner timeout.
 The [repair](FIREFOX-NET-OWNER-20261009.md) preserves the 5,000 ms deadline
 and CPU0 ownership while providing TX-only progress during socket contention
@@ -56,9 +72,9 @@ See [the repair report](FIREFOX-VM-FAULT-20261008.md) for locking and scope.
 The Mac has already completed the authorized fresh release/integration:
 `build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img`,
 SHA-256 `3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`.
-Preserve it, its manifest/provenance, and the release caches. Reuse it after
-the exact hash and unchanged image preflight pass; no Firefox rebuild/restamp
-is required for this kernel/probe repair. The new account/profile was created
+Preserve it, its manifest/provenance, and the release caches. Reuse was valid
+for the earlier kernel-only repairs; patch0061 now requires a new supported
+release and integrated image. Never restamp this historical build. The new account/profile was created
 in the retained private runtime clone, not the master or recovered old state.
 Strict Firefox and final login remain Mac/HVF work.
 

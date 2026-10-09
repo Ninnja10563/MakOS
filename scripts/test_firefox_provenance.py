@@ -14,9 +14,9 @@ import tempfile
 import firefox_provenance as provenance
 
 
-EXPECTED_PATCH_COUNT = 60
+EXPECTED_PATCH_COUNT = 61
 EXPECTED_PATCH_SHA256 = (
-    "4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe"
+    "770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab"
 )
 
 
@@ -414,20 +414,39 @@ def main() -> int:
         EXPECTED_PATCH_COUNT,
         EXPECTED_PATCH_SHA256,
     )
-    # A packaging-only source patch still changes release authority. Verify
-    # the previous successful 59-patch identity is not grandfathered in.
-    previous_series = hashlib.sha256()
-    for patch in sorted((provenance.ROOT / "ports/firefox/patches").glob("*.patch"))[:-1]:
-        previous_series.update(hashlib.sha256(patch.read_bytes()).hexdigest().encode() + b"\n")
-    assert previous_series.hexdigest() == "c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974"
-    old_build = {
-        **provenance.expected_identity(),
-        "patch_count": 59,
-        "patch_series_sha256": previous_series.hexdigest(),
-        "source_tree": "e6a918f00399df70a73e710a798c3e500e2b0a11",
-        "build_artifacts": {name: "a" * 64 for name in provenance.BUILD_ARTIFACTS},
+    # Packaging and runtime-evidence patches both change release authority.
+    # Neither historical build nor runtime stamps may be grandfathered in.
+    previous_identities = {
+        59: "c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974",
+        60: "4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe",
     }
-    expect_failure(lambda: provenance.validate_build_record(old_build), "identity mismatch")
+    patches = sorted((provenance.ROOT / "ports/firefox/patches").glob("*.patch"))
+    for previous_count, previous_identity in previous_identities.items():
+        previous_series = hashlib.sha256()
+        for patch in patches[:previous_count]:
+            previous_series.update(
+                hashlib.sha256(patch.read_bytes()).hexdigest().encode() + b"\n"
+            )
+        assert previous_series.hexdigest() == previous_identity
+        old_build = {
+            **provenance.expected_identity(),
+            "patch_count": previous_count,
+            "patch_series_sha256": previous_identity,
+            "source_tree": "e6a918f00399df70a73e710a798c3e500e2b0a11",
+            "build_artifacts": {name: "a" * 64 for name in provenance.BUILD_ARTIFACTS},
+        }
+        expect_failure(
+            lambda: provenance.validate_build_record(old_build), "identity mismatch"
+        )
+        old_runtime = {
+            **old_build,
+            "runtime_artifacts": {
+                name: "b" * 64 for name in provenance.RUNTIME_ARTIFACTS
+            },
+        }
+        expect_failure(
+            lambda: provenance.validate_runtime_record(old_runtime), "identity mismatch"
+        )
     handoff_prompt = (
         provenance.ROOT / "docs/MACOS-HVF-TEST-AGENT-PROMPT.md"
     ).read_text()

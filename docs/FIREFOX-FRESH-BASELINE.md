@@ -7,6 +7,14 @@ can be recovered. This is a new test baseline, not restoration of old data.
 The manifest contains hashes and metadata, not disk contents. Generated
 `build/` artifacts are not stored in Git.
 
+Current source requirement (2026-10-10): patch0061 requires a new supported
+61-patch Firefox release and integrated image even if a historical master is
+available. Preserve recovered disks as source data/evidence, not current
+Firefox qualification inputs. Follow the current
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) and
+[runtime evidence repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md); the old-image
+reuse instructions below apply only to the earlier kernel-only increment.
+
 This procedure is for the Apple Silicon macOS/QEMU/HVF testing agent. The
 Pi workspace cannot recover or create files on that Mac. Preserve the old
 manifest, logs, release build outputs, provenance and any surviving images.
@@ -81,7 +89,8 @@ python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
 ```
 
 Confirm that hash equals the new manifest's `image_sha256` and that the
-unchanged pinned-source/60-patch/all-five-ELF runtime preflight passes.
+current pinned-source/61-patch/all-five-ELF runtime preflight passes, including
+the required loaded libxul emitter literals. No manual restamping is allowed.
 
 ## Fresh guest state and unchanged runtime gates
 
@@ -116,12 +125,14 @@ all gates pass follow the normal visible-login instructions and record its
 PID, session, private boot/data/vars, QMP socket and screenshot.
 
 Report this as a **fresh-account/profile baseline**. The guest Firefox fatal
-is still undiagnosed until new evidence identifies it; this authorization
-does not fix it. No new Mac runtime result or full OS completion is claimed.
+in the original September report was undiagnosed at that time; later kernel
+repairs and the current first-paint evidence defect are recorded in the
+current continuation. This authorization restores no old data and establishes
+no browser fix or new runtime pass. No full OS completion is claimed.
 
-## Handoff validation
+## Historical fresh baseline handoff validation
 
-This increment changes documentation only. On Pi/Debian,
+The September 15 fresh-baseline increment changed documentation only. On Pi/Debian,
 `make test-integrated-data` passes with preservation, CRC, ELF and provenance
 negative controls intact; the shell examples pass `sh -n`. Log:
 `build/logs/fresh-baseline-20260915-integrated-host.log`. No fresh integrated

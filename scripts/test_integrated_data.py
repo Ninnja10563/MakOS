@@ -15,6 +15,9 @@ import verify_firefox_runtime_image as runtime_image
 import verify_firefox_build_elf as build_elf
 
 
+EVIDENCE_LITERALS = (b"MAKOS_JIT_POOL_OK", b"MAKOS_PRES_PAINT uri=")
+
+
 def elf(
     interpreter: bool,
     dependencies: tuple[str, ...] = (),
@@ -23,6 +26,7 @@ def elf(
     machine: int = 183,
     elf_type: int = 3,
     entry_point: int | None = None,
+    required_literals: tuple[bytes, ...] = (),
 ) -> bytes:
     phnum = 3 if interpreter else 2
     result = bytearray(1024)
@@ -115,6 +119,9 @@ def elf(
     )
     for index, program in enumerate(programs):
         struct.pack_into("<IIQQQQQQ", result, 64 + index * 56, *program)
+    literals = b"\0".join(required_literals) + b"\0"
+    assert len(literals) <= 128
+    result[896 : 896 + len(literals)] = literals
     return bytes(result)
 
 
@@ -124,6 +131,7 @@ def firefox_payloads() -> dict[str, bytes]:
             contract.interpreter,
             contract.dependencies,
             contract.soname,
+            required_literals=EVIDENCE_LITERALS if name == "libxul.so" else (),
         )
         for name, contract in integrated.FIREFOX_ELF_CONTRACTS.items()
     }
@@ -520,6 +528,117 @@ def test_preflight_rejects_self_hashed_invalid_elf(base: pathlib.Path) -> None:
         expect_elf_failure(lambda: runtime_image.verify(image), "SONAME mismatch")
 
 
+def test_required_evidence_literals(base: pathlib.Path) -> None:
+    # These synthetic ELF bytes test audit behavior only. They do not execute
+    # JIT or Gecko and cannot establish any runtime milestone.
+    contract = integrated.FIREFOX_ELF_CONTRACTS["libxul.so"]
+    assert contract.required_literals == EVIDENCE_LITERALS
+    assert all(
+        not contract.required_literals
+        for name, contract in integrated.FIREFOX_ELF_CONTRACTS.items()
+        if name != "libxul.so"
+    )
+    valid = firefox_payloads()
+    original = valid["libxul.so"]
+    bin_dir = base / "evidence-bin"
+    for name, payload in valid.items():
+        write(bin_dir / name, payload)
+    build_elf.verify(bin_dir)
+
+    def reject(label: str, payload: bytes, fragment: str) -> None:
+        write(bin_dir / "libxul.so", payload)
+        expect_elf_failure(lambda: build_elf.verify(bin_dir), fragment)
+        payloads = {**valid, "libxul.so": payload}
+        # Recompute the candidate's own package CRC and provenance hashes.
+        # Matching hashes cannot authorize bytes missing the required emitter
+        # capability, even though the identity and ELF dependencies are valid.
+        image = preflight_image(base, f"evidence-{label}", payloads)
+        expect_elf_failure(lambda: runtime_image.verify(image), fragment)
+        entries = integrated.package_entries(image)
+        sources = {
+            guest: base / f"preflight-evidence-{label}" / guest.rsplit("/", 1)[1]
+            for guest in runtime_image.REQUIRED
+        }
+        expect_elf_failure(
+            lambda: integrated.verify_components(image, sources), fragment
+        )
+        assert entries["/usr/lib/firefox/libxul.so"].sha256 == hashlib.sha256(
+            payload
+        ).hexdigest()
+
+    for index, literal in enumerate(EVIDENCE_LITERALS):
+        assert original.count(literal) == 1
+        reject(
+            f"missing-{index}",
+            original.replace(literal, b"X" * len(literal)),
+            literal.decode("ascii"),
+        )
+
+    absent = original
+    for literal in EVIDENCE_LITERALS:
+        absent = absent.replace(literal, b"X" * len(literal))
+    # The neighboring artifact has the exact literals, but cannot supply the
+    # capability for libxul. Both the raw build and packaged image use bytes.
+    nspr_contract = integrated.FIREFOX_ELF_CONTRACTS["libnspr4.so"]
+    nspr_with_literals = elf(
+        False,
+        nspr_contract.dependencies,
+        nspr_contract.soname,
+        required_literals=EVIDENCE_LITERALS,
+    )
+    write(bin_dir / "libnspr4.so", nspr_with_literals)
+    valid["libnspr4.so"] = nspr_with_literals
+    reject("other-artifact", absent, "required runtime evidence literals absent")
+    reject(
+        "unloaded-trailer",
+        absent + b"\0".join(EVIDENCE_LITERALS),
+        "required runtime evidence literals absent",
+    )
+    unreadable = bytearray(original)
+    struct.pack_into("<I", unreadable, 64 + 4, 1)  # PT_LOAD: execute, no read.
+    reject(
+        "unreadable-load", bytes(unreadable), "required runtime evidence literals absent"
+    )
+
+    split = bytearray(original)
+    # Split the first marker over separate mappings with a virtual-address
+    # gap. Do not manufacture a string by carrying a search tail across loads.
+    split_at = 900
+    struct.pack_into("<H", split, 56, 3)
+    struct.pack_into("<QQ", split, 64 + 32, split_at, split_at)
+    struct.pack_into(
+        "<IIQQQQQQ",
+        split,
+        64 + 2 * 56,
+        1,
+        4,
+        split_at,
+        0x500000,
+        0x500000,
+        len(split) - split_at,
+        len(split) - split_at,
+        1,
+    )
+    reject("split-load", bytes(split), "MAKOS_JIT_POOL_OK")
+
+    # A real contiguous marker may cross an I/O chunk boundary; bounded scans
+    # must preserve that overlap without reading outside this ELF entry.
+    boundary = bytearray(absent)
+    boundary.extend(bytes(integrated.CHUNK + 256 - len(boundary)))
+    for offset, literal in zip(
+        (integrated.CHUNK - 7, integrated.CHUNK + 64), EVIDENCE_LITERALS
+    ):
+        boundary[offset : offset + len(literal)] = literal
+    struct.pack_into("<QQ", boundary, 64 + 32, len(boundary), len(boundary))
+    write(bin_dir / "libxul.so", bytes(boundary))
+    build_elf.verify(bin_dir)
+    runtime_image.verify(
+        preflight_image(
+            base, "evidence-chunk-boundary", {**valid, "libxul.so": bytes(boundary)}
+        )
+    )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="makos-integrated-test-") as name:
         base = pathlib.Path(name)
@@ -527,6 +646,7 @@ def main() -> int:
         test_package_verification(base)
         test_build_elf_verification(base)
         test_preflight_rejects_self_hashed_invalid_elf(base)
+        test_required_evidence_literals(base)
     print(
         "MAKOS_INTEGRATED_DATA_TEST_OK deterministic_package_zero=1 "
         "preserved_hashes=filesystem-metadata,account-profile "
@@ -535,6 +655,9 @@ def main() -> int:
         "stale_image=denied mismatched_runtime=denied "
         "self_hashed_invalid_elf=corrupt,wrong-machine,wrong-type,ranges,entry,"
         "interp-order,interp-size,deps,soname "
+        "evidence_literals=libxul-readable-load-bytes "
+        "missing_emitter=jit,paint,other-artifact,unloaded,unreadable,split-load "
+        "literal_chunk_boundary=accepted "
         "pre_qemu=1"
     )
     return 0

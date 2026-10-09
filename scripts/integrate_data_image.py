@@ -44,6 +44,7 @@ class FirefoxElfContract:
     interpreter: bool
     dependencies: tuple[str, ...]
     soname: str | None = None
+    required_literals: tuple[bytes, ...] = ()
 
 
 FIREFOX_ELF_CONTRACTS = {
@@ -51,7 +52,10 @@ FIREFOX_ELF_CONTRACTS = {
     "plugin-container": FirefoxElfContract(True, ("libc.so", "libxul.so")),
     "xpcshell": FirefoxElfContract(True, ("libc.so", "libxul.so")),
     "libxul.so": FirefoxElfContract(
-        False, ("libnss3.so", "libssl3.so"), "libxul.so"
+        False,
+        ("libnss3.so", "libssl3.so"),
+        "libxul.so",
+        (b"MAKOS_JIT_POOL_OK", b"MAKOS_PRES_PAINT uri="),
     ),
     "libnspr4.so": FirefoxElfContract(False, ("libc.so",), "libnspr4.so"),
 }
@@ -183,6 +187,7 @@ def verify_aarch64_elf(
     require_interpreter: bool,
     required_dependencies: tuple[str, ...] = (),
     required_soname: str | None = None,
+    required_literals: tuple[bytes, ...] = (),
 ) -> None:
     header = read_entry_slice(image, entry, 0, 64)
     if header[:7] != b"\x7fELF\x02\x01\x01":
@@ -201,12 +206,13 @@ def verify_aarch64_elf(
     if require_interpreter and entry_point == 0:
         raise ValueError(f"ELF executable entry point is zero: {entry.path}")
     load_segments: list[tuple[int, int, int, int]] = []
+    readable_file_ranges: list[tuple[int, int]] = []
     dynamic_segments: list[tuple[int, int, int, int]] = []
     interpreter = None
     interpreter_seen = False
     for index in range(phnum):
         program = read_entry_slice(image, entry, phoff + index * phentsize, 56)
-        kind = struct.unpack_from("<I", program, 0)[0]
+        kind, flags = struct.unpack_from("<II", program, 0)
         file_offset, virtual_address = struct.unpack_from("<QQ", program, 8)
         file_size, memory_size = struct.unpack_from("<QQ", program, 32)
         if kind == 1:
@@ -219,6 +225,8 @@ def verify_aarch64_elf(
             load_segments.append(
                 (virtual_address, file_offset, file_size, memory_size)
             )
+            if flags & 4 and file_size:
+                readable_file_ranges.append((file_offset, file_size))
         elif kind == 2:
             if file_offset > entry.size or file_size > entry.size - file_offset:
                 raise ValueError(f"ELF PT_DYNAMIC file range invalid: {entry.path}")
@@ -365,6 +373,36 @@ def verify_aarch64_elf(
             f"ELF SONAME mismatch: {entry.path}: "
             f"expected={required_soname} observed={soname}"
         )
+    if required_literals:
+        # Necessary build capability, not runtime success: the strict guest
+        # gate still requires genuine JIT allocation and document paint. Scan
+        # only this ELF's readable, file-backed PT_LOAD bytes, so debug strings,
+        # unloaded trailers, or another packaged file cannot satisfy the audit.
+        missing = set(required_literals)
+        overlap = max(map(len, required_literals)) - 1
+        with image.open("rb") as source:
+            for offset, length in readable_file_ranges:
+                source.seek(entry.offset + offset)
+                remaining = length
+                tail = b""
+                while remaining and missing:
+                    count = min(CHUNK, remaining)
+                    block = source.read(count)
+                    if len(block) != count:
+                        raise ValueError(f"short package payload: {entry.path}")
+                    sample = tail + block
+                    missing.difference_update(
+                        literal for literal in tuple(missing) if literal in sample
+                    )
+                    tail = sample[-overlap:] if overlap else b""
+                    remaining -= count
+                if not missing:
+                    break
+        if missing:
+            raise ValueError(
+                f"ELF required runtime evidence literals absent: {entry.path}: "
+                + ", ".join(literal.decode("ascii") for literal in sorted(missing))
+            )
 
 
 def verify_firefox_elf_entries(
@@ -381,6 +419,7 @@ def verify_firefox_elf_entries(
             contract.interpreter,
             contract.dependencies,
             contract.soname,
+            contract.required_literals,
         )
 
 
