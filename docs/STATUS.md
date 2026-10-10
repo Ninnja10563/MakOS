@@ -4,6 +4,43 @@ Last updated: 2026-10-10.
 
 ## Current qualification update
 
+The attached October 10 Mac/HVF run at
+`73da7fc65cbc54dea4ff215f39c50c7190a1248a` passes all twelve pre-Firefox
+commands, a supported 61-patch Firefox release, integration and provenance
+preflight. Strict Firefox still fails after its full probe: missing
+`MAKOS_JIT_POOL_OK`. One browser-document submission, eight blits and seven
+TLS successes are partial evidence only; no Firefox screenshot, latency or
+visible-login result exists. No fatal occurred.
+
+The [cold syscall-buffer repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md)
+fixes a concrete kernel defect: a direct write of an untouched, authorized
+file-backed constant was rejected merely because its page was not resident.
+The write paths now populate through the current process's VM resolver before
+the unchanged resident-permission checks and atomic serial boundary. Bounds,
+isolation, W^X, capabilities and existing error conventions remain. A failed
+once-only JIT record can result from the old path, but the Mac did not capture
+that record's address/write return, so its precise cause is not established.
+Host negative controls and an additive real dynamic-musl cold-buffer gate
+cover the repair; neither is Firefox qualification.
+
+Local final Pi/Debian `make unit check` and image/artifact checks pass. One
+Pi/TCG EL0 run passes with complete new cold-write/readback/denial evidence.
+The next VM-gate boot fails the unchanged SMP dispatch-ratio assertion
+(`48,145,113`, with `145 > 3 * 48`) before reaching the fixture. Later gates
+are not run; all raw evidence/private disks are retained. This is not a
+complete passing runtime sweep, and the balancing failure is not waived.
+
+Firefox patches/provenance and existing runtime gates are unchanged. Reuse
+the Mac's verified `makos-integrated-5baa9467ca510b8a.img` after exact hash and
+unchanged preflight; do not rebuild/restamp Firefox or alter its profile.
+Rebuild the boot image and follow the [sequential Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md),
+including the added `make test-aarch64-user-write-runtime`. All previous
+commands and thresholds remain. Preserve masters, private account/profile
+disks and evidence; stop on first failure. Strict Firefox and final visible
+login remain unqualified and all audit Partial/Missing rows remain.
+
+### Earlier runtime emitter repair
+
 Attached Apple M3/macOS 26.6.2/QEMU 11.0.3/HVF evidence at
 `44174449e899dfab57625c6fbd14563652d407c7` passes all twelve ordered commands
 through cursor and the preserved image's provenance preflight. One idle-host

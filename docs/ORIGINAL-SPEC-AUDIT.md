@@ -10,6 +10,23 @@ Last audit: 2026-10-10. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: attached Mac/HVF evidence for
+`73da7fc65cbc54dea4ff215f39c50c7190a1248a` passes all twelve pre-Firefox
+commands, a supported 61-patch release/integration and unchanged provenance
+preflight. Strict Firefox fails on missing `MAKOS_JIT_POOL_OK`; one browser
+document submission, eight blits and seven TLS successes do not qualify first
+paint. No fatal, Firefox screenshot, input/Ctrl-A or final login result exists.
+The [cold syscall-buffer repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md) resolves
+authorized lazy write buffers before unchanged resident permission/serial
+checks. Host and guest regressions do not establish the particular Mac
+literal's residency or replace strict browser qualification. Firefox source,
+provenance and all existing gates remain unchanged; reuse the verified
+`5baa9467ca510b8a` Mac image after preflight. No Partial/Missing row is upgraded.
+Local unit/build and one Pi/TCG EL0 run pass, with actual cold-write evidence;
+the following VM-gate boot fails an unchanged SMP dispatch-ratio assertion.
+Later local gates are not run. The retained failure is not waived and the
+repair does not have a complete passing local runtime sweep.
+
+Earlier qualification: attached Mac/HVF evidence for
 `44174449e899dfab57625c6fbd14563652d407c7` passes all twelve ordered commands
 through cursor and the unchanged image preflight. One idle-host Firefox run
 exhausts its 600-second probe without required chrome-paint evidence; eight

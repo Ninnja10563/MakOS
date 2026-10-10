@@ -35,7 +35,20 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
-Current qualification (2026-10-10): attached Mac/HVF evidence at `44174449`
+Current qualification (2026-10-10): attached Mac/HVF evidence at `73da7fc65cbc`
+passes all pre-Firefox commands, supported 61-patch release/integration and
+unchanged provenance preflight. Strict Firefox still fails on missing
+`MAKOS_JIT_POOL_OK`; one browser-document submission, eight blits and seven
+TLS successes do not qualify first paint. No fatal or Firefox latency result
+exists. The [kernel cold-buffer repair](../../docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md)
+populates authorized lazy syscall write buffers before existing permission
+checks. It changes no Firefox patch, emitter, preference, provenance or gate.
+Reuse the Mac's verified `5baa9467ca510b8a` integrated master, not a fresh
+Firefox build, for the [sequential retest](../../docs/MACOS-HVF-TEST-AGENT-PROMPT.md).
+Its exact JIT record write failure was not logged, so this remains an
+unqualified browser diagnosis, not a proven Mac first-paint fix.
+
+Historical qualification (2026-10-10): attached Mac/HVF evidence at `44174449`
 passes all twelve commands through cursor and the old integrated-image
 preflight. The unchanged 600-second Firefox probe then fails without required
 chrome-paint evidence. The 60-patch source lacks both required production
@@ -239,7 +252,8 @@ a 191 MiB stripped `libxul.so` in a 344 MiB sector-backed image. Those old
 sizes are not current qualification. The current release path requires all
 five provenance-authorized artifacts, including both executables newly added
 to the manifest by patch0060; the user-reported `1b24354` Mac run qualified
-the full package. Real Firefox remains blocked pending kernel entry retesting.
+the full package. The later `73da7fc65cbc` report above supersedes the kernel
+entry blocker; strict first-paint and interaction qualification still fail.
 The full build writes a canonical provenance stamp only after the binary audit.
 Packaging rechecks its pinned source HEAD, exact applied-patch-series marker,
 and exact patched tracked tree. The tree is reconstructed from the pinned

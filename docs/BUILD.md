@@ -13,7 +13,25 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Firefox runtime evidence repair (2026-10-10): Mac `44174449` passes all twelve
+Cold syscall-buffer repair (2026-10-10): Mac `73da7fc65cbc` passes every
+pre-Firefox command, the supported 61-patch release/integration and provenance
+preflight. Strict Firefox fails on missing JIT-pool evidence despite one
+browser-document submission. The [kernel repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md)
+populates valid lazy write buffers before unchanged resident permission
+checks. Run `make unit check`, `make image-aarch64` and the sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md), including the additive
+`make test-aarch64-user-write-runtime` after VM-fault. Its host tests also run
+with `python3 scripts/test_aarch64_user_write_fault.py` and
+`python3 scripts/test_aarch64_user_write_runtime.py`.
+No Firefox source/provenance change is made. Reuse the verified Mac image
+`build/makos-firefox-evidence-ymp9Om/makos-integrated-5baa9467ca510b8a.img`,
+SHA-256 `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`,
+after the unchanged preflight. Do not rebuild/repackage/reintegrate Firefox,
+edit profiles or restamp artifacts for this kernel-only increment. Preserve
+all existing images/private accounts/evidence. Pi functionality is separate
+from Mac/HVF qualification; all Firefox limits remain unchanged.
+
+Historical Firefox runtime evidence repair (2026-10-10): Mac `44174449` passes all twelve
 commands through cursor and old-image preflight, but real Firefox exhausts
 the 600-second probe without required chrome-paint evidence. The
 [repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md) adds two missing production

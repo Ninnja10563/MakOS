@@ -167,6 +167,7 @@ pub enum SessionProcessRole {
     Python,
     Nano,
     Native,
+    MuslDynamicProbe,
     Toolchain,
     NativeIpc,
     Firefox,
@@ -403,6 +404,10 @@ pub fn register_session_process(pid: u64, role: SessionProcessRole) -> bool {
             }
             SessionProcessRole::Nano => CAP_FILE_WRITE | CAP_CONSOLE,
             SessionProcessRole::Python | SessionProcessRole::Native => CAP_CONSOLE,
+            // The fixed built-in musl regression creates, verifies and removes
+            // its own file. Ordinary Native applications keep console-only
+            // credentials; neither role bypasses normal VFS ownership checks.
+            SessionProcessRole::MuslDynamicProbe => CAP_CONSOLE | CAP_FILE_WRITE,
             SessionProcessRole::Toolchain => CAP_CONSOLE | CAP_FILE_WRITE,
             SessionProcessRole::NativeIpc => {
                 CAP_CONSOLE

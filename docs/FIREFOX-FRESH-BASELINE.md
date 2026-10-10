@@ -7,13 +7,17 @@ can be recovered. This is a new test baseline, not restoration of old data.
 The manifest contains hashes and metadata, not disk contents. Generated
 `build/` artifacts are not stored in Git.
 
-Current source requirement (2026-10-10): patch0061 requires a new supported
-61-patch Firefox release and integrated image even if a historical master is
-available. Preserve recovered disks as source data/evidence, not current
-Firefox qualification inputs. Follow the current
-[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) and
-[runtime evidence repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md); the old-image
-reuse instructions below apply only to the earlier kernel-only increment.
+Current qualification (2026-10-10): the Mac completed the supported 61-patch
+release/integration at `73da7fc65cbc`; its new master is
+`build/makos-firefox-evidence-ymp9Om/makos-integrated-5baa9467ca510b8a.img`,
+SHA-256 `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`.
+Strict Firefox still fails on absent JIT-pool evidence. The current cold
+syscall-buffer repair is kernel-only and reuses this exact image after
+unchanged preflight; do not run this fresh-baseline procedure again merely
+to retest it. Follow the current [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md)
+and [repair report](FIREFOX-RUNTIME-EVIDENCE-20261010.md). Stop for direction
+if the current master is missing. The old-image instructions below are
+historical recovery context, not authority to run a stale 59/60-patch image.
 
 This procedure is for the Apple Silicon macOS/QEMU/HVF testing agent. The
 Pi workspace cannot recover or create files on that Mac. Preserve the old

@@ -165,6 +165,10 @@ test-aarch64-el0-entry-runtime: image-aarch64
 test-aarch64-vm-fault-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_vm_fault.py
 
+.PHONY: test-aarch64-user-write-runtime
+test-aarch64-user-write-runtime: image-aarch64
+	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_user_write.py
+
 .PHONY: test-aarch64-btype-runtime
 test-aarch64-btype-runtime: image-aarch64
 	MAKOS_AARCH64_IMAGE=$(AARCH64_IMAGE) python3 scripts/boot_test_aarch64_btype.py
@@ -280,6 +284,8 @@ unit:
 	python3 scripts/test_aarch64_page_table_atomic.py
 	python3 scripts/test_aarch64_vm_fault_commit.py
 	python3 scripts/test_aarch64_vm_fault_runtime.py
+	python3 scripts/test_aarch64_user_write_fault.py
+	python3 scripts/test_aarch64_user_write_runtime.py
 	python3 scripts/test_aarch64_el0_entry.py
 	python3 scripts/test_aarch64_btype_runtime.py
 	python3 scripts/test_aarch64_el0_entry_runtime.py
@@ -359,6 +365,8 @@ check:
 	python3 scripts/test_aarch64_page_table_atomic.py
 	python3 scripts/test_aarch64_vm_fault_commit.py
 	python3 scripts/test_aarch64_vm_fault_runtime.py
+	python3 scripts/test_aarch64_user_write_fault.py
+	python3 scripts/test_aarch64_user_write_runtime.py
 	python3 scripts/test_aarch64_el0_entry.py
 	python3 scripts/test_aarch64_btype_runtime.py
 	python3 scripts/test_aarch64_el0_entry_runtime.py

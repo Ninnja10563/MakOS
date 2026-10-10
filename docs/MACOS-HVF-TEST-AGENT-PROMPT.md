@@ -13,26 +13,30 @@ gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 44174449e899dfab57625c6fbd14563652d407c7
+Previous exact Mac-tested baseline: 73da7fc65cbc54dea4ff215f39c50c7190a1248a
 
-Use the exact full Firefox runtime-evidence repair commit supplied in chat,
+Use the exact full cold syscall-buffer repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
 arbitrary future descendant. The last run passed all twelve ordered commands
-through cursor and preserved-image preflight, then failed after the full
-600-second Firefox probe: `Firefox did not paint browser chrome within probe window`.
-The idle Mac produced eight blits and five TLS successes, no fatal, and no
-required JIT-pool or chrome-document paint record. No Firefox screenshot or
-interaction result exists. The current 60-patch source had neither required
-emitter. Patch0061 adds truthful records after successful executable-pool
-registration and successful nonempty WebRender document submission. Neither
-proves JIT execution or completed scanout; the independent real-pixel and
-interaction checks remain mandatory. The build/package/image audit now
-rejects libxul without either required loaded literal. Preserve all prior
-images/provenance/accounts/evidence, but a new supported Firefox release
-build/package/integrated clone is REQUIRED for this source change. Never
-restamp the historical 60-patch build or relax preflight to reuse it.
+through cursor, a supported 61-patch Firefox release, integration and image
+preflight. The full 600-second Firefox probe then failed on missing
+`MAKOS_JIT_POOL_OK`: eight blits, seven TLS successes and one browser-document
+submission, but no fatal or Firefox screenshot/interaction result. Kernel
+write validation incorrectly rejected untouched demand-backed readable pages.
+Populate authorized buffers before the unchanged resident-permission and
+whole-record serial checks. The missing record's exact page residency was
+not captured on the Mac; this source-proven defect is not yet a browser pass.
+Firefox source, all 61 patches, provenance and runtime gates are unchanged.
+Reuse the verified October 10 integrated image below; do NOT rebuild Firefox,
+repackage, reintegrate, change profile preferences or restamp artifacts for
+this kernel-only repair. Preserve all historical images and private profiles.
 
 Pi source/host/cross-build checks do not qualify Firefox on this Mac.
+The final Pi run passed full unit/build and one EL0 runtime with complete
+cold-write evidence, then stopped at an unchanged boot SMP load-ratio failure
+(dispatches 48,145,113; 145 > 3 * 48) before the VM fixture. Later Pi gates were
+not run. This outstanding result is not waived or called a clean sweep;
+require the full Mac sequence below and retain any recurrence unchanged.
 Do not change fatal assertions, timeouts, thresholds, SDK
 macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
 HOST_CC to substitute another compiler. Preserve all preceding kernel,
@@ -66,6 +70,7 @@ remote main to match, and record the exact tested commit.
        make image-aarch64
        make test-aarch64-el0-entry-runtime
        make test-aarch64-vm-fault-runtime
+       make test-aarch64-user-write-runtime
        make test-aarch64-btype-runtime
        make test-aarch64-net-owner-runtime
        make test-aarch64-smp-tcp-runtime
@@ -104,6 +109,17 @@ remote main to match, and record the exact tested commit.
    deterministic losing kernel interleaving or browser pass from the marker.
    Deterministic host tests force that race separately. The added wrapper
    launches one EL0 harness, with its original deadlines and checks intact.
+
+   The added user-write gate must report
+   `MAKOS_AARCH64_USER_WRITE_RUNTIME_OK accel=hvf`. Require two complete
+   immutable-source lines written from untouched read-only mappings through
+   musl/native syscall 17 and native TTY syscall 63, a cold cross-page file
+   write with exact readback, and ten denied invalid-buffer calls retaining
+   the existing errors (17:-1,63:-22). Require exactly one complete guest
+   `MAKOS_MUSL_USER_WRITE_OK` record, cleanup, the unchanged EL0/VM proofs and
+   status-42 reap. This is a syscall-buffer fixture, not JIT execution or
+   Firefox. Retain its nested session, private disks, raw serial, PID/QMP and
+   unchanged boot hashes. No output from a rejected buffer may be accepted.
 
    The added BTYPE gate must report `MAKOS_AARCH64_BTYPE_RUNTIME_OK accel=hvf`.
    Require exactly one complete ordered SOURCE_OK, ENTRY_OK, TARGET_OK and
@@ -299,107 +315,40 @@ remote main to match, and record the exact tested commit.
    cursor, `completion=fast-plus-bounded-recovery`, and zero GPU timeouts or
    errors. Every delayed completion, if any, must have a matching recovered
    record with the same queue and command.
-4. The October 8 Mac report published, and October 9 again preflighted,
-   `build/makos-fresh-firefox-VMF8ae/makos-integrated-3b68500032eec2d4.img`,
-   SHA-256
-   `3b68500032eec2d4e0a225c44877a070f10de44e3f164cf0700f65bc827ecec3`.
-   Its matching manifest SHA-256 is
-   `a9615cc28c989bfee754a1f4b448800fa22f5a4cd40f5b8a85d0eb743db0c7a1`.
-   Preserve this historical master, its matching manifest/provenance, private
-   account/profile disks, all five release outputs and package auxiliary
-   files before supported build/packaging refreshes them. Use independent
-   copies/reflinks, not hard links to files a build can truncate in place.
-   The previous runtime created NEW test state in a private clone; do not
-   claim recovered old profiles. The old integrated master is no longer a
-   qualification input: its 60-patch identity and missing emitters are
-   expected to fail the strengthened preflight. Do not run it or restamp it.
-   A manifest or compact evidence ZIP cannot restore missing disk bytes.
-   If intended source account data is absent, stop for direction or use only
-   the already-authorized fresh baseline described in
-   docs/FIREFOX-FRESH-BASELINE.md; explicitly label it new account/profile data.
+4. Reuse the supported October 10 Mac release/integrated master:
 
-   Rebuild using append-only patch0061 through the supported full release
-   wrapper; retain all prior 60 patches unchanged. A developer build
-   is compile/link evidence only and cannot be packaged. With
-   `MAKOS_FIREFOX_DEVELOPER_BUILD` unset, run the supported release path, never
-   a bare make/relink inside the object directory. Preserve the previously
-   qualified source checkout and sysroots. If they are absent, prepare them
-   with the documented prerequisite commands (clone.sh, musl/build-makos.sh,
-   libcxx/build-makos.sh, rust/build-std.sh); do not discard or rebuild them
-   merely to avoid using the existing cache. With prerequisites present, run:
+       INTEGRATED_IMAGE=build/makos-firefox-evidence-ymp9Om/makos-integrated-5baa9467ca510b8a.img
+       shasum -a 256 "$INTEGRATED_IMAGE"
+       python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
 
-       ports/firefox/test-widget.sh
-       python3 ports/firefox/test-package-manifest.py --source-dir build/ports/firefox/source
-       python3 ports/firefox/test-runtime-evidence.py --source-dir build/ports/firefox/source
-       env -u MAKOS_FIREFOX_DEVELOPER_BUILD ports/firefox/build-makos.sh -j1
-
-   Set the documented Python 3.11/3.12 and `MAKOS_*` LLVM/libclang variables
-   when the tools are not installed in their default Homebrew locations. The
-   supported wrapper must print `MAKOS_FIREFOX_HOST_TOOLS_OK` for a complete
-   runnable host C/C++ pair and cbindgen 0.27.0 or newer before the expensive
-   build. If a release cache was moved under the developer object directory,
-   allow only the wrapper's journaled, recoverable
-   `makos-moved-cargo-quarantine` operation. Do not delete or manually move
-   Cargo or C++ caches.
-
-   The later integrated-image packaging path also stages CPython 3.14.7. It
-   requires a matching host Python 3.14 and a validated LLVM readelf. Set
-   `MAKOS_READELF` only when an explicit tool is needed; otherwise the build
-   selects repository-staged LLVM 19, `PATH`, or Homebrew. Do not substitute
-   Python 3.11/3.12 for CPython's matching-version cross-build prerequisite.
-
-   The full release must print
-   `MAKOS_FIREFOX_BUILD_ELF_OK
-   artifacts=firefox,plugin-container,xpcshell,libxul.so,libnspr4.so
-   identity=elf64,aarch64,et-dyn interp=executables-only
-   dependencies=artifact-specific`,
-   `MAKOS_FIREFOX_BINARY_OK target=aarch64-unknown-makos
-   elf=firefox,plugin-container,xpcshell,libxul gecko=linked nss=linked
-   runtime=shared-musl interp=/lib/ld-musl-aarch64.so.1` and
-   `MAKOS_FIREFOX_BUILD_OK developer=0`. It must then create the canonical
-   release build stamp for Firefox 140.13.0esr source commit
-   `90ad18aabeaa9cbd63a1f749a57f266e758e50da`. The release build/package
-   markers must report 61 patches with exact ordered series SHA-256
+   Require exact image SHA-256
+   `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`
+   and matching manifest SHA-256
+   `4cb2b6ef3a7d4c4d852755ce33ebd0cbbbb4de5291b53a3d6dfc7a68fe2a6f6a`.
+   The existing supported release/package markers report 61 patches with exact ordered
+   series SHA-256
    `770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab`,
-   and five audited build hashes. Do not manually create, copy from another
-   build, or edit the provenance record.
+   pinned Firefox 140.13.0esr source
+   `90ad18aabeaa9cbd63a1f749a57f266e758e50da`, and all five audited build
+   and stripped-runtime artifacts. Require the unchanged all-five-ELF,
+   loaded-literal, hash and provenance preflight, not just an image hash.
+   No Firefox source, patch, package or provenance change is part of this
+   kernel repair; no release rebuild or integration is needed. Never restamp
+   or transplant artifacts. The older 60-patch `3b68500032eec2d4` image remains
+   historical evidence, not a substitute input.
 
-   Set `SOURCE_DATA_IMAGE` to the intended existing MakOS data image, or use
-   the authorized unique fresh-source procedure if no backup is recoverable.
-   Do not use a forensic private disk as a live writable guest. Integration
-   reads its source and preserves account/profile regions; hash that source
-   before and after. Use a unique output directory and never overwrite an
-   existing image. Build the package and new content-addressed clone with:
-
-       test -f "$SOURCE_DATA_IMAGE"
-       INTEGRATED_OUTPUT_DIR=$(mktemp -d "$PWD/build/makos-firefox-evidence-XXXXXX")
-       shasum -a 256 "$SOURCE_DATA_IMAGE" > "$INTEGRATED_OUTPUT_DIR/source-before.sha256"
-       make integrated-data-aarch64 SOURCE_DATA_IMAGE="$SOURCE_DATA_IMAGE" INTEGRATED_OUTPUT_DIR="$INTEGRATED_OUTPUT_DIR"
-       shasum -a 256 -c "$INTEGRATED_OUTPUT_DIR/source-before.sha256"
-
-   Require `MAKOS_FIREFOX_PACKAGE_OK` and `MAKOS_INTEGRATED_DATA_OK`. Record
-   Mozilla's successful stage-package output and both regular executable
-   paths at dist/firefox/plugin-container and dist/firefox/xpcshell. The
-   supported packager must perform its own byte-authority comparisons; do not
-   substitute a manual hash check for those gates. Record
-   the new `build/makos-integrated-<identity>.img`, its matching
-   `.manifest.json`, their SHA-256 values, preserved-region identities, five
-   exact stripped runtime hashes, and package/image semantic identity. If any
-   release, package, or integration prerequisite fails, return the exact
-   blocker and do not run the historical image.
-   Set INTEGRATED_IMAGE to the exact newly published content-addressed path,
-   require its SHA-256 to match its own generated manifest, and run
-   `python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"`.
-   Do not require the new image to match the historical 3b68500032eec2d4 hash.
-   The packager must use its five stamp-authorized private snapshots, mode-0700
-   package root, actual package plus Firefox/all-five-ELF candidate preflight,
-   canonical/alias rejection, and image-last publication. Its six auxiliary
-   files are individually atomic but explicitly not a transaction. If the
-   command is interrupted between those publications, retain the prior image
-   as authoritative, preserve the possibly mixed auxiliary set as evidence,
-   and stop/report the interruption. Do not retry during this qualification
-   or manually reconcile files. A later explicitly authorized continuation
-   can rerun the exact unchanged supported packaging command.
+   Preserve the current master, manifest, build/runtime provenance, release
+   cache and all private account/profile/evidence disks. The previous private
+   session was retained at
+   `build/logs/macos-hvf-73da7fc65cbc-20261010/19-firefox-runtime-private/makos-aarch64-test-5lzp0ykz/`;
+   its data SHA-256 is
+   `3588374602d911b93975b6cd89ee9e3929d4d1b6cc3c6aed5ff6d92622ed08e1`.
+   Do not boot forensic originals writable or edit their preferences. The
+   integrated master preserves October 9 account/profile state; it is not
+   recovery of the earlier lost account. A manifest or compact evidence ZIP
+   cannot restore missing image bytes. If this exact master is absent or its
+   hash/preflight fails, stop and report the input blocker. Do not silently
+   create a different test baseline or run another historical image.
 
 5. Run the strict real-Firefox gate only against that verified current image,
    only when `uptime`, `vm_stat`, `sysctl vm.swapusage`, and `memory_pressure`
@@ -460,10 +409,13 @@ remote main to match, and record the exact tested commit.
    MAKOS_AARCH64_DUPLICATE_MAPPING record (CPU/root/VA/candidate
    physical/existing entry), and the exact preceding thread/CPU/root records. Do not infer a
    missing reason, join fragments into successful evidence, retry after the
-   first failure, or launch the final visible login. Capture any temporary
-   session paths/PID/QMP descriptors while the harness is running; where its
-   normal cleanup removes temporary disks, record that fact rather than
-   claiming they were retained. Preserve all existing master images/data.
+   first failure, or launch the final visible login. Capture the temporary
+   session paths/PID/QMP descriptors while the harness is running. Before
+   its normal cleanup, retain the exact private boot/data/vars files in a new
+   evidence directory (same-filesystem hard links are acceptable); do not
+   alter the harness or boot those forensic files. Hash retained files after
+   QEMU exits. If retention fails, explicitly record missing bytes rather
+   than claiming a manifest restores them. Preserve all master images/data.
 
    For any earlier self-host failure, preserve
    `build/makos-selfhost-focused-serial.log`, complete harness stdout/stderr,

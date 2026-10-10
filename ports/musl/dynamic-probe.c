@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #define _GNU_SOURCE
+#include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -61,6 +62,141 @@ static int emit_fault_result(const struct worker_result results[WORKERS])
 		return -1;
 	return write(STDOUT_FILENO, record, (size_t)length) == (ssize_t)length
 		? 0 : -1;
+}
+
+static long native_user_write(unsigned number, const void *buffer, size_t length)
+{
+	register uintptr_t x0 __asm__("x0") = STDERR_FILENO;
+	register uintptr_t x1 __asm__("x1") = (uintptr_t)buffer;
+	register uintptr_t x2 __asm__("x2") = length;
+	register uintptr_t x8 __asm__("x8") = number;
+	__asm__ volatile("svc #0" : "+r"(x0)
+		: "r"(x1), "r"(x2), "r"(x8) : "memory", "cc");
+	return (long)x0;
+}
+
+static int user_write_failure(unsigned phase, long observed)
+{
+	char record[192];
+	int length = snprintf(record, sizeof record,
+		"MAKOS_MUSL_USER_WRITE_FAIL phase=%u observed=%ld\n", phase, observed);
+	if (length > 0 && (size_t)length < sizeof record)
+		(void)write(STDERR_FILENO, record, (size_t)length);
+	return -1;
+}
+
+static int emit_user_write_result(void)
+{
+	char record[512];
+	int length = snprintf(record, sizeof record,
+		"MAKOS_MUSL_USER_WRITE_OK source=immutable-mmap "
+		"first_touch=kernel-copy tty=musl-17,native-63 tty_records=2 "
+		"file_offset=4093 file_bytes=67 readback=exact negatives=10 "
+		"errors=17:-1,63:-22 cleanup=unmapped,unlinked\n");
+	if (length <= 0 || (size_t)length >= sizeof record)
+		return -1;
+	return write(STDOUT_FILENO, record, (size_t)length) == (ssize_t)length
+		? 0 : -1;
+}
+
+static int reject_user_write(unsigned phase, const void *buffer, size_t length)
+{
+	/* Preserve MakOS's current distinct native ABI errors. Musl translates
+	 * native write's -1 to EBADF; this regression does not redefine errno. */
+	long observed = native_user_write(17, buffer, length);
+	if (observed != -1)
+		return user_write_failure(phase, observed);
+	observed = native_user_write(63, buffer, length);
+	if (observed != -22)
+		return user_write_failure(phase + 1, observed);
+	return 0;
+}
+
+static int probe_user_write(void)
+{
+	const size_t text_bytes = sizeof "#include <stdint.h>\n" - 1;
+	char begin[128];
+	int length = snprintf(begin, sizeof begin,
+		"MAKOS_MUSL_USER_WRITE_BEGIN source=immutable-mmap tty_records=2\n");
+	if (length <= 0 || (size_t)length >= sizeof begin ||
+	    write(STDOUT_FILENO, begin, (size_t)length) != (ssize_t)length)
+		return user_write_failure(1, length);
+	int source = open("/usr/src/makos/ports/musl/shared-demo.c", O_RDONLY);
+	if (source < 0)
+		return user_write_failure(2, source);
+	for (unsigned path = 0; path < 2; path++) {
+		void *cold = mmap(0, PAGE_BYTES, PROT_READ, MAP_PRIVATE, source, 0);
+		if (cold == MAP_FAILED)
+			return user_write_failure(3 + path * 3, -1);
+		/* No memcpy, strlen, comparison, volatile access or warm-up read:
+		 * each new immutable-file VMA first reaches its bytes in the kernel.
+		 * Normal musl write dispatches native 17; test native 63 separately. */
+		long written = path == 0 ? write(STDERR_FILENO, cold, text_bytes)
+			: native_user_write(63, cold, text_bytes);
+		if (written != (long)text_bytes)
+			return user_write_failure(4 + path * 3, written);
+		if (munmap(cold, PAGE_BYTES))
+			return user_write_failure(5 + path * 3, -1);
+	}
+	if (close(source))
+		return user_write_failure(9, -1);
+
+	source = open("/usr/lib/libc.so", O_RDONLY);
+	if (source < 0)
+		return user_write_failure(10, source);
+	void *cold = mmap(0, PAGE_BYTES * 2, PROT_READ, MAP_PRIVATE, source, 0);
+	if (cold == MAP_FAILED)
+		return user_write_failure(11, -1);
+	char path[64];
+	length = snprintf(path, sizeof path, "/home/user/cold-write-%ld", (long)getpid());
+	if (length <= 0 || (size_t)length >= sizeof path)
+		return user_write_failure(12, length);
+	int target = open(path, O_CREAT | O_EXCL | O_RDWR, 0600);
+	if (target < 0)
+		return user_write_failure(13, target);
+	/* This source view is still untouched. The span crosses two cold file
+	 * pages, and the bytes are checked against independent pread afterwards. */
+	long written = write(target, (const char *)cold + PAGE_BYTES - 3, 67);
+	char expected[67], actual[67];
+	int failed = written != 67 ||
+		pread(source, expected, sizeof expected, PAGE_BYTES - 3) != (ssize_t)sizeof expected ||
+		pread(target, actual, sizeof actual, 0) != (ssize_t)sizeof actual ||
+		memcmp(expected, actual, sizeof actual);
+	/* Only our successfully O_EXCL-created file may be removed. */
+	int close_result = close(target);
+	int unlink_result = unlink(path);
+	int unmap_result = munmap(cold, PAGE_BYTES * 2);
+	int source_result = close(source);
+	if (failed || close_result || unlink_result || unmap_result || source_result)
+		return user_write_failure(14, written);
+
+	void *none = mmap(0, PAGE_BYTES, PROT_NONE,
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (none == MAP_FAILED || reject_user_write(20, none, 8) ||
+	    munmap(none, PAGE_BYTES))
+		return user_write_failure(22, -1);
+	void *resident = mmap(0, PAGE_BYTES, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (resident == MAP_FAILED)
+		return user_write_failure(23, -1);
+	*(volatile unsigned char *)resident = 'X';
+	if (mprotect(resident, PAGE_BYTES, PROT_NONE) ||
+	    reject_user_write(24, resident, 8) || munmap(resident, PAGE_BYTES))
+		return user_write_failure(26, -1);
+	void *hole = mmap(0, PAGE_BYTES * 3, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (hole == MAP_FAILED)
+		return user_write_failure(27, -1);
+	memcpy((char *)hole + PAGE_BYTES - 8, "UNSAFE!!", 8);
+	if (munmap((char *)hole + PAGE_BYTES, PAGE_BYTES) ||
+	    reject_user_write(28, (char *)hole + PAGE_BYTES - 8, 16) ||
+	    munmap(hole, PAGE_BYTES) ||
+	    munmap((char *)hole + PAGE_BYTES * 2, PAGE_BYTES))
+		return user_write_failure(30, -1);
+	if (reject_user_write(31, hole, 8) ||
+	    reject_user_write(33, (const void *)(UINTPTR_MAX - 7), 16))
+		return -1;
+	return emit_user_write_result();
 }
 
 /* The last arrival publishes every participant's writes before releasing
@@ -245,6 +381,8 @@ int main(int argc, char **argv)
 		return 133;
 	if (munmap(fault_region, FAULT_BYTES) || emit_fault_result(results))
 		return 137;
+	if (probe_user_write())
+		return 138;
 	if (write(1, marker, sizeof marker - 1) != sizeof marker - 1)
 		return 122;
 	return 42;

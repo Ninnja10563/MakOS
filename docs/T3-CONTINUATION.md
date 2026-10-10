@@ -27,7 +27,44 @@ Preserve existing files and changes.
 
 ## Current verified state
 
-### 2026-10-10 Firefox runtime evidence repair
+### 2026-10-10 cold syscall-buffer repair
+
+The attached Mac/HVF run of `73da7fc65cbc54dea4ff215f39c50c7190a1248a`
+passes all twelve pre-Firefox commands, supported 61-patch release/integration
+and provenance preflight. Strict Firefox exhausts its unchanged probe on
+missing `MAKOS_JIT_POOL_OK`; browser-document submission now appears once,
+with eight blits and seven TLS successes, no fatal, but no Firefox screenshot
+or interaction result. Final visible login was not launched.
+
+The [repair report](FIREFOX-RUNTIME-EVIDENCE-20261010.md) documents a concrete
+kernel defect: direct write of an untouched valid file-backed constant fails
+the resident-only buffer check. Population now uses the existing bounded,
+generation-checked current-process VM resolver before final read permission
+and whole-write serial checks. The old behavior is rejected by host negative
+controls; an additive dynamic-musl cold-buffer gate covers real syscalls.
+The exact residency/return of the Mac JIT emitter was not logged, so do not
+claim that its missing record's cause or Firefox rendering is qualified.
+
+Final local full unit/check and image/artifact builds pass. One Pi/TCG EL0
+run passes, including the complete new cold-write evidence (strictly checked
+from its retained raw serial). The next VM-gate boot fails the unchanged SMP
+load ratio: dispatches `48,145,113`, so `145 > 3 * 48`, before the new fixture.
+The sequence stops; later runtime gates and final visible login are not run.
+No retry or threshold change is made. See the report for exact sessions,
+PIDs, private disks, hashes and outstanding validation; no QEMU remains.
+
+No Firefox patches, provenance, old test assertions or timing limits change.
+Rebuild kernel/guest fixtures, then follow the [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md)
+at the exact pushed commit supplied in chat. Reuse the Mac's
+`build/makos-firefox-evidence-ymp9Om/makos-integrated-5baa9467ca510b8a.img`,
+SHA-256 `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`,
+only after unchanged all-five-artifact/provenance preflight. No Firefox
+rebuild, repackage, reintegration, profile edits or restamping is needed.
+Preserve its master, prior release outputs, accounts/private clones and logs.
+Pi evidence is not Mac/HVF qualification. Stop on first failure; no final
+visible login until strict Firefox passes. Audit Partial/Missing rows remain.
+
+### Historical 2026-10-10 Firefox runtime evidence repair
 
 Attached Mac/HVF qualification of
 `44174449e899dfab57625c6fbd14563652d407c7` passes all twelve commands through

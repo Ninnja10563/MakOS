@@ -5936,8 +5936,10 @@ pub fn spawn_musl_dynamic_probe() -> Option<u64> {
     context.registers[1] = startup.argv;
     context.registers[2] = startup.envp;
     let (pid, process) = install_loaded_process(parent_pid, process, ProcessRole::Native, context)?;
-    if !crate::security::register_session_process(pid, crate::security::SessionProcessRole::Native)
-    {
+    if !crate::security::register_session_process(
+        pid,
+        crate::security::SessionProcessRole::MuslDynamicProbe,
+    ) {
         discard_spawned(pid);
         return None;
     }

@@ -1524,6 +1524,25 @@ pub fn sync_user_code(frame: u64) {
     unsafe { asm!("dsb ish", "ic iallu", "dsb ish", "isb", options(nostack),) }
 }
 
+/// Populate a syscall read buffer before taking any descriptor/TTY/serial lock.
+/// A caller can pass an untouched file-backed constant directly to write(2);
+/// absence of a resident PTE is not absence of an authorized readable mapping.
+/// The VM resolver enforces the address/overflow/copy bounds before population
+/// and performs backing I/O outside its locks. This is population, not final
+/// authorization: every caller must still check user_range_readable afterward,
+/// including for already-resident pages whose permissions may deny access.
+fn fault_in_user_read_buffer(address: u64, length: usize) -> bool {
+    if cached_active_root() == 0 {
+        return false;
+    }
+    crate::aarch64_vm::fault_in_range(
+        crate::aarch64_process::current_pid(),
+        address,
+        length,
+        false,
+    )
+}
+
 pub(crate) fn user_range_readable(address: u64, length: usize) -> bool {
     let root = cached_active_root();
     let Some(end) = address.checked_add(length as u64) else {
@@ -3134,6 +3153,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             let address = frame.registers[1];
             let length = frame.registers[2] as usize;
             if !crate::security::has_capability(crate::security::CAP_IPC)
+                || !fault_in_user_read_buffer(address, length)
                 || !user_range_readable(address, length)
             {
                 frame.registers[0] = (-22i64) as u64;
@@ -3292,7 +3312,9 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 (-22i64) as u64
             } else if length == 0 {
                 0
-            } else if !user_range_readable(address, length) {
+            } else if !fault_in_user_read_buffer(address, length)
+                || !user_range_readable(address, length)
+            {
                 (-22i64) as u64
             } else {
                 let input = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
@@ -4127,7 +4149,9 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_FILE_WRITE => {
             let address = frame.registers[1];
             let length = frame.registers[2] as usize;
-            if !user_range_readable(address, length) {
+            if !fault_in_user_read_buffer(address, length)
+                || !user_range_readable(address, length)
+            {
                 ERROR_INVALID
             } else {
                 let input = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
@@ -5868,7 +5892,7 @@ fn tty_read(frame: &ExceptionFrame) -> u64 {
 fn tty_write(frame: &ExceptionFrame) -> u64 {
     let address = frame.registers[1];
     let length = frame.registers[2] as usize;
-    if !user_range_readable(address, length) {
+    if !fault_in_user_read_buffer(address, length) || !user_range_readable(address, length) {
         return crate::aarch64_tty::Errno::Invalid.abi();
     }
     let bytes = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
