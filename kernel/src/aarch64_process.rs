@@ -182,6 +182,7 @@ struct ContextSlot {
     pid: u64,
     group_pid: u64,
     role: ProcessRole,
+    startup_ready: bool,
     affinity_mask: u8,
     automatic_cpu: u8,
     automatic_load_baseline: [u64; 3],
@@ -206,6 +207,7 @@ impl ContextSlot {
         pid: 0,
         group_pid: 0,
         role: ProcessRole::None,
+        startup_ready: false,
         affinity_mask: 0,
         automatic_cpu: 0,
         automatic_load_baseline: [0; 3],
@@ -224,6 +226,10 @@ impl ContextSlot {
         input_wait_handle: 0,
         name: [0; 16],
     };
+}
+
+fn startup_dispatch_allowed(slot: Option<&ContextSlot>) -> bool {
+    slot.is_some_and(|slot| slot.startup_ready)
 }
 
 fn production_role_code(role: ProcessRole) -> u8 {
@@ -322,6 +328,11 @@ impl SchedulerState {
         let surface_priority_tid = active_surface_priority_tid();
         let selected = self.table.schedule_next_where_on(cpu, |info| {
             let slot = contexts.iter().find(|slot| slot.pid == info.pid);
+            // Ready table storage is not publication of an unfinished AP
+            // startup. Unrelated timer/SGI wakes must respect this barrier.
+            if !startup_dispatch_allowed(slot) {
+                return false;
+            }
             if slot.is_some_and(|slot| {
                 slot.group_pid == REMOTE_GROUP_STOP_PID.load(Ordering::Acquire)
             }) {
@@ -693,14 +704,14 @@ impl ComputeMigration {
 }
 
 struct LockedProcesses {
-    lock: AtomicBool,
+    lock: crate::ticket_lock::TicketLock,
     state: UnsafeCell<SchedulerState>,
 }
 
 unsafe impl Sync for LockedProcesses {}
 
 static PROCESSES: LockedProcesses = LockedProcesses {
-    lock: AtomicBool::new(false),
+    lock: crate::ticket_lock::TicketLock::new(),
     state: UnsafeCell::new(SchedulerState::new()),
 };
 static SLEEP_BLOCK_REPORTED: AtomicBool = AtomicBool::new(false);
@@ -3985,6 +3996,7 @@ pub fn clone_thread(
             pid: tid,
             group_pid: parent.group_pid,
             role: parent.role,
+            startup_ready: true,
             affinity_mask: if application_worker_role(parent.role) {
                 0xe
             } else {
@@ -4078,6 +4090,7 @@ pub fn fork_process(frame: &crate::arch::ExceptionFrame) -> Option<u64> {
             pid: child_pid,
             group_pid: child_pid,
             role: parent.role,
+            startup_ready: true,
             affinity_mask: 1,
             automatic_cpu: 0,
             automatic_load_baseline: [0; 3],
@@ -4616,15 +4629,19 @@ pub fn network_control_allowed() -> bool {
 }
 
 fn with_state<R>(function: impl FnOnce(&mut SchedulerState) -> R) -> R {
-    while PROCESSES
-        .lock
-        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
-    }
+    // Reserve one FIFO turn before touching scheduler state. A fast yielding
+    // PE (or the BSP's completion poll) must not barge ahead of queued PEs
+    // by repeatedly reacquiring an unfair test-and-set lock.
+    // Mask before joining the queue: a local IRQ must never queue behind
+    // the interrupted owner/waiter on the same CPU. DAIF helpers use nomem,
+    // so fence compiler memory motion at both edges of this masked interval.
+    let interrupts = crate::arch::LocalInterruptMask::acquire();
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    let guard = PROCESSES.lock.lock();
     let result = function(unsafe { &mut *PROCESSES.state.get() });
-    PROCESSES.lock.store(false, Ordering::Release);
+    drop(guard);
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    drop(interrupts);
     result
 }
 
@@ -5142,6 +5159,9 @@ fn install_loaded_process(
             pid,
             group_pid: pid,
             role,
+            // Toolchain leaders can execute on a peer before this call
+            // returns. Publish them only after session credentials bind.
+            startup_ready: role != ProcessRole::Toolchain,
             affinity_mask: compute_placement.map_or(1, |placement| 1u8 << placement.cpu),
             automatic_cpu: 0,
             automatic_load_baseline: [0; 3],
@@ -5507,6 +5527,24 @@ pub fn spawn_musl_probe() -> Option<u64> {
     Some(pid)
 }
 
+fn publish_toolchain_startup(pid: u64) -> bool {
+    with_state(|state| {
+        if !state.table.get(pid).is_some_and(|info| {
+            info.state == makos_process_table::ProcessState::Ready
+        }) {
+            return false;
+        }
+        let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == pid) else {
+            return false;
+        };
+        if slot.startup_ready || slot.role != ProcessRole::Toolchain || slot.group_pid != pid {
+            return false;
+        }
+        slot.startup_ready = true;
+        true
+    })
+}
+
 pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool) -> Option<u64> {
     let parent_pid = current_pid();
     if parent_pid == 0
@@ -5539,6 +5577,12 @@ pub fn spawn_toolchain(manifest_path: &[u8], fixture: bool) -> Option<u64> {
         discard_spawned(pid);
         return None;
     }
+    // Publish under the same lock used for selection, only after credentials
+    // are complete. A wake without this admission barrier is insufficient.
+    if !publish_toolchain_startup(pid) {
+        crate::fatal("AArch64 Toolchain startup publication failed");
+    }
+    notify_idle_cpus();
     crate::serial_println!(
         "MAKOS_AARCH64_TOOLCHAIN_PROCESS_OK pid={} parent={} elf=1 el=0 entry={:#x} ttbr0={:#x} source=guest-file startup=sysv argc=2 mode={} scheduler=kernel-least-loaded-ap device_mmio_owner=cpu0",
         pid,

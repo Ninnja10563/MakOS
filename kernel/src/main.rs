@@ -66,6 +66,8 @@ mod serial;
 mod socket;
 #[cfg(target_arch = "x86_64")]
 mod syscall;
+#[cfg(target_arch = "aarch64")]
+mod ticket_lock;
 mod vfs;
 #[cfg(target_arch = "x86_64")]
 mod vm;

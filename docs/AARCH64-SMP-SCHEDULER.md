@@ -1,5 +1,275 @@
 # AArch64 multicore userspace scheduler design
 
+## 2026-10-14: FIFO scheduler lock and AP startup publication
+
+The authoritative 2026-10-13 Apple M3/macOS 26.6.2, QEMU 11.0.3/HVF
+qualification of `fc9338bbef4cb45c1c6a5548ca0511917d3ef10e` passes
+`make unit check`, image construction, EL0-entry, VM-fault, cold user-write,
+BTYPE migration and network-owner gates. The new user-write gate proves both
+untouched file-backed TTY writes, exact 67-byte cross-page file readback,
+ten invalid-buffer denials and cleanup, alongside the original EL0/VM/reap
+checks. This is not Firefox or JIT execution evidence.
+
+The first failed command is `make test-aarch64-smp-tcp-runtime`, but its guest
+fails in the preceding unconditional boot load-balancing fixture, before any
+TCP fixture work. Its complete final diagnostic is:
+
+```text
+MAKOS_AARCH64_SMP_LOAD_DIAGNOSTIC peak=0xe cpu_mask=0xe dispatches=49,59,186 total=294 min=49 max=186 statuses=80,81,82,83,84,85 task_masks_valid=1 free_balance=1
+MAKOS_FAILURE_DETAIL: AArch64 SMP load-balancing proof failed
+MAKOS_FATAL: AArch64 SMP load-balancing proof failed
+```
+
+The original ratio check rejects `186 > 3 * 49`. Exact statuses, task masks,
+overlap and frame recovery pass. Earlier guests in the same sequence passed
+that check with dispatches `107,95,99`, `88,115,96`, `118,106,79`,
+`98,105,113` and `75,109,122`. The Mac therefore reproduces the same assertion
+class as the prior Pi/TCG `48,145,113` failure; neither the host nor the
+cold-buffer repair is established as its cause. The last prelaunch CPU
+sample is 95.55% idle with normal memory pressure and no concurrent guest or
+heavy build. Command exit is 2, shell real time 110.72 s and recorder elapsed
+time 110.882025 s. The harness retains its 90-second marker wait and reports
+its missing TCP-result assertion after the guest fatal.
+
+The sequence stops immediately, without retry. SMP-input, self-host,
+Native/Python-role, Firefox-role and cursor gates, current Firefox image
+preflight/runtime, and final visible login are **not run**. Historical
+results below do not qualify this commit for those later gates.
+
+### Evidence preservation
+
+The supplied compact evidence archive contains
+`macos-hvf-fc9338bbef4c-20261013/08-smp-tcp-runtime-artifacts/makos-smp-tcp-focused-serial.log`:
+9,280 bytes, SHA-256
+`0f318ea022b475a49ec2564ce8ac9d94679f23d0c4ea49790181b7abcfea93da`.
+The saved serial contains the full diagnostic, failure detail and fatal. The
+unchanged TCP harness saves its accumulated serial before termination and
+does not drain the shutdown tail; no additional bytes or numeric QEMU exit
+status are claimed. QEMU PID is 76459, harness PID 76457, original session
+`build/makos-smp-tcp-dp2vnc_n`, QMP inherited socketpair fd 5. The original
+temporary directory was cleaned up, but all three private boot/data/vars
+files were retained before cleanup under the Mac evidence directory's
+`08-smp-tcp-runtime-private/makos-smp-tcp-dp2vnc_n/`. They are not in the
+compact ZIP. No QEMU remains and no current screenshot was produced.
+
+The existing Firefox integrated master remains
+`build/makos-firefox-evidence-ymp9Om/makos-integrated-5baa9467ca510b8a.img`,
+SHA-256 `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`.
+Its post-failure preservation hash is not a current preflight pass. There was
+no Firefox rebuild, reintegration, provenance restamp or profile edit.
+
+### Repair scope and validation boundary
+
+The former scheduler-state test-and-set lock permits a fast reacquiring PE
+or CPU0's completion poll to overtake PEs already waiting for the same lock.
+The lock repair replaces it with the allocation-free FIFO ticket
+core in `kernel/src/ticket_lock.rs`. Each waiter reserves one turn; an owner
+publishes its completed scheduler-state changes with Release ordering, and
+the next owner observes its turn with Acquire ordering. Queued callers
+cannot be overtaken by subsequent arrivals. The guard releases the lock
+before `with_state` returns.
+
+`with_state` masks local interrupts **before** reserving a ticket, preventing
+a local interrupt from queueing behind its own interrupted owner or waiter.
+Compiler fences surround the masked memory-access interval because the
+DAIF helpers use `nomem`; the ticket guard is dropped before the closing
+fence and restoration of the caller's exact saved DAIF value. Interrupts are
+not unconditionally enabled on return.
+
+This repairs an actual starvation possibility, not a measured reconstruction
+of the failed Mac interleaving. FIFO acquisition guarantees order among
+queued requests; it neither proves which PE stalled in that run nor bounds
+dispatch shares when a peer has not requested service. The six immutable
+tasks, 48 yields each, task selection, affinity, dispatch accounting,
+ownership checks, minimum 32 dispatches per AP, total at least 288,
+`max <= 3 * min`, status/frame assertions, 2-second AP-start and 20-second
+completion deadlines remain unchanged. No runtime gate or Firefox threshold
+is relaxed.
+
+Additive host coverage is provided through
+`scripts/test_aarch64_scheduler_lock.py` in `make unit check`, exercising the
+production ticket core and the extracted production `with_state` wrapper.
+Nine tests cover a legal old-lock barging interleaving, queued AP/BSP order,
+ticket wrap, exclusion/publication, guard release, saved interrupt masks and
+the real process-table six-task workload. Four compiled negative controls
+reject broken queue order, nonwrapping release, missing IRQ masking and early
+IRQ restoration. Host adapters do not execute AArch64 DAIF instructions.
+The boot proof and assembly workload are additionally byte-hash guarded
+against the unchanged baseline. Both test targets retain warning-as-error
+compilation for these generated Rust fixtures.
+
+For the initial FIFO-only candidate on Pi/Debian, full `make unit check` passes in 336.509 s,
+including the nine checks and four negative controls in both targets.
+`make image-aarch64` and its artifact checks pass in 63.303 s. Logs are
+retained under `build/smp-lock-repair-20261014-P1AVcM/`; old boot/kernel and
+opt-in images and previous serial logs were copied there before testing.
+The independent read-only review found no blocking lock-order or IRQ-order
+issue. These host results alone do not qualify guest behavior.
+The Mac protocol adds the existing, unchanged
+`make test-aarch64-smp-load-runtime` as a focused gate while retaining every
+previous sequential command and stop-on-first-failure rule. Pi/Debian
+functional evidence must be recorded separately from Mac/HVF qualification.
+Firefox remains the priority, but neither its runtime nor full OS completion
+is established; original-specification audit Partial/Missing rows remain.
+
+### Local runtime recording boundary
+
+Functional testing uses Pi/Debian, QEMU 10.0.11/TCG, four guest CPUs and the
+unchanged Make targets, one guest at a time. The initial FIFO-only boot SHA-256 is
+`cdd1f289d4bb6f7782c3daff8ee5c3fd728901299cd64feeebad9af229861ecc`.
+The local recorder retains separate command logs, the raw serial files saved
+by the unchanged harnesses, PID/harness/QMP arguments, session paths and
+live-linked private boot/data/vars; it hashes those files after guest exit.
+Its records are in
+`build/smp-lock-repair-20261014-P1AVcM/{qualified,continued}/runtime-results.json`.
+No local result is Mac/HVF or Firefox performance evidence.
+
+One **unqualified capture interruption** must remain visible: after the first
+six gates passed, the local observer aborted during TCP launch with
+`expected exactly three private guest disks`. Its rejected process argument
+sample and numeric harness status were not retained; no guest result or
+failure reason may be inferred from that incomplete attempt. The command log
+ends at harness launch. Its original `build/makos-smp-tcp-7em5igv4/` disks
+remain, also retained under `capture-interrupted-smp-tcp-private/` in the
+evidence directory. No QEMU or harness remained before continuing.
+
+Only the ignored local recorder was corrected to retain process samples and
+skip samples without a QEMU drive argument list. A fresh unchanged TCP
+command then completed successfully, followed by a passing SMP-input gate
+and the failed self-host run described below.
+The interrupted attempt is not counted as a pass, no guest assertion
+was waived, and no production source or repository gate was changed between
+those two launches. Preserve both evidence sets.
+
+The first eight completed gates pass, but self-host **fails** after 98.535 s:
+the first Toolchain process (PID 4) exits status 80, followed by
+`AArch64 toolchain SMP evidence invalid`. Its load proof passes with
+`120,117,175` dispatches. The sequence stops; Native/Python, Firefox-role,
+cursor, real Firefox and visible login are not run on this candidate.
+QEMU PID 3912049 and harness 3911912 exit; QMP was inherited fd 4 and the
+original session was `build/makos-selfhost-focused-kgguhjj8`. Raw serial,
+harness output and all private disks remain under `continued/`; their exact
+hashes are in its result JSON. This failure is not waived or counted as a
+passing sweep.
+
+### Startup race exposed during local validation
+
+`install_loaded_process` previously installed a Ready Toolchain context,
+released the scheduler lock and notified APs before `spawn_toolchain` bound
+that PID's session credentials. Toolchain leaders, unlike the ordinary
+CPU0 session leaders, can execute immediately on another CPU. An early
+`SYS_CREATE` therefore sees deny-by-default credentials and can fail the
+fixture's initial file-seeding block with status 80. A read-only scan of the
+first 1 MiB of the retained data image found no `generated` filename matches;
+the exact failing syscall return was not logged, so this is a source-proven
+race consistent with the failure, not a reconstructed syscall trace.
+
+A scheduler-locked `startup_ready` admission bit now keeps new Toolchain
+leaders ineligible until the original successful credential-registration
+step completes. Every ordinary scheduler selection checks the bit before
+role and affinity eligibility. A timer or unrelated SGI cannot bypass it;
+merely postponing the creator's wake would not suffice. Publication verifies
+a Ready, singleton Toolchain context, sets the bit under the same lock, and
+then notifies APs. The original registration refusal and `discard_spawned`
+cleanup remain unchanged and execute while the child is still unowned.
+Existing boot fixtures, CPU0 leaders and thread/fork initialization retain
+their prior eligibility behavior. No capabilities, affinity, dispatch counts,
+workload, runtime assertions or thresholds change.
+
+The additional `scripts/test_aarch64_spawn_publication.py` compiles the real
+spawn, admission, publication and discard routines, production process table,
+and actual credential registration/lookup/clearing code. Its six host tests
+include a forced AP scheduling lookup before registration and require the
+first admitted execution to see exact console/file-write credentials.
+Inactive/full sessions, invalid requests and publication states, cleanup, and ordinary role policy
+are covered. Three compiled negative controls remove admission, the fresh
+wake or reclamation. ELF loading, wake delivery, host locks and resource
+reclamation are explicit adapters, not guest execution. Existing structural
+assertions and runtime tests remain unchanged.
+
+### Combined-repair validation
+
+Final Pi/Debian `make image-aarch64` and artifact checks pass in 56.289 s;
+full `make unit check` passes in 332.499 s. Both new suites run in both
+targets: 15 host cases and seven compiled negative controls, retaining all
+prior tests. The boot image SHA-256 is
+`4bea120305b11b1ad5889f53279d5971b7b816f857e6d7515bf9ba7eecfee963`;
+`target/aarch64-unknown-none/release/makos-kernel` is
+`758bc6ee63006813b3d74dcc718a7ee17c8ebebce1ddfa9ed66ca0b3fb99d232`.
+The evidence directory above retains `06-startup-barrier-image.log`,
+`07-final-unit-check.log` (SHA-256
+`f77f498d9821e3811edf40ec5ad2d029c65e94f9b1ab53f9e6ff93a556a256b9`)
+and `08-final-pre-runtime.txt`. Independent read-only review found no
+blocking admission, refusal-cleanup or lock-order issue; review is not a
+guest test. Runtime results use a fresh `final/` directory, never replacing
+the earlier failed or incomplete evidence.
+After the final documentation update, the existing scheduler/provenance
+guards and both new host suites pass again; their output is retained in
+`09-final-document-and-focused-checks.log`.
+
+The combined-repair self-host run passes in 198.929 s with `cli_builds=20`,
+`processes=21`, `runtime_graphs=4,3,2,2,3,2,2,3`, exact generated-header bytes
+and hashes, and `spawn_before_wait=3 statuses=42,42,42`. Its locked overlap
+record matches PIDs/groups `13,14,15` on CPUs `1,2,3`, roots
+`0x4012f000,0x40191000,0x401f3000`, distinct address spaces and singleton
+ownership. All 21 placements use APs (`6,6,9`); dispatches are `175,175,178`,
+with 30 migrations, source/target masks `0xe`, zero evidence drops, 40 CPU0
+compositions for 48 AP deferrals, no pending handoff, and zero GPU delayed
+recoveries/timeouts/errors. The saved raw
+`final/runtime-selfhost-artifacts/makos-selfhost-focused-serial.log` has
+SHA-256 `428756396ddd62cf40b91c273d52b5b94fc6ad8cc40ce9e1871454ed22aa12c9`.
+Its original session is `build/makos-selfhost-focused-f6x5axcn`; QEMU PID
+3933650, harness PID 3933551, QMP inherited socketpair fd 4. Private files
+survive the original cleanup under `final/runtime-selfhost-private/`.
+
+All twelve final sequential Pi/TCG gates exit 0, with no concurrent QEMU,
+retry or intervening source change. Times below are local command elapsed
+times, not Mac/HVF performance evidence. Dispatch triples are the real boot
+load proof from each gate's saved serial, not application-worker totals.
+
+| `make test-aarch64-…-runtime` | Seconds | Load dispatches AP1/AP2/AP3 | QEMU PID | Harness PID |
+| --- | ---: | --- | ---: | ---: |
+| `smp-load` | 23.595 | 100,100,100 | 3930901 | 3930857 |
+| `el0-entry` | 32.471 | 100,99,101 | 3931162 | 3931145 |
+| `vm-fault` | 30.962 | 98,101,101 | 3931536 | 3931495 |
+| `user-write` | 31.406 | 99,98,100 | 3931843 | 3931827 |
+| `btype` | 31.772 | 100,100,100 | 3932187 | 3932155 |
+| `net-owner` | 24.118 | 98,101,101 | 3932539 | 3932502 |
+| `smp-tcp` | 25.039 | 99,101,100 | 3932753 | 3932711 |
+| `smp-input` | 33.350 | 99,99,99 | 3932957 | 3932920 |
+| `selfhost` | 198.929 | 92,101,105 | 3933650 | 3933551 |
+| `native-smp` | 42.527 | 100,101,99 | 3935467 | 3935434 |
+| `production-smp` | 43.760 | 112,104,84 | 3936127 | 3936100 |
+| `cursor` | 28.042 | 63,131,109 | 3936613 | 3936570 |
+
+The exact original session paths, command lines and all private image hashes
+are retained in `final/runtime-results.json`, SHA-256
+`9a9b337ce1b2e9d35b0f9a8aa1e8b160c4f96685df8124d1ce3cec8a7d33e854`.
+For each row, command output is `final/runtime-<gate>.log`, raw saved serial
+is under `final/runtime-<gate>-artifacts/`, and live-retained boot/data/vars
+are under `final/runtime-<gate>-private/`. QMP is an inherited socketpair,
+fd 5 for TCP and fd 4 for the other eleven guests. Every before/after master
+boot hash equals the final boot hash above; opt-in private boot hashes are
+recorded separately. No QEMU or runtime harness remains after the sequence.
+
+The Native/Python-role gate reports three/one automatic migrations with zero
+evidence drops and both status-42 reaps. The production Firefox-role fixture
+reports four migrations, zero drops, exact syscall-149 post-enqueue handoff
+and status 42. These roles do not establish CPython or Firefox execution.
+Cursor reports seven positions, zero changed scanout pixels, virtio-GPU plane,
+hidden host cursor, and zero delayed recoveries/timeouts/errors. All original
+EL0, concurrent VM, cold-buffer, BTYPE, real UDP/TCP and input assertions pass.
+
+The required Mac `5baa9467ca510b8a` Firefox image is absent on this Pi, so no
+real Firefox preflight/runtime or post-qualification visible login is run
+here. The twelve passes qualify this local repair increment only. Mac/HVF
+must run the complete sequential protocol at the exact pushed commit; strict
+Firefox's 600-second probe, first-character `<500 ms`, Ctrl-A `<10000 ms`
+and all other assertions remain unchanged. Audit Partial/Missing rows remain.
+
+The design and historical evidence below are retained; the dated report
+above is the current qualification boundary.
+
 ## Saved EL0 instruction validation
 
 The initial main-image placement interval is not the valid resumed-PC range.

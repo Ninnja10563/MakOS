@@ -27,6 +27,57 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-14 scheduler lock and AP startup repair
+
+Mac/HVF `fc9338bbef4cb45c1c6a5548ca0511917d3ef10e` passes unit/check,
+image, EL0, VM, the new cold user-write gate, BTYPE and network-owner. The
+SMP TCP command then fails in the preceding boot load proof: `49,59,186`
+dispatches violate `186 > 3 * 49`. All other load predicates pass. No later
+gate, current Firefox preflight/runtime or visible login ran; no guest remains.
+Private disks and exact failed evidence remain on the Mac, not in its ZIP.
+
+The [scheduler report](AARCH64-SMP-SCHEDULER.md) records a source-level
+lock-barging defect and the IRQ-masked FIFO ticket-lock repair. It does not
+claim that every skewed CPU trace was caused by lock starvation or guarantee
+equal shares when a peer has not requested the lock.
+
+The initial FIFO-only candidate's Pi/Debian QEMU/TCG sequence subsequently
+fails at self-host: the first Toolchain process exits status 80 during
+initial file seeding, followed by `AArch64 toolchain SMP evidence invalid`.
+Preserve `build/smp-lock-repair-20261014-P1AVcM/continued/runtime-selfhost.log`
+and the report's retained serial/private disks; do not relabel the failure
+as a pass. Its source-proven startup race is now repaired: a Ready AP
+Toolchain context remains inadmissible through `startup_ready=false` until
+its original credential registration succeeds, then publication under the
+scheduler lock precedes the AP wake. Original registration refusal/discard
+cleanup remains intact, and other constructor eligibility is unchanged.
+The log does not identify the exact failed syscall return or interleaving.
+
+Final Pi/Debian full `make unit check` passes in 332.499 s; image/artifact
+checks pass in 56.289 s. All twelve sequential Pi/TCG gates pass, including
+20-build/21-process self-host with every original graph/header/parallel
+proof. Final evidence is in `build/smp-lock-repair-20261014-P1AVcM/final/`,
+with exact PID/session/QMP/private-disk hashes in `runtime-results.json` and
+the report. Final boot SHA-256 is
+`4bea120305b11b1ad5889f53279d5971b7b816f857e6d7515bf9ba7eecfee963`,
+unchanged before/after every gate. No QEMU remains. The required Mac image
+is absent on the Pi; no real Firefox preflight/runtime or visible login is
+run here. Workload, round-robin order, affinity, capabilities, dispatch
+accounting, assertions and deadlines are unchanged; do not pin the fixture,
+pad counters, soften its bound or retry failures into a pass. Full Mac
+retesting remains necessary, including the existing
+`make test-aarch64-smp-load-runtime` target added to the sequential protocol
+and every original self-host proof.
+
+Preserve the verified Mac image
+`build/makos-firefox-evidence-ymp9Om/makos-integrated-5baa9467ca510b8a.img`
+and require its unchanged all-five-artifact/61-patch provenance preflight.
+No Firefox rebuild, repackage, reintegration, restamp or profile edit is
+needed. Follow the [Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md) at the exact
+pushed commit supplied in chat. Stop at first failure; no final visible
+login until strict Firefox passes. Pi evidence is functional only and all
+audit Partial/Missing rows remain.
+
 ### 2026-10-10 cold syscall-buffer repair
 
 The attached Mac/HVF run of `73da7fc65cbc54dea4ff215f39c50c7190a1248a`

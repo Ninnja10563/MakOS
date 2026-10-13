@@ -13,30 +13,49 @@ gates, including the final visible login, after a failure.
 
 Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
-Previous exact Mac-tested baseline: 73da7fc65cbc54dea4ff215f39c50c7190a1248a
+Previous exact Mac-tested baseline: fc9338bbef4cb45c1c6a5548ca0511917d3ef10e
 
-Use the exact full cold syscall-buffer repair commit supplied in chat,
+Use the exact full scheduler FIFO-lock/AP-startup repair commit supplied in chat,
 descending from this baseline; do not test the baseline again or choose an
-arbitrary future descendant. The last run passed all twelve ordered commands
-through cursor, a supported 61-patch Firefox release, integration and image
-preflight. The full 600-second Firefox probe then failed on missing
-`MAKOS_JIT_POOL_OK`: eight blits, seven TLS successes and one browser-document
-submission, but no fatal or Firefox screenshot/interaction result. Kernel
-write validation incorrectly rejected untouched demand-backed readable pages.
-Populate authorized buffers before the unchanged resident-permission and
-whole-record serial checks. The missing record's exact page residency was
-not captured on the Mac; this source-proven defect is not yet a browser pass.
+arbitrary future descendant. The last run passed unit/check, image, EL0, VM,
+cold user-write, BTYPE and network-owner. The next SMP TCP command failed
+before its TCP fixture: early-boot dispatches 49,59,186 violate 186 > 3 * 49,
+with all six statuses, masks and frame balance intact. The idle Mac now
+reproduces the assertion class previously seen on Pi. Later gates, Firefox
+preflight/runtime and final visible login were not run. Do not reuse older
+browser/cursor/self-host evidence as passes for this commit.
+
+The scheduler lock now admits queued callers FIFO instead of allowing a
+fast releaser or BSP polling loop to barge ahead of them. IRQ masking and
+compiler ordering cover queue admission through release. Round-robin order,
+affinity, workload, dispatch counts and every bound/deadline remain unchanged.
+The failed trace did not record lock waits, and FIFO does not guarantee equal
+CPU totals when a peer has not requested service; require actual runtime
+proof rather than assuming the observed Mac cause has been established.
+
+The FIFO-only candidate's Pi/Debian QEMU/TCG sequence later failed self-host:
+its first Toolchain process exited status 80 during initial file seeding,
+then the guest reported AArch64 toolchain SMP evidence invalid. Preserve that
+failure; it is neither a pass nor Mac evidence. Source inspection identified
+an AP Toolchain startup race: a Ready task could execute before its session
+credentials were bound. The combined repair withholds Toolchain dispatch
+admission until the original successful credential binding, then publishes
+startup_ready under the scheduler lock before waking APs. Original refusal
+cleanup and deny-by-default permissions remain; other constructor eligibility
+is unchanged. The exact failed syscall return/interleaving was not logged.
+Final combined-repair Pi/Debian full unit/check, image/artifact checks and
+all twelve sequential Pi/TCG runtime gates pass, including every original
+self-host proof. That local run is not Mac/HVF qualification. Require all
+original self-host proofs below, without bypass, retry or reduced assertions.
+
 Firefox source, all 61 patches, provenance and runtime gates are unchanged.
 Reuse the verified October 10 integrated image below; do NOT rebuild Firefox,
 repackage, reintegrate, change profile preferences or restamp artifacts for
 this kernel-only repair. Preserve all historical images and private profiles.
 
 Pi source/host/cross-build checks do not qualify Firefox on this Mac.
-The final Pi run passed full unit/build and one EL0 runtime with complete
-cold-write evidence, then stopped at an unchanged boot SMP load-ratio failure
-(dispatches 48,145,113; 145 > 3 * 48) before the VM fixture. Later Pi gates were
-not run. This outstanding result is not waived or called a clean sweep;
-require the full Mac sequence below and retain any recurrence unchanged.
+Earlier Pi dispatches 48,145,113 and Mac dispatches 49,59,186 must remain
+failures. Do not waive either bound or retry a failed run into a pass.
 Do not change fatal assertions, timeouts, thresholds, SDK
 macros, fortification or -Werror. Keep /usr/bin/cc (Apple clang); do not set
 HOST_CC to substitute another compiler. Preserve all preceding kernel,
@@ -52,7 +71,8 @@ remote main to match, and record the exact tested commit.
    docs/FIREFOX-FATAL-CAPTURE-20260915.md and
    docs/FIREFOX-VM-FAULT-20261008.md, docs/FIREFOX-BTYPE-20261009.md and
    docs/FIREFOX-NET-OWNER-20261009.md and
-   docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md.
+   docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md and
+   docs/AARCH64-SMP-SCHEDULER.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -68,6 +88,7 @@ remote main to match, and record the exact tested commit.
 
        make unit check
        make image-aarch64
+       make test-aarch64-smp-load-runtime
        make test-aarch64-el0-entry-runtime
        make test-aarch64-vm-fault-runtime
        make test-aarch64-user-write-runtime
@@ -79,6 +100,15 @@ remote main to match, and record the exact tested commit.
        make test-aarch64-native-smp-runtime
        make test-aarch64-production-smp-runtime
        make test-aarch64-cursor-runtime
+
+   The dedicated SMP-load target uses its existing migration/load harness.
+   Require MAKOS_AARCH64_SMP_LOAD_RUNTIME_OK accel=hvf and the actual kernel
+   load record: six tasks, three worker CPUs, mask 0xe, 48 real yields each,
+   at least 288 selections, at least 32 per AP, max <= 3 * min, exclusive ownership,
+   exact statuses 80,81,82,83,84,85 and balanced frames. The 2s dispatch and
+   20s completion deadlines and every original harness check remain. Save
+   the raw per-CPU counts; never pad them, pin tasks or average failed runs.
+   Also retain all existing migration/context checks from this target.
 
    The new EL0-entry gate must report
    `MAKOS_AARCH64_EL0_ENTRY_RUNTIME_OK accel=hvf fixture=dynamic-musl-pthread`,

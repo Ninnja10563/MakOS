@@ -1,8 +1,50 @@
 # Implementation status
 
-Last updated: 2026-10-10.
+Last updated: 2026-10-14.
 
 ## Current qualification update
+
+The attached October 13 Mac/HVF run of
+`fc9338bbef4cb45c1c6a5548ca0511917d3ef10e` passes full unit/check, image,
+EL0, VM, cold user-write, BTYPE and network-owner gates. The next command,
+SMP TCP, fails before its network fixture: early-boot load dispatches
+`49,59,186` violate the unchanged `max <= 3 * min` bound. All six statuses,
+CPU/ownership masks and frame recovery pass. The host was idle with normal
+memory pressure; this cannot be dismissed as a Pi-only result. Later gates,
+Firefox preflight/runtime and visible login were not run.
+
+The [scheduler repair](AARCH64-SMP-SCHEDULER.md) prevents a releaser or new
+arrival from overtaking already-queued scheduler callers through an
+IRQ-masked FIFO ticket lock with ordered Acquire/Release ownership. FIFO
+admission does not guarantee equal CPU dispatch totals if a peer has not
+requested the lock, and the Mac trace did not record individual lock waits.
+
+The initial FIFO-only candidate reaches self-host on Pi/Debian QEMU/TCG but
+fails: its first Toolchain process exits status 80 in the initial file-seeding
+stage, followed by `AArch64 toolchain SMP evidence invalid`. The failed
+evidence is retained; it is not a passing sweep or a Mac result. Source
+inspection identifies an AP startup race: Ready Toolchain leaders could run
+before their session credentials were bound. A scheduler-locked
+`startup_ready` bit now withholds their dispatch eligibility until successful
+binding, then publishes admission and wakes APs. Original credential checks
+and refusal cleanup remain; other constructors retain their prior
+eligibility. The failed syscall return was not recorded, so the race is
+source-proven but that exact failing interleaving is not reconstructed.
+
+Final Pi/Debian full `make unit check` passes in 332.499 s and image/artifact
+checks in 56.289 s. All twelve sequential Pi/TCG runtime gates pass, from
+focused SMP-load through cursor. Self-host proves 20 builds, 21 processes,
+the eight ordered graph counts, exact headers and locked distinct-root
+parallel execution; the report retains every PID/session/private disk and
+the earlier failed candidate. No QEMU remains. Round-robin order, affinity,
+workload, counters, capabilities, all assertions and deadlines remain
+unchanged. This is not Mac/HVF or real-Firefox qualification; the required
+integrated image is absent on the Pi and no browser runtime or visible login
+is run here. No audit row is upgraded. Reuse the unchanged `5baa9467ca510b8a`
+Firefox image on the Mac after preflight; no Firefox rebuild, restamp or
+profile change is needed.
+
+### Historical October 10 cold-buffer qualification
 
 The attached October 10 Mac/HVF run at
 `73da7fc65cbc54dea4ff215f39c50c7190a1248a` passes all twelve pre-Firefox

@@ -6,10 +6,32 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-10. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-14. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: attached Mac/HVF evidence for
+`fc9338bbef4cb45c1c6a5548ca0511917d3ef10e` passes unit/check, image,
+EL0, VM, cold user-write, BTYPE and network-owner. Early-boot SMP load
+dispatches `49,59,186` fail the unchanged max/min bound during the next TCP
+command, before TCP executes. Later gates, Firefox and visible login are not
+run. The [scheduler repair](AARCH64-SMP-SCHEDULER.md) prevents queued callers
+being overtaken through an IRQ-masked FIFO ticket lock. Its initial FIFO-only
+Pi/TCG candidate later fails self-host with first-Toolchain status 80 and
+`AArch64 toolchain SMP evidence invalid`; that failure remains recorded.
+Source inspection exposes an AP Toolchain startup/credential-binding race.
+Dispatch now requires a scheduler-locked startup admission bit published only
+after the original successful credential binding; refusal cleanup and
+deny-by-default permissions remain. The precise failed syscall interleaving
+was not logged. Final combined-repair full unit/check, image/artifact checks
+and all twelve sequential Pi/TCG runtime gates pass, including every original
+self-host proof. Exact logs, PIDs, sessions, private disks and hashes are in
+the report; the earlier failure is retained. No QEMU remains. Round-robin
+order, affinity, workload and qualification limits are unchanged. This is
+neither proof of real Firefox nor a guarantee of equal dispatch rates on
+arbitrarily delayed CPUs. All Partial/Missing rows remain; the exact
+`5baa9467ca510b8a` Mac image remains the required input after preflight.
+
+Earlier qualification: attached Mac/HVF evidence for
 `73da7fc65cbc54dea4ff215f39c50c7190a1248a` passes all twelve pre-Firefox
 commands, a supported 61-patch release/integration and unchanged provenance
 preflight. Strict Firefox fails on missing `MAKOS_JIT_POOL_OK`; one browser

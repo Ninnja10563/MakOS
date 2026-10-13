@@ -281,6 +281,8 @@ unit:
 	python3 scripts/test_aarch64_cursor_plane.py
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
+	python3 scripts/test_aarch64_scheduler_lock.py
+	python3 scripts/test_aarch64_spawn_publication.py
 	python3 scripts/test_aarch64_page_table_atomic.py
 	python3 scripts/test_aarch64_vm_fault_commit.py
 	python3 scripts/test_aarch64_vm_fault_runtime.py
@@ -362,6 +364,8 @@ check:
 	python3 scripts/test_aarch64_cursor_plane.py
 	python3 scripts/test_aarch64_smp.py
 	python3 scripts/test_aarch64_smp_scheduler.py
+	python3 scripts/test_aarch64_scheduler_lock.py
+	python3 scripts/test_aarch64_spawn_publication.py
 	python3 scripts/test_aarch64_page_table_atomic.py
 	python3 scripts/test_aarch64_vm_fault_commit.py
 	python3 scripts/test_aarch64_vm_fault_runtime.py

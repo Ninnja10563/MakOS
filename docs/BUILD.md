@@ -13,7 +13,33 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Cold syscall-buffer repair (2026-10-10): Mac `73da7fc65cbc` passes every
+Scheduler-lock and AP startup repair (2026-10-14): Mac `fc9338bbef4c`
+qualifies cold writes, but its next SMP TCP boot fails the unchanged SMP
+load skew bound. See [scheduler evidence and locking](AARCH64-SMP-SCHEDULER.md).
+The FIFO-only candidate's Pi/TCG sequence later fails self-host with initial
+Toolchain status 80 and `AArch64 toolchain SMP evidence invalid`. Source
+inspection identifies a Ready AP Toolchain context exposed before credential
+binding; a scheduler-locked startup admission bit now prevents dispatch
+until successful binding, then publication precedes the AP wake. Original
+credential checks/refusal cleanup and other constructor eligibility remain.
+The exact failed syscall return was not logged; retain the failed run.
+Final combined-repair Pi/Debian full unit/check, image/artifact checks and all
+twelve sequential Pi/TCG gates pass; the report records exact evidence and
+the retained earlier failure. These do not qualify real Firefox on the Mac.
+Run full
+`make unit check`, `make image-aarch64`, the unchanged focused
+`make test-aarch64-smp-load-runtime` and the complete sequential
+[Mac protocol](MACOS-HVF-TEST-AGENT-PROMPT.md). The added production-lock
+host regressions are `python3 scripts/test_aarch64_scheduler_lock.py` and
+`python3 scripts/test_aarch64_spawn_publication.py`, both included in
+unit/check. Require the original self-host gate and all its
+existing proofs as well as the focused load gate. Do not change the load
+workload, thresholds, affinity or counters. Existing Firefox image/source/
+provenance are unchanged; reuse the exact `5baa9467ca510b8a` master below after
+preflight. No Mac Firefox
+result is inferred from the passed cold-buffer fixture or Pi checks.
+
+Historical cold syscall-buffer repair (2026-10-10): Mac `73da7fc65cbc` passes every
 pre-Firefox command, the supported 61-patch release/integration and provenance
 preflight. Strict Firefox fails on missing JIT-pool evidence despite one
 browser-document submission. The [kernel repair](FIREFOX-RUNTIME-EVIDENCE-20261010.md)
