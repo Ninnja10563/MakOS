@@ -13,7 +13,21 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Scheduler-lock and AP startup repair (2026-10-14): Mac `fc9338bbef4c`
+Surface-priority atomicity repair (2026-10-15): primary development is now
+on Apple M3/macOS. Full exact `7baa2c2ce03d` Mac/HVF qualification passes
+unit/check, image, all twelve runtime gates and unchanged Firefox preflight,
+then fails real Firefox Ctrl-A latency at 26503 ms (limit 10000 ms), after
+verified first paint. See [preserved evidence and repair](FIREFOX-SURFACE-PRIORITY-20261015.md).
+`python3 scripts/test_aarch64_surface_priority.py` now includes extracted
+production-code hint lifecycle/selection tests and negative controls, also
+run by unit/check. Publication, expiry and one-shot consumption share the
+scheduler lock. No browser binaries, profiles, gate limits or provenance
+change. Reuse the exact `5baa9467ca510b8a` master after preflight and run the
+complete unchanged Mac protocol on the new exact commit. Keep Apple
+`/usr/bin/cc`, fortification and `-Werror`. A host regression pass is not
+strict Firefox qualification.
+
+Historical scheduler-lock and AP startup repair (2026-10-14): Mac `fc9338bbef4c`
 qualifies cold writes, but its next SMP TCP boot fails the unchanged SMP
 load skew bound. See [scheduler evidence and locking](AARCH64-SMP-SCHEDULER.md).
 The FIFO-only candidate's Pi/TCG sequence later fails self-host with initial

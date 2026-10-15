@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""Structural guard for bounded Firefox surface-key scheduling priority."""
+"""Production-code and structural guards for bounded surface-key priority.
+
+Host adapters provide a mutex, clock and serial sink; selection and hint
+lifecycle routines plus ProcessTable are real production code. These tests
+do not qualify guest input latency or establish a past failure's interleaving.
+"""
 
 from pathlib import Path
+import re
+import subprocess
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +36,13 @@ def function_body(source: str, signature: str) -> str:
     raise AssertionError(f"unterminated function: {signature}")
 
 
+def function_item(source: str, signature: str) -> str:
+    body = function_body(source, signature)
+    start = source.index(signature)
+    brace = source.index("{", start)
+    return source[start:brace + 1] + body + "}"
+
+
 route = function_body(INPUT, "fn route_surface_key")
 poll = function_body(INPUT, "pub fn poll()")
 prioritize = function_body(PROCESS, "pub(crate) fn prioritize_firefox_surface_thread")
@@ -36,6 +51,7 @@ handoff_ready = function_body(
     PROCESS, "pub(crate) fn complete_firefox_process_leader_handoff"
 )
 set_priority = function_body(PROCESS, "fn set_surface_priority")
+set_priority_locked = function_body(PROCESS, "fn set_surface_priority_in_state")
 active_priority = function_body(PROCESS, "fn active_surface_priority_tid")
 priority_affinity = function_body(PROCESS, "fn surface_priority_cpu_eligible")
 input_block = function_body(PROCESS, "pub(crate) fn block_current_for_input")
@@ -62,7 +78,7 @@ assert prioritize.index("FIREFOX_INPUT_WATCHER_TID.load") < prioritize.index(
 )
 assert "unwrap_or_else(||" in prioritize
 assert "set_surface_priority(tid)" in prioritize
-assert "saturating_add(SURFACE_PRIORITY_TICKS)" in set_priority
+assert "saturating_add(SURFACE_PRIORITY_TICKS)" in set_priority_locked
 assert "now > deadline" in active_priority
 assert "slot.role == ProcessRole::Firefox" in priority_affinity
 assert "slot.affinity_mask & (1u8 << cpu) != 0" in priority_affinity
@@ -71,7 +87,7 @@ assert "MAKOS_AARCH64_FIREFOX_INPUT_WATCHER_BLOCKED_OK" in input_block
 assert "SURFACE_MAIN_HANDOFF_WATCHER_TID.store(watcher" in handoff
 assert "SURFACE_MAIN_HANDOFF_PENDING_GROUP.store(group_pid" in handoff
 assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_ARM_OK" in handoff
-assert "SURFACE_PRIORITY_TID.store(0" in handoff
+assert "with_state" in handoff and "clear_surface_priority" in handoff
 assert "slot.pid == slot.group_pid" in handoff
 assert "set_surface_priority(leader)" in handoff
 assert "source=watcher-dequeue-fallback" in handoff
@@ -86,7 +102,7 @@ assert "source=watcher-post-enqueue wake=sgi" in handoff_ready
 assert "activate_futex_wakes(state" in futex_wake
 assert "slot.pid == slot.group_pid" in activate_wakes
 assert "SURFACE_MAIN_HANDOFF_PENDING_GROUP.load" in activate_wakes
-assert "set_surface_priority(task.thread)" in activate_wakes
+assert "set_surface_priority_in_state(state, task.thread)" in activate_wakes
 assert "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_OK" in activate_wakes
 assert "const SURFACE_PRIORITY_TICKS: u64 = 1_000;" in PROCESS
 assert "FIREFOX_INPUT_WATCHER_TID.store(tid" in PROCESS
@@ -127,7 +143,6 @@ assert "select_surface_priority(state, prior_pid, cpu)" in secondary
 assert "report_surface_priority_dispatch(pid, cpu, pid == group_pid)" in secondary
 assert "MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK" in PROCESS
 assert "MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK" in PROCESS
-assert "compare_exchange(tid, 0, Ordering::AcqRel" in PROCESS
 assert "yields can outpace timer ticks" in PROCESS
 assert INPUT.count("route_surface_key(") == 5  # helper plus 4 keyboard routes
 for token in (
@@ -160,6 +175,417 @@ for token in (
     "handoff=watcher-post-enqueue-syscall:149",
 ):
     assert token in PRODUCTION_RUNTIME, token
+
+
+def check_locked_publication(source: str) -> None:
+    """Guard the real lock boundary, not merely adapter behavior."""
+    setter = function_body(source, "fn set_surface_priority(")
+    assert re.fullmatch(
+        r"\s*with_state\(\|state\| set_surface_priority_in_state\(state, tid\)\)\s*",
+        setter,
+    ), "priority publication must use one scheduler-lock transaction"
+    assert "static SURFACE_PRIORITY_TID:" not in source
+    assert "static SURFACE_PRIORITY_DEADLINE:" not in source
+    assert "surface_priority_tid: u64" in source
+    assert "surface_priority_deadline: u64" in source
+    assert "surface_priority_tid: 0" in source
+    assert "surface_priority_deadline: 0" in source
+    active = function_item(source, "fn active_surface_priority_tid(")
+    assert "state: &mut SchedulerState" in active
+    locked_setter = function_item(source, "fn set_surface_priority_in_state(")
+    assert "state: &mut SchedulerState" in locked_setter
+    report = function_body(source, "fn report_surface_priority_dispatch(")
+    assert "with_state" not in report and "clear_surface_priority" not in report
+    assert "SURFACE_PRIORITY_TID" not in report and "SURFACE_PRIORITY_DEADLINE" not in report
+    assert "surface_priority_tid" not in report and "surface_priority_deadline" not in report
+    selected = function_body(source, "fn select_surface_priority(")
+    assert "if selected.is_some()" in selected
+    assert "clear_surface_priority(state)" in selected
+    assert "active_surface_priority_tid(state)" in selected
+    schedule_next = function_body(source, "fn schedule_next_for_cpu(")
+    assert "active_surface_priority_tid(self)" in schedule_next
+    assert "if selected.is_some_and(|info| info.pid == surface_priority_tid)" in schedule_next
+    consume = schedule_next.index("clear_surface_priority(self)")
+    assert schedule_next.index("self.table.schedule_next_where_on") < consume
+    assert consume < schedule_next.index(
+        "report_surface_priority_dispatch(surface_priority_tid, cpu, leader)"
+    ) < schedule_next.index("self.cpu_dispatches[cpu]")
+    assert consume < schedule_next.index("self.cpu_dispatches[cpu]")
+
+
+check_locked_publication(PROCESS)
+# This restored torn-publication shape is rejected structurally: compiling a
+# deliberately unlocked replacement with a host mutex would hide the defect.
+unlocked = PROCESS.replace(
+    "with_state(|state| set_surface_priority_in_state(state, tid))",
+    "set_surface_priority_in_state(unlocked_state, tid)",
+    1,
+)
+assert unlocked != PROCESS
+try:
+    check_locked_publication(unlocked)
+except AssertionError as error:
+    assert "priority publication must use one scheduler-lock transaction" in str(error)
+else:
+    raise AssertionError("unlocked publication negative control was accepted")
+
+production_functions = {
+    name: function_item(PROCESS, f"fn {name}(")
+    for name in (
+        "set_surface_priority", "set_surface_priority_in_state",
+        "clear_surface_priority", "active_surface_priority_tid",
+        "surface_priority_cpu_eligible", "select_surface_priority",
+        "report_surface_priority_dispatch",
+    )
+}
+priority_constant = re.search(
+    r"^const SURFACE_PRIORITY_TICKS:.*;$", PROCESS, re.MULTILINE
+).group(0)
+# Extract the ordinary selector's exact consume branch separately. Its full
+# method includes unrelated boot-probe and placement telemetry; those remain
+# guarded above. The adapter drives the real ProcessTable round-robin call.
+ordinary_body = function_body(PROCESS, "fn schedule_next_for_cpu(")
+ordinary_consume = function_item(
+    ordinary_body,
+    "if selected.is_some_and(|info| info.pid == surface_priority_tid)",
+)
+production_functions["ordinary_consume"] = (
+    "impl SchedulerState {\n"
+    "fn consume_ordinary_selection(&mut self, "
+    "selected: Option<makos_process_table::ProcessInfo>, surface_priority_tid: u64, "
+    "cpu: usize) {\n"
+    + ordinary_consume + "\n}\n}\n"
+)
+
+host_fixture = r'''
+use makos_process_table::{ProcessState, ProcessTable};
+use std::sync::{Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
+
+#[derive(Clone, Copy, PartialEq)]
+enum ProcessRole { Firefox, Native }
+struct ContextSlot { pid: u64, group_pid: u64, role: ProcessRole, affinity_mask: u8 }
+struct SchedulerState {
+    table: ProcessTable<8>,
+    contexts: Vec<ContextSlot>,
+    surface_priority_tid: u64,
+    surface_priority_deadline: u64,
+}
+static STATE: Mutex<Option<SchedulerState>> = Mutex::new(None);
+static CLOCK: AtomicU64 = AtomicU64::new(0);
+static SERIAL: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static SURFACE_PRIORITY_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_PRIORITY_AP_REPORTED: AtomicBool = AtomicBool::new(false);
+static SURFACE_MAIN_DISPATCH_REPORTED: AtomicBool = AtomicBool::new(false);
+fn with_state<R>(f: impl FnOnce(&mut SchedulerState) -> R) -> R {
+    f(STATE.lock().unwrap().as_mut().unwrap())
+}
+mod arch {
+    pub fn monotonic_ticks() -> u64 {
+        super::CLOCK.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+#[macro_export]
+macro_rules! serial_println {
+    ($($value:tt)*) => {{ crate::SERIAL.lock().unwrap().push(format!($($value)*)); }};
+}
+include!("priority_production.rs");
+
+fn setup() -> (u64, u64) {
+    CLOCK.store(10, Ordering::Release);
+    SURFACE_PRIORITY_REPORTED.store(false, Ordering::Release);
+    SURFACE_PRIORITY_AP_REPORTED.store(false, Ordering::Release);
+    SURFACE_MAIN_DISPATCH_REPORTED.store(false, Ordering::Release);
+    SERIAL.lock().unwrap().clear();
+    let mut table = ProcessTable::new();
+    let leader = table.spawn(0, 0x1000).unwrap();
+    let watcher = table.spawn(leader, 0x2000).unwrap();
+    *STATE.lock().unwrap() = Some(SchedulerState {
+        table,
+        contexts: vec![
+            ContextSlot { pid: leader, group_pid: leader,
+                          role: ProcessRole::Firefox, affinity_mask: 1 },
+            ContextSlot { pid: watcher, group_pid: leader,
+                          role: ProcessRole::Firefox, affinity_mask: 0xe },
+        ],
+        surface_priority_tid: 0, surface_priority_deadline: 0,
+    });
+    (leader, watcher)
+}
+fn hint() -> (u64, u64) {
+    with_state(|s| (s.surface_priority_tid, s.surface_priority_deadline))
+}
+fn select(prior: u64, cpu: usize) -> Option<u64> {
+    with_state(|s| select_surface_priority(s, prior, cpu).map(|info| info.pid))
+}
+
+#[test]
+fn ready_selection_consumes_once_before_telemetry() {
+    let (_, watcher) = setup();
+    assert!(set_surface_priority(watcher));
+    assert_eq!(hint(), (watcher, 1010));
+    assert_eq!(select(0, 2), Some(watcher));
+    assert_eq!(hint(), (0, 0), "selected priority must be consumed under lock");
+    assert_eq!(select(watcher, 2), None);
+    with_state(|s| assert_eq!(s.table.running_cpu(watcher), Some(2)));
+}
+
+#[test]
+fn ordinary_selection_consumes_only_matching_hint() {
+    let (leader, watcher) = setup();
+    assert!(set_surface_priority(watcher));
+    with_state(|s| {
+        let hint = active_surface_priority_tid(s);
+        let selected = s.table.schedule_next_where_on(0, |info| info.pid == leader);
+        assert_eq!(selected.unwrap().pid, leader);
+        s.consume_ordinary_selection(selected, hint, 0);
+        assert_eq!(s.surface_priority_tid, watcher,
+            "unrelated ordinary selection must retain the hint");
+        assert!(SERIAL.lock().unwrap().is_empty(),
+            "unrelated ordinary selection must not claim priority evidence");
+        let selected = s.table.schedule_next_where_on(1, |info| info.pid == watcher);
+        assert_eq!(selected.unwrap().pid, watcher);
+        s.consume_ordinary_selection(selected, hint, 1);
+        assert_eq!((s.surface_priority_tid, s.surface_priority_deadline), (0, 0),
+            "ordinary selection must consume its matching one-shot hint");
+    });
+    let serial = SERIAL.lock().unwrap();
+    assert!(serial.iter().any(|line| line.starts_with(&format!(
+        "MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK tid={watcher} cpu=1 "))),
+        "ordinary watcher selection must emit its AP dispatch evidence");
+    assert!(!serial.iter().any(|line| line.starts_with(
+        "MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK")));
+}
+
+#[test]
+fn ordinary_leader_selection_reports_main_once() {
+    let (leader, _) = setup();
+    for _ in 0..2 {
+        assert!(set_surface_priority(leader));
+        with_state(|s| {
+            let hint = active_surface_priority_tid(s);
+            let selected = s.table.schedule_next_where_on(0, |info| info.pid == leader);
+            assert_eq!(selected.unwrap().pid, leader);
+            s.consume_ordinary_selection(selected, hint, 0);
+            assert_eq!((s.surface_priority_tid, s.surface_priority_deadline), (0, 0));
+        });
+    }
+    let serial = SERIAL.lock().unwrap();
+    let expected = format!(
+        "MAKOS_AARCH64_SURFACE_MAIN_DISPATCH_OK tid={leader} cpu=0 \
+source=bounded-handoff affinity=leader-cpu0");
+    assert_eq!(serial.iter().filter(|line| *line == &expected).count(), 1,
+        "ordinary leader selection must emit exactly one main dispatch record");
+    assert!(!serial.iter().any(|line| line.starts_with(
+        "MAKOS_AARCH64_SURFACE_PRIORITY_AP_OK")));
+}
+
+#[test]
+fn old_report_does_not_clobber_same_tid_refresh() {
+    let (leader, _) = setup();
+    assert!(set_surface_priority(leader));
+    assert_eq!(select(0, 0), Some(leader));
+    // The AP publishes syscall-149 priority after CPU0's old selection but
+    // before CPU0 emits its delayed telemetry. Both publications name TID1.
+    CLOCK.store(20, Ordering::Release);
+    assert!(set_surface_priority(leader));
+    report_surface_priority_dispatch(leader, 0, true);
+    assert_eq!(hint(), (leader, 1020),
+        "late dispatch report must not erase refreshed same-TID priority");
+    assert_eq!(select(leader, 0), Some(leader));
+    assert_eq!(hint(), (0, 0));
+}
+
+#[test]
+fn expiry_clears_pair_and_refresh_survives_old_report() {
+    let (leader, watcher) = setup();
+    assert!(set_surface_priority(leader));
+    CLOCK.store(1010, Ordering::Release);
+    assert_eq!(with_state(active_surface_priority_tid), leader);
+    CLOCK.store(1011, Ordering::Release);
+    assert_eq!(with_state(active_surface_priority_tid), 0);
+    assert_eq!(hint(), (0, 0), "expiry must clear the coherent tuple");
+    assert!(set_surface_priority(watcher));
+    report_surface_priority_dispatch(leader, 0, true);
+    assert_eq!(hint(), (watcher, 2011));
+    assert_eq!(select(0, 3), Some(watcher));
+}
+
+#[test]
+fn blocked_priority_remains_until_real_wake() {
+    let (_, watcher) = setup();
+    with_state(|s| {
+        s.table.activate_on(1, watcher).unwrap();
+        assert_eq!(s.table.block_current_on(1), Some(watcher));
+    });
+    assert!(set_surface_priority(watcher));
+    assert_eq!(select(0, 2), None);
+    assert_eq!(hint(), (watcher, 1010));
+    with_state(|s| {
+        assert_eq!(s.table.get(watcher).unwrap().state, ProcessState::Blocked);
+        assert!(s.table.wake(watcher));
+    });
+    assert_eq!(select(0, 2), Some(watcher));
+}
+
+#[test]
+fn foreign_running_owner_retains_hint_until_owner_selects() {
+    let (_, watcher) = setup();
+    with_state(|s| s.table.activate_on(1, watcher).unwrap());
+    assert!(set_surface_priority(watcher));
+    assert_eq!(select(0, 2), None);
+    assert_eq!(hint(), (watcher, 1010));
+    assert_eq!(select(watcher, 1), Some(watcher));
+    assert_eq!(hint(), (0, 0));
+    with_state(|s| assert_eq!(s.table.running_cpu(watcher), Some(1)));
+}
+
+#[test]
+fn leader_and_worker_affinity_are_authoritative() {
+    let (leader, watcher) = setup();
+    assert!(set_surface_priority(leader));
+    for cpu in 1..4 {
+        assert_eq!(select(0, cpu), None, "leader must remain CPU0-only");
+        assert_eq!(hint(), (leader, 1010));
+    }
+    assert_eq!(select(0, 0), Some(leader));
+    assert!(set_surface_priority(watcher));
+    assert_eq!(select(leader, 0), None, "worker must remain AP-only");
+    with_state(|s| s.contexts[1].affinity_mask = 0x4);
+    assert_eq!(select(0, 1), None);
+    assert_eq!(select(0, 3), None);
+    assert_eq!(select(0, 4), None);
+    assert_eq!(select(0, 2), Some(watcher));
+}
+
+#[test]
+fn invalid_targets_clear_without_dispatch() {
+    let (_, watcher) = setup();
+    assert!(!set_surface_priority(0));
+    assert_eq!(hint(), (0, 0));
+    assert!(set_surface_priority(99));
+    assert_eq!(select(0, 1), None);
+    assert_eq!(hint(), (0, 0));
+    with_state(|s| s.contexts[1].role = ProcessRole::Native);
+    assert!(set_surface_priority(watcher));
+    assert_eq!(select(0, 1), None);
+    assert_eq!(hint(), (0, 0));
+    with_state(|s| { s.contexts.pop(); });
+    assert!(set_surface_priority(watcher));
+    assert_eq!(select(0, 1), None);
+    assert_eq!(hint(), (0, 0));
+}
+
+#[test]
+fn zombie_target_cannot_dispatch() {
+    let (_, watcher) = setup();
+    with_state(|s| {
+        s.table.activate_on(1, watcher).unwrap();
+        s.table.exit_current_on(1, 42).unwrap();
+    });
+    assert!(set_surface_priority(watcher));
+    assert_eq!(select(0, 1), None);
+    assert_eq!(hint(), (0, 0));
+}
+
+#[test]
+fn zero_tid_does_not_erase_existing_hint_and_deadline_saturates() {
+    let (leader, _) = setup();
+    CLOCK.store(u64::MAX - 10, Ordering::Release);
+    assert!(set_surface_priority(leader));
+    assert_eq!(hint(), (leader, u64::MAX));
+    assert!(!set_surface_priority(0));
+    assert_eq!(hint(), (leader, u64::MAX));
+}
+'''
+
+with tempfile.TemporaryDirectory(prefix="makos-surface-priority-") as temporary:
+    directory = Path(temporary)
+    library = directory / "libmakos_process_table.rlib"
+    subprocess.run(
+        ["rustc", "--edition=2024", "--crate-name", "makos_process_table",
+         "--crate-type", "rlib", str(ROOT / "crates/process-table/src/lib.rs"),
+         "-o", str(library)], check=True,
+    )
+    (directory / "test.rs").write_text(host_fixture)
+
+    def compile_fixture(name: str, **changes: str) -> Path:
+        functions = production_functions | changes
+        (directory / "priority_production.rs").write_text(
+            priority_constant + "\n" + "\n".join(functions.values())
+        )
+        binary = directory / name
+        subprocess.run(
+            ["rustc", "--edition=2024", "--test", "-D", "warnings",
+             str(directory / "test.rs"), "--extern", f"makos_process_table={library}",
+             "-o", str(binary)], check=True,
+        )
+        return binary
+
+    subprocess.run(
+        [str(compile_fixture("surface-priority-tests")), "--test-threads=1"],
+        check=True, timeout=30,
+    )
+
+    def reject(name: str, test: str, diagnostic: str, **changes: str) -> None:
+        result = subprocess.run(
+            [str(compile_fixture(name, **changes)), "--exact", test],
+            capture_output=True, text=True, timeout=15,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode == 0 or diagnostic not in output:
+            raise AssertionError(f"{name} did not reject restored defect:\n{output}")
+
+    old_report = production_functions["report_surface_priority_dispatch"]
+    old_report = old_report[:-1] + r'''
+    with_state(|state| {
+        if state.surface_priority_tid == tid { clear_surface_priority(state); }
+    });
+}'''
+    reject("old-report-clobber", "old_report_does_not_clobber_same_tid_refresh",
+           "late dispatch report must not erase refreshed same-TID priority",
+           report_surface_priority_dispatch=old_report)
+    retained = production_functions["select_surface_priority"].replace(
+        "if selected.is_some()", "if false && selected.is_some()", 1
+    )
+    assert retained != production_functions["select_surface_priority"]
+    reject("unconsumed-priority", "ready_selection_consumes_once_before_telemetry",
+           "selected priority must be consumed under lock",
+           select_surface_priority=retained)
+    unrestricted = production_functions["surface_priority_cpu_eligible"].replace(
+        "slot.affinity_mask & (1u8 << cpu) != 0", "slot.affinity_mask != 0", 1
+    )
+    assert unrestricted != production_functions["surface_priority_cpu_eligible"]
+    reject("ignored-affinity", "leader_and_worker_affinity_are_authoritative",
+           "leader must remain CPU0-only", surface_priority_cpu_eligible=unrestricted)
+    partial_clear = production_functions["clear_surface_priority"].replace(
+        "state.surface_priority_deadline = 0;", "", 1
+    )
+    assert partial_clear != production_functions["clear_surface_priority"]
+    reject("partial-expiry-clear", "expiry_clears_pair_and_refresh_survives_old_report",
+           "expiry must clear the coherent tuple", clear_surface_priority=partial_clear)
+    ordinary_unconsumed = production_functions["ordinary_consume"].replace(
+        "clear_surface_priority(self);", "let _ = self;", 1
+    )
+    assert ordinary_unconsumed != production_functions["ordinary_consume"]
+    reject("ordinary-unconsumed", "ordinary_selection_consumes_only_matching_hint",
+           "ordinary selection must consume its matching one-shot hint",
+           ordinary_consume=ordinary_unconsumed)
+    ordinary_unreported = production_functions["ordinary_consume"].replace(
+        "report_surface_priority_dispatch(surface_priority_tid, cpu, leader);",
+        "let _ = (surface_priority_tid, cpu, leader);", 1,
+    )
+    assert ordinary_unreported != production_functions["ordinary_consume"]
+    reject("missing-ordinary-report", "ordinary_leader_selection_reports_main_once",
+           "ordinary leader selection must emit exactly one main dispatch record",
+           ordinary_consume=ordinary_unreported)
+
+print(
+    "MAKOS_AARCH64_SURFACE_PRIORITY_HOST_OK priority=production-code "
+    "process_table=production-code lock,clock,serial=host-adapters cases=11 "
+    "negative_controls=unlocked-publication,old-report-clobber,unconsumed-priority,"
+    "ignored-affinity,partial-expiry-clear,ordinary-unconsumed,missing-ordinary-report "
+    "scope=hint-coherence-not-guest-latency"
+)
 
 print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_TEST_OK "

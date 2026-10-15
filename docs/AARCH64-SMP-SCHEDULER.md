@@ -1,5 +1,18 @@
 # AArch64 multicore userspace scheduler design
 
+## 2026-10-15: coherent one-shot Firefox surface hints
+
+The [Mac failure and repair report](FIREFOX-SURFACE-PRIORITY-20261015.md)
+records all twelve passing Mac/HVF gates followed by a real Firefox Ctrl-A
+latency failure. Surface hint TID/deadline now belong to `SchedulerState`:
+publication, expiry, reset and successful selection are serialized by its
+existing lock. Both explicit priority selection and ordinary blocking/exit
+dispatch consume matching hints before unlock. Post-unlock telemetry cannot
+erase a newer same-TID refresh. Futex wake uses the already-locked setter,
+not recursive locking. The stale bound remains 1000 ticks; hints remain
+one-shot, with blocked/foreign-owner retention and existing affinity rules.
+This does not establish the measured browser delay's cause or a Firefox pass.
+
 ## 2026-10-14: FIFO scheduler lock and AP startup publication
 
 The authoritative 2026-10-13 Apple M3/macOS 26.6.2, QEMU 11.0.3/HVF

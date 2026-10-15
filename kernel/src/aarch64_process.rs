@@ -273,6 +273,10 @@ struct SchedulerState {
     futex: FutexTable<MAX_FUTEX_WAITERS>,
     contexts: [ContextSlot; MAX_PROCESSES],
     btype_probe: BtypeProbeState,
+    // One-shot input hint: publication, expiry and dispatch consumption share
+    // the scheduler lock. Telemetry must never clear a newer publication.
+    surface_priority_tid: u64,
+    surface_priority_deadline: u64,
     session_active: bool,
     self_test_session: bool,
     timer_switches: u64,
@@ -301,6 +305,8 @@ impl SchedulerState {
             futex: FutexTable::new(),
             contexts: [ContextSlot::EMPTY; MAX_PROCESSES],
             btype_probe: BtypeProbeState::EMPTY,
+            surface_priority_tid: 0,
+            surface_priority_deadline: 0,
             session_active: false,
             self_test_session: false,
             timer_switches: 0,
@@ -324,8 +330,8 @@ impl SchedulerState {
     }
 
     fn schedule_next_for_cpu(&mut self, cpu: usize) -> Option<makos_process_table::ProcessInfo> {
+        let surface_priority_tid = active_surface_priority_tid(self);
         let contexts = &self.contexts;
-        let surface_priority_tid = active_surface_priority_tid();
         let selected = self.table.schedule_next_where_on(cpu, |info| {
             let slot = contexts.iter().find(|slot| slot.pid == info.pid);
             // Ready table storage is not publication of an unfinished AP
@@ -358,6 +364,18 @@ impl SchedulerState {
                 })
             }
         });
+        // Blocking/exit paths can dispatch through this ordinary selector
+        // without select_surface_priority. They consume the same one-shot hint.
+        if selected.is_some_and(|info| info.pid == surface_priority_tid) {
+            clear_surface_priority(self);
+            let leader = self.contexts.iter().any(|slot| {
+                slot.pid == surface_priority_tid && slot.pid == slot.group_pid
+            });
+            // These paths have no common post-unlock dispatch hook. Emit the
+            // same bounded, once-only evidence here; reporting cannot touch
+            // hint state or recursively acquire the scheduler lock.
+            report_surface_priority_dispatch(surface_priority_tid, cpu, leader);
+        }
         if selected.is_some() && cpu < self.cpu_dispatches.len() {
             self.cpu_dispatches[cpu] = self.cpu_dispatches[cpu].saturating_add(1);
         }
@@ -722,8 +740,6 @@ static IDLE_IO_REPORTED: AtomicBool = AtomicBool::new(false);
 static INPUT_BLOCK_REPORTED: AtomicBool = AtomicBool::new(false);
 static IDLE_SLEEP_REPORTED: AtomicBool = AtomicBool::new(false);
 static FIREFOX_INPUT_WATCHER_TID: AtomicU64 = AtomicU64::new(0);
-static SURFACE_PRIORITY_TID: AtomicU64 = AtomicU64::new(0);
-static SURFACE_PRIORITY_DEADLINE: AtomicU64 = AtomicU64::new(0);
 static SURFACE_MAIN_HANDOFF_PENDING_GROUP: AtomicU64 = AtomicU64::new(0);
 static SURFACE_MAIN_HANDOFF_WATCHER_TID: AtomicU64 = AtomicU64::new(0);
 static SURFACE_MAIN_HANDOFF_REPORTED: AtomicBool = AtomicBool::new(false);
@@ -3722,9 +3738,8 @@ pub(crate) fn prioritize_firefox_surface_thread() -> bool {
 /// pre-enqueue boost remains a compatibility fallback; syscall 149 completes
 /// the contract only after Gecko has a main-thread runnable to execute.
 pub(crate) fn arm_firefox_process_leader_handoff() {
-    SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-    SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
     let (watcher, group_pid, leader) = with_state(|state| {
+        clear_surface_priority(state);
         let watcher = state.table.current_pid_on(scheduler_cpu()).unwrap_or(0);
         let group_pid = state
             .contexts
@@ -3844,15 +3859,22 @@ pub(crate) fn complete_firefox_process_leader_handoff() -> bool {
 }
 
 fn set_surface_priority(tid: u64) -> bool {
+    with_state(|state| set_surface_priority_in_state(state, tid))
+}
+
+fn set_surface_priority_in_state(state: &mut SchedulerState, tid: u64) -> bool {
     if tid == 0 {
         return false;
     }
-    SURFACE_PRIORITY_TID.store(tid, Ordering::Release);
-    SURFACE_PRIORITY_DEADLINE.store(
-        crate::arch::monotonic_ticks().saturating_add(SURFACE_PRIORITY_TICKS),
-        Ordering::Release,
-    );
+    state.surface_priority_tid = tid;
+    state.surface_priority_deadline =
+        crate::arch::monotonic_ticks().saturating_add(SURFACE_PRIORITY_TICKS);
     true
+}
+
+fn clear_surface_priority(state: &mut SchedulerState) {
+    state.surface_priority_tid = 0;
+    state.surface_priority_deadline = 0;
 }
 
 pub fn sleep_until(deadline: u64, frame: &mut crate::arch::ExceptionFrame) {
@@ -4416,7 +4438,7 @@ fn activate_futex_wakes(
         if firefox_leader_group.is_some_and(|group_pid| {
             SURFACE_MAIN_HANDOFF_PENDING_GROUP.load(Ordering::Acquire) == group_pid
         }) {
-            set_surface_priority(task.thread);
+            set_surface_priority_in_state(state, task.thread);
             if !SURFACE_MAIN_HANDOFF_REPORTED.swap(true, Ordering::AcqRel) {
                 crate::serial_println!(
                     "MAKOS_AARCH64_SURFACE_MAIN_HANDOFF_OK tid={} source=futex-wake bounded_ticks={}",
@@ -4669,8 +4691,7 @@ fn record_smp_load_dispatch(state: &SchedulerState, pid: u64, cpu: usize) {
 fn reset_production_worker_evidence() {
     crate::arch::reset_input_irq_evidence();
     FIREFOX_INPUT_WATCHER_TID.store(0, Ordering::Release);
-    SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-    SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+    with_state(clear_surface_priority);
     SURFACE_MAIN_HANDOFF_PENDING_GROUP.store(0, Ordering::Release);
     SURFACE_MAIN_HANDOFF_WATCHER_TID.store(0, Ordering::Release);
     SURFACE_MAIN_HANDOFF_REPORTED.store(false, Ordering::Release);
@@ -7503,16 +7524,15 @@ fn clear_child_tid_on_exit() {
     }
 }
 
-fn active_surface_priority_tid() -> u64 {
-    let tid = SURFACE_PRIORITY_TID.load(Ordering::Acquire);
+fn active_surface_priority_tid(state: &mut SchedulerState) -> u64 {
+    let tid = state.surface_priority_tid;
     if tid == 0 {
         return 0;
     }
     let now = crate::arch::monotonic_ticks();
-    let deadline = SURFACE_PRIORITY_DEADLINE.load(Ordering::Acquire);
+    let deadline = state.surface_priority_deadline;
     if deadline == 0 || now > deadline {
-        SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        clear_surface_priority(state);
         return 0;
     }
     tid
@@ -7529,26 +7549,23 @@ fn select_surface_priority(
     prior_pid: u64,
     cpu: usize,
 ) -> Option<makos_process_table::ProcessInfo> {
-    let tid = active_surface_priority_tid();
+    let tid = active_surface_priority_tid(state);
     if tid == 0 {
         return None;
     }
     let Some(info) = state.table.get(tid) else {
-        SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        clear_surface_priority(state);
         return None;
     };
     let Some(slot) = state.contexts.iter().find(|slot| slot.pid == tid) else {
-        SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        clear_surface_priority(state);
         return None;
     };
     if slot.role != ProcessRole::Firefox {
-        SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+        clear_surface_priority(state);
         return None;
     }
-    match info.state {
+    let selected = match info.state {
         makos_process_table::ProcessState::Running if tid == prior_pid => Some(info),
         // Another CPU already owns the selected context. Preserve the hint so
         // that owner can retain it at its next exception instead of letting a
@@ -7567,11 +7584,18 @@ fn select_surface_priority(
         }
         makos_process_table::ProcessState::Blocked => None,
         _ => {
-            SURFACE_PRIORITY_TID.store(0, Ordering::Release);
-            SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
+            clear_surface_priority(state);
             None
         }
+    };
+    // The deadline bounds a stale hint; it is not a time slice. One selected
+    // dispatch consumes it while still locked, before any telemetry. A later
+    // same-TID post-enqueue refresh must survive an earlier dispatch's report.
+    // Retaining the hint would starve same-affinity children: yields can outpace timer ticks.
+    if selected.is_some() {
+        clear_surface_priority(state);
     }
+    selected
 }
 
 fn report_surface_priority_dispatch(tid: u64, cpu: usize, leader: bool) {
@@ -7600,17 +7624,9 @@ fn report_surface_priority_dispatch(tid: u64, cpu: usize, leader: bool) {
             tid,
         );
     }
-    // The deadline bounds a stale hint; it is not a time slice. One selected
-    // dispatch is sufficient for the watcher to dequeue or the leader to run
-    // its posted callback. Keeping the hint after that dispatch can starve a
-    // same-affinity Firefox child that the selected thread immediately yields
-    // to, because yields can outpace timer ticks by orders of magnitude.
-    if SURFACE_PRIORITY_TID
-        .compare_exchange(tid, 0, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-    {
-        SURFACE_PRIORITY_DEADLINE.store(0, Ordering::Release);
-    }
+    // Reporting cannot mutate hints or acquire the scheduler lock. Explicit
+    // priority callers report after unlocking; ordinary selection reports
+    // while locked because its blocking/exit paths have no shared return hook.
 }
 
 fn schedule_from_exception(frame: &mut crate::arch::ExceptionFrame, timer: bool) {

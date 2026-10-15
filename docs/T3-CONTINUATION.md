@@ -8,9 +8,11 @@ Original specification source:
 
 `/Users/marcushuang/.codex/attachments/4ef18f50-cd19-419b-93ed-d509edff0836/pasted-text.txt`
 
-Current development host: Raspberry Pi running Debian Linux. The primary
-interactive/performance qualification target remains macOS Apple Silicon using
-AArch64 QEMU/HVF. Pi QEMU/KVM or TCG results are functional Pi evidence only
+Current development host: Apple M3 macOS at
+`/Users/marcushuang/Desktop/Desktop/MakOS` (moved 2026-10-15). Keep Apple
+`/usr/bin/cc`, fortification and `-Werror`, with documented Mac prerequisites.
+The interactive/performance target is AArch64 QEMU/HVF. Historical Raspberry
+Pi/Debian QEMU/KVM or TCG results are functional Pi evidence only
 and never substitute for required macOS/HVF timing evidence. Workspace is a Git
 repository on `main`, tracking `https://github.com/Ninnja10563/MakOS.git`.
 Preserve existing files and changes.
@@ -26,6 +28,35 @@ Preserve existing files and changes.
 7. Boot QEMU for user testing at meaningful milestones.
 
 ## Current verified state
+
+### 2026-10-15 Mac qualification and surface-priority race repair
+
+Exact `7baa2c2ce03d4c4757c39e2c0c8e9b3a1f9e7ee8` passes unit/check,
+image, all twelve sequential Mac/HVF kernel/runtime gates and unchanged
+Firefox provenance preflight. Strict real Firefox fails at Ctrl-A latency
+`26503 ms >= 10000 ms`, after JIT evidence and verified first paint at
+`89167 ms`. No unchanged retry, later browser assertion or visible login.
+All original self-host/header/parallel, migration and cursor proofs pass.
+The complete attempt, final raw serial, screenshots, PID/session/QMP and
+private boot/data/vars remain under
+`build/logs/macos-development-7baa2c2ce03d-V0Oqi3uE/`; see its
+`FINAL-REPORT.txt`, `RESULTS.json` and `EXACT-RESULT-MARKERS.txt`.
+No QEMU remains. Prelaunch pressure was normal; CPU idle samples were
+93.50% and 97.78%. This is an actual Mac browser failure, not the earlier
+no-launch readiness refusal.
+
+User now authorizes primary implementation work after preserving each first
+failure, followed by regression tests, documentation, commit/push and a fresh
+full exact-commit qualification. The bounded
+[surface-priority repair](FIREFOX-SURFACE-PRIORITY-20261015.md) removes torn
+hint publication and late same-TID consumption races. Their occurrence in
+this failing run is not proven. The syscall149/leader-dispatch records are
+present; do not mislabel this as missing handoff. Keep every gate unchanged.
+Reuse the preserved `5baa9467ca510b8a` image after hash/provenance checks;
+no browser rebuild/reintegration/restamp/profile edit. No audit row upgrade.
+Keep T3 Code open. Do not delete assets or disable security/cloud/update
+services; host launch still requires normal pressure and two >=90%-idle
+intervals, with bounded readiness waits and no concurrent QEMU/build.
 
 ### 2026-10-14 scheduler lock and AP startup repair
 

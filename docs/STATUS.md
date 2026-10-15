@@ -1,8 +1,29 @@
 # Implementation status
 
-Last updated: 2026-10-14.
+Last updated: 2026-10-15.
 
 ## Current qualification update
+
+Local Apple M3/macOS 26.6.2, QEMU 11.0.3/HVF qualification of
+`7baa2c2ce03d4c4757c39e2c0c8e9b3a1f9e7ee8` passes unit/check, image,
+all twelve requested runtime gates and unchanged 61-patch/five-artifact
+Firefox preflight. Real Firefox now supplies JIT and verified first paint
+(`89167 ms`), but the next Ctrl-A assertion fails at `26503 ms`, limit
+`10000 ms`. No later browser assertions or visible login ran. No QEMU
+remains. Complete logs, final raw serial, screenshots and all private disks
+are retained in `build/logs/macos-development-7baa2c2ce03d-V0Oqi3uE/`.
+Launch memory pressure was normal with two CPU samples above 90% idle.
+
+The [surface-priority repair](FIREFOX-SURFACE-PRIORITY-20261015.md)
+serializes hint publication, expiry and one-shot consumption under the
+scheduler lock. It fixes source-proven races, not a proven explanation for
+the measured Ctrl-A delay. Fresh exact-commit Mac/HVF qualification is
+required; all browser deadlines, workload, affinity and provenance remain
+unchanged. The preserved `5baa9467ca510b8a` image is not rebuilt or restamped.
+Primary development is now on this Mac; historical Pi evidence remains
+separate. Audit Partial/Missing rows are not upgraded.
+
+### Historical October 14 scheduler qualification
 
 The attached October 13 Mac/HVF run of
 `fc9338bbef4cb45c1c6a5548ca0511917d3ef10e` passes full unit/check, image,

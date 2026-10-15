@@ -2,7 +2,8 @@
 
 ## Development and runtime environments
 
-- The repository workspace is currently hosted on a Raspberry Pi running Debian Linux. Treat this machine as a development/editing host, not as the target used to qualify MakOS interactive or performance behavior.
+- Primary development moved on 2026-10-15 to the Apple M3 macOS workspace `/Users/marcushuang/Desktop/Desktop/MakOS`. Keep Apple `/usr/bin/cc`, fortification and `-Werror`; use the documented Mac prerequisites, not Linux tool paths or swap/zram configuration.
+- Historical Raspberry Pi/Debian development and QEMU/TCG evidence remains labeled Pi evidence. Preserve it; it does not qualify Mac interactive/performance behavior.
 - MakOS will be run and tested on a macOS device using QEMU. The primary documented interactive target is AArch64 QEMU with Apple HVF on Apple Silicon.
 - Functional AArch64 boot/runtime tests may also run on the Raspberry Pi under QEMU (KVM when permission is available, otherwise TCG). Record them as Raspberry Pi evidence and do not substitute them for the required macOS/HVF qualification.
 - Do not reinterpret Raspberry Pi host timings as macOS/QEMU performance evidence. In particular, run strict Firefox latency gates unchanged on the intended idle macOS host with the required generated images and QEMU installation.

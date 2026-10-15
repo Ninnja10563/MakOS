@@ -6,10 +6,23 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-14. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-15. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: attached Mac/HVF evidence for
+Current qualification: locally measured Apple M3/macOS/HVF at
+`7baa2c2ce03d4c4757c39e2c0c8e9b3a1f9e7ee8` passes unit/check, image,
+all twelve sequential runtime gates and unchanged Firefox provenance.
+Real Firefox produces JIT and verified paint (`89167 ms`), then fails Ctrl-A
+at `26503 ms` against the unchanged `10000 ms` limit. Later browser proofs
+and visible login are not run. Raw serial, screenshots, host conditions,
+private disks and hashes remain in
+`build/logs/macos-development-7baa2c2ce03d-V0Oqi3uE/`. No QEMU remains.
+The [surface-priority repair](FIREFOX-SURFACE-PRIORITY-20261015.md) fixes
+source-proven hint races without claiming their occurrence caused that
+measurement. It requires fresh Mac/HVF qualification. All Partial/Missing
+rows remain unchanged; browser paint alone is not interactive qualification.
+
+Earlier qualification: attached Mac/HVF evidence for
 `fc9338bbef4cb45c1c6a5548ca0511917d3ef10e` passes unit/check, image,
 EL0, VM, cold user-write, BTYPE and network-owner. Early-boot SMP load
 dispatches `49,59,186` fail the unchanged max/min bound during the next TCP
