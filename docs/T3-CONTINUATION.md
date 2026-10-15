@@ -29,6 +29,28 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-16 follow-up: input latency passes, navigation fails
+
+Exact `10eb3684e3ca35205e0978e8882918179128a96f` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged image/provenance
+preflight. Strict Firefox paints at28145ms, passes Ctrl-A5176ms/10000ms and
+first-character110ms/500ms, then fails initial example.com navigation after
+its unchanged90s deadline. No matching page-stop/target-TLS evidence;
+pixel comparison is gated on those markers and was not reached.
+Preserve `build/logs/macos-makfs4-prefix-20261015-clEgkG/`, full report,
+final raw serial, screenshots and all retained private boot/data/vars.
+QEMU87333/harness87328 exited; no retry or visible login.
+
+Raw input spells the entire HTTPS URL and Enter. Search initialization
+telemetry error is caught, so it does not establish navigation abortion.
+Repeated760be972.sqlite IOERR loses SQLite extended result/errno. Regular
+MakFS4 MAP_SHARED is unsupported; the profile datastore explicitly uses
+nonexclusive WAL, but the exact failed operation remains unobserved.
+The [next diagnostic](FIREFOX-FILE-FAILURE-EVIDENCE-20261016.md) adds bounded
+negative file-syscall results/arguments, not a guessed filesystem fix.
+Keep original browser bytes/provenance, thresholds and complete sequence.
+No Partial/Missing row upgrade. Only strict Firefox success permits login.
+
 ### 2026-10-15 follow-up: MakFS4 write amplification
 
 Exact `0f415ab5b30e282d092a88f7c08a0cea71de030b` passes unit/check,

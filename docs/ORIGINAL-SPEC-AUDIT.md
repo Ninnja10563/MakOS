@@ -6,10 +6,20 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-15. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-16. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: exact Mac/HVF
+`10eb3684e3ca35205e0978e8882918179128a96f` passes unit/check, image,
+all twelve runtime gates and unchanged Firefox preflight. Ctrl-A5176ms and
+first-character110ms meet unchanged limits; first HTTPS navigation then
+fails without target-page/TLS proof. No pixel check, later assertions or
+visible login. Evidence: `build/logs/macos-makfs4-prefix-20261015-clEgkG/`;
+QEMU exited. [Bounded file-failure evidence](FIREFOX-FILE-FAILURE-EVIDENCE-20261016.md)
+addresses missing diagnostic specificity, not a browser success claim.
+All Partial/Missing rows remain unchanged.
+
+Earlier qualification: exact Mac/HVF
 `0f415ab5b30e282d092a88f7c08a0cea71de030b` passes unit/check, image,
 all twelve runtime gates and unchanged Firefox preflight. Strict Firefox
 fails Ctrl-A15446ms/10000ms after verified paint33187ms; later browser

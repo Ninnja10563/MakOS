@@ -1,8 +1,20 @@
 # Implementation status
 
-Last updated: 2026-10-15.
+Last updated: 2026-10-16.
 
 ## Current qualification update
+
+Exact `10eb3684e3ca35205e0978e8882918179128a96f` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.
+Firefox paint28145ms, Ctrl-A5176ms and first-character110ms pass their
+unchanged limits. First HTTPS navigation then fails: no target page-stop or
+TLS proof; pixel validation is not reached. No retry, later browser assertion
+or visible login. Evidence/private disks remain in
+`build/logs/macos-makfs4-prefix-20261015-clEgkG/`; QEMU exited.
+Repeated SQLite IOERR lacks its extended cause. The next
+[bounded file-failure diagnostic](FIREFOX-FILE-FAILURE-EVIDENCE-20261016.md)
+records negative syscall results without changing semantics, image bytes or
+qualification limits. This is not browser qualification or an audit upgrade.
 
 Exact `0f415ab5b30e282d092a88f7c08a0cea71de030b` passes unit/check,
 image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.

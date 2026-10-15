@@ -14,6 +14,8 @@ mod aarch64_desktop;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_epoll;
 #[cfg(target_arch = "aarch64")]
+mod aarch64_file_failure_trace;
+#[cfg(target_arch = "aarch64")]
 mod aarch64_installer;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_interaction_trace;

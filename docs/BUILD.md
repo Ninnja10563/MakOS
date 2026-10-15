@@ -13,6 +13,16 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+File-failure diagnostics (2026-10-16): exact Mac/HVF `10eb3684e3ca`
+passes all twelve runtime gates and original Firefox preflight. Firefox
+Ctrl-A5176ms and first-character110ms pass unchanged limits, then initial
+HTTPS navigation fails before target-page/TLS/pixel proof. See
+[preserved failure and observation contract](FIREFOX-FILE-FAILURE-EVIDENCE-20261016.md).
+`python3 scripts/test_aarch64_file_failure_trace.py` exercises the bounded
+production diagnostic in unit/check. No error translation, syscall behavior,
+browser image, provenance, workload or deadline changes. Fresh complete
+exact-commit qualification remains mandatory; no unchanged failure retry.
+
 MakFS4 prefix-COW repair (2026-10-15): exact Mac/HVF `0f415ab5b30e`
 passes all twelve runtime gates and unchanged Firefox preflight, then fails
 Ctrl-A15446ms/10000ms after paint33187ms. See

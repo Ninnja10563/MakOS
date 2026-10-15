@@ -3816,6 +3816,18 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         _ => {}
     }
 
+    // Preserve raw arguments before x0 becomes the return value. Diagnostics
+    // run only after normal-dispatch handler guards are dropped, and before
+    // signal delivery can rewrite the return frame. Earlier blocking/switching
+    // branches deliberately remain outside this observation boundary.
+    let file_trace_args = [
+        frame.registers[0],
+        frame.registers[1],
+        frame.registers[2],
+        frame.registers[3],
+        frame.registers[4],
+        frame.registers[5],
+    ];
     frame.registers[0] = match frame.registers[8] {
         SYS_WRITE => {
             let address = frame.registers[0];
@@ -5548,6 +5560,12 @@ fn handle_svc(frame: &mut ExceptionFrame) {
         SYS_GETTID => crate::aarch64_process::current_tid(),
         _ => ERROR_INVALID,
     };
+    crate::aarch64_file_failure_trace::record(
+        frame.registers[8],
+        file_trace_args,
+        frame.registers[0],
+        frame.ttbr0,
+    );
     finish_signal_delivery(frame);
 }
 
