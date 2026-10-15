@@ -29,6 +29,24 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-15 diagnostic follow-up: VM mapping search
+
+Exact `40db5c225d7129ac7990704516e41acd00293037` passes unit/check, image,
+all twelve Mac/HVF runtime gates and unchanged image/provenance preflight.
+Strict Firefox then fails Ctrl-A24215ms/limit10000ms, after paint92030ms.
+Preserve `build/logs/macos-interaction-trace-20261015-FV7TML/`, including
+final raw serial/screenshots, retained private boot/data/vars and report.
+No retry/login; QEMU exited. All source identities and thresholds unchanged.
+
+New bounded trace shows61 CPU0/TID4 syscall53 spans totaling1436ms before
+cap exhaustion; arguments and later phases are unavailable. Source first-fit
+search repeatedly scans8192 slots per overlap under the VM lock/IRQ mask.
+The [first-fit repair](FIREFOX-VM-FIRST-FIT-20261015.md) preserves earliest-gap
+semantics with in-place ordering and one traversal. It is not a claim that
+this explains all browser latency. Keep original Firefox bytes/provenance;
+no rebuild/restamp/profile edits. Fresh committed qualification remains
+mandatory; no audit Partial/Missing row upgraded.
+
 ### 2026-10-15 follow-up: interaction still fails, timing evidence needed
 
 Exact `04bbe5fbf1ab3e190a3ce85a1000a86e46a67d22` passes full Mac/HVF

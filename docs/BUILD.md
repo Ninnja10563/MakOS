@@ -13,6 +13,14 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+VM first-fit search repair (2026-10-15): exact diagnostic Mac/HVF
+`40db5c225d71` passes all twelve runtime gates and Firefox preflight, then
+fails Ctrl-A24215ms/10000ms after paint92030ms. Bounded spans show slow
+VM-map calls; [first-fit repair](FIREFOX-VM-FIRST-FIT-20261015.md) removes
+source-proven repeated region-table rescans. No browser fix claim or image
+rebuild/restamp. Existing assertions and fresh exact-commit qualification
+remain mandatory. VM-space crate tests now run in unit and check.
+
 Interaction timing diagnostics (2026-10-15): exact Mac/HVF `04bbe5fbf1ab`
 passes all twelve runtime gates but strict Firefox still fails Ctrl-A
 19139ms versus10000ms, after paint90073ms. See the

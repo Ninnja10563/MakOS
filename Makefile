@@ -249,6 +249,7 @@ unit:
 	python3 scripts/test_makfs4_directory_scale.py
 	cargo test -p makos-readiness
 	cargo test -p makos-structured-log
+	cargo test -p makos-vm-space
 	python3 scripts/test_aarch64_io_wake.py
 	python3 scripts/test_aarch64_madvise.py
 	python3 scripts/test_aarch64_scm_rights.py
@@ -333,6 +334,7 @@ check:
 	python3 scripts/test_makfs4_directory_scale.py
 	cargo test -p makos-readiness
 	cargo test -p makos-structured-log
+	cargo test -p makos-vm-space
 	python3 scripts/test_aarch64_io_wake.py
 	python3 scripts/test_aarch64_madvise.py
 	python3 scripts/test_aarch64_scm_rights.py

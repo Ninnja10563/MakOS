@@ -9,7 +9,15 @@ spec breadth remains; `Missing` means no qualifying implementation.
 Last audit: 2026-10-15. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: locally measured Mac/HVF at
+Current qualification: exact Mac/HVF diagnostic commit
+`40db5c225d7129ac7990704516e41acd00293037` passes all twelve runtime gates
+and Firefox preflight, but Ctrl-A fails24215ms/10000ms after paint92030ms.
+Evidence: `build/logs/macos-interaction-trace-20261015-FV7TML/`. Bounded
+kernel spans show slow VM-map calls, not complete latency attribution.
+[First-fit search repair](FIREFOX-VM-FIRST-FIT-20261015.md) preserves policy
+and every qualification limit. No browser success, login or audit upgrade.
+
+Earlier qualification: locally measured Mac/HVF at
 `04bbe5fbf1ab3e190a3ce85a1000a86e46a67d22` again passes unit/check, image,
 all twelve runtime gates and unchanged Firefox preflight. Real browser
 paint is verified at90073ms, but Ctrl-A fails19139ms against10000ms.

@@ -4,6 +4,15 @@ Last updated: 2026-10-15.
 
 ## Current qualification update
 
+Exact diagnostic commit `40db5c225d7129ac7990704516e41acd00293037` passes
+all twelve Mac/HVF runtime gates and unchanged Firefox preflight, then fails
+Ctrl-A at24215ms versus10000ms after paint92030ms. Full evidence remains in
+`build/logs/macos-interaction-trace-20261015-FV7TML/`; no guest/login remains.
+Bounded tracing identifies61 slow VM-map calls but exhausts its output cap;
+it does not explain the entire delay. The next [first-fit search repair](FIREFOX-VM-FIRST-FIT-20261015.md)
+removes repeated full-table scans without changing allocation policy or
+qualification limits. Browser success and later interaction remain unproven.
+
 The subsequent exact `04bbe5fbf1ab3e190a3ce85a1000a86e46a67d22` Mac/HVF
 run again passes unit/check, image, all twelve runtime gates and unchanged
 Firefox preflight. Real Firefox fails Ctrl-A at `19139 ms`, limit `10000 ms`,
