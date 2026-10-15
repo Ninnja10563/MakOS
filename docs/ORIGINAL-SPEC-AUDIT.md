@@ -9,7 +9,17 @@ spec breadth remains; `Missing` means no qualifying implementation.
 Last audit: 2026-10-15. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: locally measured Apple M3/macOS/HVF at
+Current qualification: locally measured Mac/HVF at
+`04bbe5fbf1ab3e190a3ce85a1000a86e46a67d22` again passes unit/check, image,
+all twelve runtime gates and unchanged Firefox preflight. Real browser
+paint is verified at90073ms, but Ctrl-A fails19139ms against10000ms.
+Later interaction proofs/login not run; no guest remains. Complete evidence
+is retained under `build/logs/macos-surface-priority-20261015-BJztz6/`.
+[Bounded timing instrumentation](FIREFOX-INTERACTION-TIMING-20261015.md)
+does not claim a browser fix or change any qualification threshold. No
+Partial/Missing row is upgraded.
+
+Earlier qualification: locally measured Apple M3/macOS/HVF at
 `7baa2c2ce03d4c4757c39e2c0c8e9b3a1f9e7ee8` passes unit/check, image,
 all twelve sequential runtime gates and unchanged Firefox provenance.
 Real Firefox produces JIT and verified paint (`89167 ms`), then fails Ctrl-A

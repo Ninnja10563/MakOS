@@ -13,6 +13,15 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Interaction timing diagnostics (2026-10-15): exact Mac/HVF `04bbe5fbf1ab`
+passes all twelve runtime gates but strict Firefox still fails Ctrl-A
+19139ms versus10000ms, after paint90073ms. See the
+[preserved failure and observation contract](FIREFOX-INTERACTION-TIMING-20261015.md).
+The next kernel-only increment adds bounded architectural-counter spans,
+not a claimed browser repair. Keep every gate/deadline unchanged and reuse
+the exact preserved Firefox image after hash/provenance checks. No rebuild,
+reintegration, restamp or profile edit. Full fresh Mac qualification required.
+
 Surface-priority atomicity repair (2026-10-15): primary development is now
 on Apple M3/macOS. Full exact `7baa2c2ce03d` Mac/HVF qualification passes
 unit/check, image, all twelve runtime gates and unchanged Firefox preflight,

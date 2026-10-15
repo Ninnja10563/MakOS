@@ -29,6 +29,26 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-15 follow-up: interaction still fails, timing evidence needed
+
+Exact `04bbe5fbf1ab3e190a3ce85a1000a86e46a67d22` passes full Mac/HVF
+unit/check, image, all twelve runtime gates and unchanged image/provenance
+checks. Strict Firefox then fails Ctrl-A at19139ms versus10000ms, after
+verified paint90073ms. Preserve
+`build/logs/macos-surface-priority-20261015-BJztz6/` and its final report,
+raw serial/screenshots/private boot/data/vars. No QEMU or final login remains.
+The prior source-proven hint races are fixed; this does not establish a
+Firefox fix or a causal timing improvement. Complete handoff records exist.
+Pointer-down/release have at least4980guest-ms between dispatch starts, but
+existing logs cannot distinguish userspace work, descheduling or kernel wait.
+
+The [interaction timing increment](FIREFOX-INTERACTION-TIMING-20261015.md)
+adds bounded hardware-counter kernel spans to obtain attribution, not to
+loosen gates. Keep the original image and every threshold/proof unchanged;
+no Firefox rebuild/restamp/profile edit. Fresh exact-commit qualification
+still stops at first failure. Only strict Firefox success permits visible
+private-clone login. All audit Partial/Missing rows remain.
+
 ### 2026-10-15 Mac qualification and surface-priority race repair
 
 Exact `7baa2c2ce03d4c4757c39e2c0c8e9b3a1f9e7ee8` passes unit/check,

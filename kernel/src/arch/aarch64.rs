@@ -2629,6 +2629,10 @@ fn typed_channel_receive(endpoint: u64, message_address: u64, transfer_address: 
 }
 
 fn handle_svc(frame: &mut ExceptionFrame) {
+    // Whole-handler RAII includes early returns; entry identity survives any
+    // scheduler switch that rewrites the return frame. No handler lock held.
+    let _interaction_span =
+        crate::aarch64_interaction_trace::syscall(frame.registers[8], frame.ttbr0);
     const SYS_WRITE: u64 = 0;
     const SYS_YIELD: u64 = 1;
     const SYS_CHANNEL_CREATE: u64 = 2;
@@ -6011,6 +6015,8 @@ fn finish_signal_delivery(frame: &mut ExceptionFrame) {
 }
 
 fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
+    // IRQ tracing never asks the scheduler for a TID: EL1 may hold its lock.
+    let interaction_root = frame.ttbr0;
     let first = IRQ_ENTRIES.fetch_add(1, Ordering::AcqRel) == 0;
     if first {
         crate::serial_println!("MAKOS_AARCH64_IRQ_TRACE stage=entry");
@@ -6100,28 +6106,53 @@ fn handle_irq(kind: u64, frame: &mut ExceptionFrame) {
             // The CPU0 timer is the production owner service point. The
             // driver defers a tick if this IRQ interrupted a direct CPU0
             // request, avoiding recursive acquisition of the device lock.
-            crate::aarch64_virtio_blk::service_requests_from_timer();
+            {
+                let _interaction_span = crate::aarch64_interaction_trace::span(
+                    "timer-block-service", 0, 0, interaction_root,
+                );
+                crate::aarch64_virtio_blk::service_requests_from_timer();
+            }
             // TX requests are copied and need no socket/scheduler locks.
             // Service them even when this tick interrupted EL1; the driver
             // defers recursively interrupted ownership. RX stays EL0-only.
-            crate::aarch64_virtio_net::service_tx_requests_from_timer();
+            {
+                let _interaction_span = crate::aarch64_interaction_trace::span(
+                    "timer-net-tx-service", 0, 0, interaction_root,
+                );
+                crate::aarch64_virtio_net::service_tx_requests_from_timer();
+            }
         }
         if kind == 9 {
             // Socket/net state uses non-recursive locks. Only run the RX
             // bottom half when the IRQ interrupted EL0; running it over an
             // in-flight socket syscall could spin forever on its own lock.
             if cpu_index() == 0 {
-                service_network_rx_on_owner_cpu();
+                {
+                    let _interaction_span = crate::aarch64_interaction_trace::span(
+                        "timer-net-rx-service", 0, 0, interaction_root,
+                    );
+                    service_network_rx_on_owner_cpu();
+                }
                 // Retain a 100 Hz recovery drain for an edge acknowledged while
                 // it interrupted EL1, or for a transport edge lost in firmware.
-                service_input_on_owner_cpu();
+                {
+                    let _interaction_span = crate::aarch64_interaction_trace::span(
+                        "timer-input-recovery", 0, 0, interaction_root,
+                    );
+                    service_input_on_owner_cpu();
+                }
             }
             // Only an armed immutable boot probe can consume this IRQ.
             // Its SPSR comes from the hardware frame, never an injected value.
             if crate::aarch64_process::btype_probe_from_timer(frame) {
                 return;
             }
-            crate::aarch64_process::preempt_from_timer(frame);
+            {
+                let _interaction_span = crate::aarch64_interaction_trace::span(
+                    "timer-preempt", 0, 0, interaction_root,
+                );
+                crate::aarch64_process::preempt_from_timer(frame);
+            }
             finish_signal_delivery(frame);
         } else if cpu_index() == 0 {
             crate::aarch64_process::service_timer_waiters();

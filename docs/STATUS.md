@@ -4,6 +4,16 @@ Last updated: 2026-10-15.
 
 ## Current qualification update
 
+The subsequent exact `04bbe5fbf1ab3e190a3ce85a1000a86e46a67d22` Mac/HVF
+run again passes unit/check, image, all twelve runtime gates and unchanged
+Firefox preflight. Real Firefox fails Ctrl-A at `19139 ms`, limit `10000 ms`,
+after verified first paint at `90073 ms`. No later browser assertions or
+visible login ran; no guest remains. Evidence is preserved in
+`build/logs/macos-surface-priority-20261015-BJztz6/`. The hint race repair is
+not a browser qualification. [Bounded kernel timing diagnostics](FIREFOX-INTERACTION-TIMING-20261015.md)
+address missing phase attribution without changing workloads, deadlines,
+browser binaries/provenance or any audit status.
+
 Local Apple M3/macOS 26.6.2, QEMU 11.0.3/HVF qualification of
 `7baa2c2ce03d4c4757c39e2c0c8e9b3a1f9e7ee8` passes unit/check, image,
 all twelve requested runtime gates and unchanged 61-patch/five-artifact

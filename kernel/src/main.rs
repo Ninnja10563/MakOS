@@ -16,6 +16,8 @@ mod aarch64_epoll;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_installer;
 #[cfg(target_arch = "aarch64")]
+mod aarch64_interaction_trace;
+#[cfg(target_arch = "aarch64")]
 mod aarch64_net_progress_probe;
 #[cfg(target_arch = "aarch64")]
 mod aarch64_net_wire;

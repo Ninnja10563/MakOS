@@ -3730,6 +3730,9 @@ pub(crate) fn prioritize_firefox_surface_thread() -> bool {
             target_handle,
         );
     }
+    if tid != 0 {
+        crate::aarch64_interaction_trace::arm();
+    }
     set_surface_priority(tid)
 }
 
