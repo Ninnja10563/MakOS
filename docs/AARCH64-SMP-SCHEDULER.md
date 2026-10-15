@@ -1,5 +1,19 @@
 # AArch64 multicore userspace scheduler design
 
+## 2026-10-16: priority cannot override migration placement
+
+The [preserved Mac fatal and repair](FIREFOX-PRIORITY-MIGRATION-20261016.md)
+identifies a reachable conflict between timer rebalance and input priority.
+After automatic CPU publication, both Running retention and ordinary hinted
+selection must reject the old source. The common priority predicate now
+honors automatic CPU assignment as well as allowed affinity. Explicit user
+affinity remains authoritative; leaders stay CPU0-only. Priority changes
+ordering, not placement. Rejected source selection preserves the hint until
+an eligible CPU dispatches it. Existing owner-release invariant and fatal,
+one-shot consumption, stale bound and migration policy limits remain.
+This supersedes the historical preference-bypass policy described below;
+it does not establish Firefox success or explain earlier navigation failures.
+
 ## 2026-10-15: coherent one-shot Firefox surface hints
 
 The [Mac failure and repair report](FIREFOX-SURFACE-PRIORITY-20261015.md)

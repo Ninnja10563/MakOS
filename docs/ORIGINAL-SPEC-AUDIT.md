@@ -10,6 +10,17 @@ Last audit: 2026-10-16. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: exact Mac/HVF
+`36a291a24189ae35a267cb9c0180bff1f83fd5bc` passes unit/check, image,
+all twelve runtime gates and original Firefox preflight. First paint48336ms;
+Ctrl-A delivery then fails. Final raw records identify kernel fatal
+`AArch64 timer migration retained source ownership`. Complete preserved
+evidence/private disks: `build/logs/macos-file-failure-20261016-haXs3v/`.
+QEMU exited; no retry/later assertions/login. The
+[priority/migration repair](FIREFOX-PRIORITY-MIGRATION-20261016.md) retains
+the ownership fatal and all thresholds; it requires fresh qualification.
+Earlier navigation remains unresolved. All Partial/Missing rows unchanged.
+
+Earlier qualification: exact Mac/HVF
 `10eb3684e3ca35205e0978e8882918179128a96f` passes unit/check, image,
 all twelve runtime gates and unchanged Firefox preflight. Ctrl-A5176ms and
 first-character110ms meet unchanged limits; first HTTPS navigation then

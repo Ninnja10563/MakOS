@@ -4,6 +4,18 @@ Last updated: 2026-10-16.
 
 ## Current qualification update
 
+Exact `36a291a24189ae35a267cb9c0180bff1f83fd5bc` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.
+Firefox paints at48336ms, then Ctrl-A delivery times out; final raw serial
+captures `AArch64 timer migration retained source ownership` as failure
+detail and fatal. No later assertions/login/retry. All evidence and private
+disks remain in `build/logs/macos-file-failure-20261016-haXs3v/`; QEMU exited.
+The [priority/migration repair](FIREFOX-PRIORITY-MIGRATION-20261016.md)
+makes every priority selector honor automatic CPU placement. The ownership
+fatal and all test limits stay intact. This is a source-proven reachable
+conflict, not proof of the earlier navigation failure's cause. Full new-commit
+qualification remains required; no audit upgrade or Firefox pass.
+
 Exact `10eb3684e3ca35205e0978e8882918179128a96f` passes unit/check,
 image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.
 Firefox paint28145ms, Ctrl-A5176ms and first-character110ms pass their

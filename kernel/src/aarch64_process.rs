@@ -7545,6 +7545,14 @@ fn surface_priority_cpu_eligible(slot: &ContextSlot, cpu: usize) -> bool {
     slot.role == ProcessRole::Firefox
         && cpu < 4
         && slot.affinity_mask & (1u8 << cpu) != 0
+        // Input priority changes ordering, not ownership or placement. A
+        // timer rebalance publishes the new automatic CPU before selection
+        // releases the old owner. Both priority selectors must exclude that
+        // old CPU, even while the process table still calls the task Running.
+        && (slot.pid == slot.group_pid
+            || slot.affinity_user_set
+            || slot.automatic_cpu == 0
+            || usize::from(slot.automatic_cpu) == cpu)
 }
 
 fn select_surface_priority(
@@ -7569,10 +7577,11 @@ fn select_surface_priority(
         return None;
     }
     let selected = match info.state {
-        makos_process_table::ProcessState::Running if tid == prior_pid => Some(info),
-        // Another CPU already owns the selected context. Preserve the hint so
-        // that owner can retain it at its next exception instead of letting a
-        // racing scheduler clear a valid cross-CPU handoff.
+        makos_process_table::ProcessState::Running
+            if tid == prior_pid && surface_priority_cpu_eligible(slot, cpu) => Some(info),
+        // Another CPU owns the context, or timer migration just made the
+        // current owner ineligible. Preserve the hint; ordinary scheduling
+        // releases an ineligible source before the target can dispatch it.
         makos_process_table::ProcessState::Running => None,
         makos_process_table::ProcessState::Ready => {
             // Firefox leaders and device work remain on CPU0. A native-event

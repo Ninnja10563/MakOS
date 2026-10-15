@@ -29,6 +29,25 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-16 follow-up: real priority/migration fatal
+
+Exact `36a291a24189ae35a267cb9c0180bff1f83fd5bc` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged image/provenance
+preflight. Firefox first paint48336ms; first harness failure is missing
+Ctrl-A widget marker. Final raw serial captures both failure detail and fatal:
+`AArch64 timer migration retained source ownership`. No later assertions,
+retry or visible login. QEMU16479/harness16472 exited. Preserve the full report,
+final raw serial, screenshots, all private disks, hashes and host evidence in
+`build/logs/macos-file-failure-20261016-haXs3v/`.
+
+[Bounded repair](FIREFOX-PRIORITY-MIGRATION-20261016.md): priority previously
+retained the Running source or reselected it despite rebalance changing its
+automatic CPU. Both direct and ordinary priority paths must respect that
+placement; keep the fatal invariant. Add production-code transition coverage,
+retain earlier regressions and run a fresh full exact-commit qualification.
+No Firefox rebuild/restamp/profile edit. Earlier navigation/SQLite issues
+remain separate and unresolved; no Partial/Missing audit upgrade.
+
 ### 2026-10-16 follow-up: input latency passes, navigation fails
 
 Exact `10eb3684e3ca35205e0978e8882918179128a96f` passes unit/check,

@@ -133,7 +133,10 @@ assert "let direct = kind == 9;" in timer_irq
 assert "record_input_irq(intid, direct, activity);" in timer_irq
 assert "MAKOS_AARCH64_INPUT_IRQ_OK" in ARCH
 assert "ProcessState::Ready" in select and "state.table.activate_on(cpu, tid)" in select
-assert "ProcessState::Running if tid == prior_pid => Some(info)" in select
+assert re.search(
+    r"ProcessState::Running\s+if tid == prior_pid && "
+    r"surface_priority_cpu_eligible\(slot, cpu\) => Some\(info\)", select
+)
 assert "ProcessState::Blocked => None" in select
 assert "ProcessState::Running => None" in select
 assert "surface_priority_cpu_eligible(slot, cpu)" in select
@@ -236,15 +239,48 @@ production_functions = {
         "clear_surface_priority", "active_surface_priority_tid",
         "surface_priority_cpu_eligible", "select_surface_priority",
         "report_surface_priority_dispatch",
+        "startup_dispatch_allowed", "application_worker_role",
+        "production_ap_worker", "production_role_code", "tracked_production_worker",
     )
 }
 priority_constant = re.search(
     r"^const SURFACE_PRIORITY_TICKS:.*;$", PROCESS, re.MULTILINE
 ).group(0)
-# Extract the ordinary selector's exact consume branch separately. Its full
-# method includes unrelated boot-probe and placement telemetry; those remain
-# guarded above. The adapter drives the real ProcessTable round-robin call.
+# Extract the complete ordinary selection predicate and its consume branch.
+# Later boot-probe/dispatch telemetry is outside this fixture, not replaced
+# by a parallel scheduling model. Rebalance and ProcessTable are production.
 ordinary_body = function_body(PROCESS, "fn schedule_next_for_cpu(")
+ordinary_selection = ordinary_body[:ordinary_body.index(
+    "        // Blocking/exit paths can dispatch")]
+assert ordinary_selection.count("schedule_next_where_on") == 1
+production_functions["ordinary_selection"] = (
+    "impl SchedulerState {\n"
+    "fn schedule_next_for_cpu(&mut self, cpu: usize) "
+    "-> Option<makos_process_table::ProcessInfo> {\n"
+    + ordinary_selection
+    + "self.consume_ordinary_selection(selected, surface_priority_tid, cpu);\n"
+    + "selected\n}\n}\n"
+)
+production_functions["rebalance"] = (
+    "impl SchedulerState {\n"
+    + function_item(PROCESS, "fn rebalance_application_on_timer(") + "\n}\n"
+)
+production_functions["migration_type"] = (
+    "#[derive(Clone, Copy)]\n" + function_item(PROCESS, "struct ComputeMigration {")
+    + "\n" + function_item(PROCESS, "impl ComputeMigration {")
+)
+for name in ("APPLICATION_REBALANCE_DISPATCH_DELTA", "MAX_APPLICATION_MIGRATIONS"):
+    production_functions[name] = re.search(
+        rf"^const {name}:.*;$", PROCESS, re.MULTILINE
+    ).group(0)
+selection_start = schedule.index("let priority = select_surface_priority(state, prior_pid, cpu);")
+selection_end = schedule.index("if migration.is_some()", selection_start)
+assert schedule.index("state.rebalance_application_on_timer(cpu, prior_pid)") < selection_start
+production_functions["timer_selection"] = (
+    "fn select_after_rebalance(state: &mut SchedulerState, prior_pid: u64, cpu: usize) "
+    "-> Option<makos_process_table::ProcessInfo> {\n"
+    + schedule[selection_start:selection_end] + "next\n}\n"
+)
 ordinary_consume = function_item(
     ordinary_body,
     "if selected.is_some_and(|info| info.pid == surface_priority_tid)",
@@ -259,16 +295,26 @@ production_functions["ordinary_consume"] = (
 
 host_fixture = r'''
 use makos_process_table::{ProcessState, ProcessTable};
-use std::sync::{Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::{Mutex, atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering}};
 
 #[derive(Clone, Copy, PartialEq)]
-enum ProcessRole { Firefox, Native }
-struct ContextSlot { pid: u64, group_pid: u64, role: ProcessRole, affinity_mask: u8 }
+#[allow(dead_code)] // Production predicate references roles not created in this fixture.
+enum ProcessRole { Firefox, Native, Python, SmpProbe, SmpLoad }
+#[derive(Clone, Copy)]
+struct ContextSlot {
+    pid: u64, group_pid: u64, role: ProcessRole, affinity_mask: u8,
+    startup_ready: bool, automatic_cpu: u8, automatic_load_baseline: [u64; 3],
+    automatic_migrated: bool, affinity_user_set: bool,
+}
 struct SchedulerState {
     table: ProcessTable<8>,
     contexts: Vec<ContextSlot>,
     surface_priority_tid: u64,
     surface_priority_deadline: u64,
+    cpu_dispatches: [u64; 4],
+    compute_placement_cursor: u8,
+    application_migration_records: [ComputeMigration; MAX_APPLICATION_MIGRATIONS],
+    application_migration_count: usize,
 }
 static STATE: Mutex<Option<SchedulerState>> = Mutex::new(None);
 static CLOCK: AtomicU64 = AtomicU64::new(0);
@@ -276,6 +322,15 @@ static SERIAL: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static SURFACE_PRIORITY_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_PRIORITY_AP_REPORTED: AtomicBool = AtomicBool::new(false);
 static SURFACE_MAIN_DISPATCH_REPORTED: AtomicBool = AtomicBool::new(false);
+static REMOTE_GROUP_STOP_PID: AtomicU64 = AtomicU64::new(0);
+static SMP_PROBE_AFFINITY: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static PRODUCTION_WORKER_GROUP_PID: AtomicU64 = AtomicU64::new(0);
+static PRODUCTION_WORKER_ROLE: AtomicU8 = AtomicU8::new(0);
+static APPLICATION_MIGRATION_EVIDENCE_DROPS: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_MIGRATIONS: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_MIGRATION_SOURCE_MASK: AtomicU64 = AtomicU64::new(0);
+static APPLICATION_MIGRATION_TARGET_MASK: AtomicU64 = AtomicU64::new(0);
+mod aarch64_application_balance;
 fn with_state<R>(f: impl FnOnce(&mut SchedulerState) -> R) -> R {
     f(STATE.lock().unwrap().as_mut().unwrap())
 }
@@ -296,18 +351,34 @@ fn setup() -> (u64, u64) {
     SURFACE_PRIORITY_AP_REPORTED.store(false, Ordering::Release);
     SURFACE_MAIN_DISPATCH_REPORTED.store(false, Ordering::Release);
     SERIAL.lock().unwrap().clear();
+    REMOTE_GROUP_STOP_PID.store(0, Ordering::Release);
+    for counter in [&APPLICATION_MIGRATIONS, &APPLICATION_MIGRATION_SOURCE_MASK,
+                    &APPLICATION_MIGRATION_TARGET_MASK, &APPLICATION_MIGRATION_EVIDENCE_DROPS] {
+        counter.store(0, Ordering::Release);
+    }
     let mut table = ProcessTable::new();
     let leader = table.spawn(0, 0x1000).unwrap();
     let watcher = table.spawn(leader, 0x2000).unwrap();
+    PRODUCTION_WORKER_GROUP_PID.store(leader, Ordering::Release);
+    PRODUCTION_WORKER_ROLE.store(1, Ordering::Release);
     *STATE.lock().unwrap() = Some(SchedulerState {
         table,
         contexts: vec![
             ContextSlot { pid: leader, group_pid: leader,
-                          role: ProcessRole::Firefox, affinity_mask: 1 },
+                          role: ProcessRole::Firefox, affinity_mask: 1,
+                          startup_ready: true, automatic_cpu: 0,
+                          automatic_load_baseline: [0; 3], automatic_migrated: false,
+                          affinity_user_set: false },
             ContextSlot { pid: watcher, group_pid: leader,
-                          role: ProcessRole::Firefox, affinity_mask: 0xe },
+                          role: ProcessRole::Firefox, affinity_mask: 0xe,
+                          startup_ready: true, automatic_cpu: 0,
+                          automatic_load_baseline: [0; 3], automatic_migrated: false,
+                          affinity_user_set: false },
         ],
         surface_priority_tid: 0, surface_priority_deadline: 0,
+        cpu_dispatches: [0; 4], compute_placement_cursor: 1,
+        application_migration_records: [ComputeMigration::EMPTY; MAX_APPLICATION_MIGRATIONS],
+        application_migration_count: 0,
     });
     (leader, watcher)
 }
@@ -496,6 +567,139 @@ fn zero_tid_does_not_erase_existing_hint_and_deadline_saturates() {
     assert!(!set_surface_priority(0));
     assert_eq!(hint(), (leader, u64::MAX));
 }
+
+#[test]
+fn rebalance_running_priority_releases_source_before_unique_target_dispatch() {
+    for source in 1..4 {
+        let (leader, watcher) = setup();
+        assert!(set_surface_priority(watcher));
+        with_state(|s| {
+            s.contexts[1].automatic_cpu = source as u8;
+            s.cpu_dispatches[source] = APPLICATION_REBALANCE_DISPATCH_DELTA;
+            s.table.activate_on(source, watcher).unwrap();
+            let migration = s.rebalance_application_on_timer(source, watcher).unwrap();
+            let target = migration.target_cpu;
+            assert_ne!(target, source);
+            assert_eq!(migration.pid, watcher);
+            assert_eq!(migration.group_pid, leader);
+            assert_eq!(migration.application_role, 1);
+            assert_eq!(migration.source_cpu, source);
+            assert_eq!(migration.loads[source - 1], APPLICATION_REBALANCE_DISPATCH_DELTA);
+            assert_ne!(migration.idle_mask & (1 << target), 0);
+            assert_eq!(s.contexts[1].automatic_cpu, target as u8);
+            assert!(s.contexts[1].automatic_migrated);
+            assert_eq!(s.application_migration_count, 1);
+            assert_eq!(s.application_migration_records[0].target_cpu, target);
+            assert_eq!(s.table.running_cpu(watcher), Some(source),
+                "rebalance publishes placement before changing ProcessTable ownership");
+            // Exact production priority-or-ordinary expression, after the real
+            // timer rebalance. Ordinary ProcessTable preemption releases owner.
+            assert_eq!(select_after_rebalance(s, watcher, source).map(|i| i.pid), None,
+                "migrating priority must not retain source ownership");
+            assert_eq!(s.table.get(watcher).unwrap().state, ProcessState::Ready);
+            assert_eq!(s.table.running_cpu(watcher), None);
+            assert_eq!(s.table.current_pid_on(source), None);
+            assert_eq!(s.surface_priority_tid, watcher);
+            assert_eq!(select_after_rebalance(s, 0, target).unwrap().pid, watcher);
+            assert_eq!(s.table.running_cpu(watcher), Some(target));
+            assert_eq!((0..4).filter(|cpu|
+                s.table.current_pid_on(*cpu) == Some(watcher)).count(), 1);
+            assert_eq!((s.surface_priority_tid, s.surface_priority_deadline), (0, 0));
+            assert!(s.rebalance_application_on_timer(target, watcher).is_none());
+        });
+        assert_eq!(APPLICATION_MIGRATIONS.load(Ordering::Acquire), 1);
+        assert_eq!(APPLICATION_MIGRATION_SOURCE_MASK.load(Ordering::Acquire), 1 << source);
+        assert_eq!(APPLICATION_MIGRATION_EVIDENCE_DROPS.load(Ordering::Acquire), 0);
+    }
+}
+
+#[test]
+fn ordinary_priority_rejects_automatic_source_without_priority_selector() {
+    for initially_running in [false, true] {
+        let (_, watcher) = setup();
+        assert!(set_surface_priority(watcher));
+        with_state(|s| {
+            s.contexts[1].automatic_cpu = 2;
+            if initially_running { s.table.activate_on(1, watcher).unwrap(); }
+            assert!(s.schedule_next_for_cpu(1).is_none(),
+                "ordinary priority must respect automatic target");
+            assert_eq!(s.table.get(watcher).unwrap().state, ProcessState::Ready);
+            assert_eq!(s.table.running_cpu(watcher), None);
+            assert_eq!(s.surface_priority_tid, watcher);
+            assert!(SERIAL.lock().unwrap().is_empty());
+            assert_eq!(s.schedule_next_for_cpu(2).unwrap().pid, watcher);
+            assert_eq!(s.table.running_cpu(watcher), Some(2));
+            assert_eq!((s.surface_priority_tid, s.surface_priority_deadline), (0, 0));
+            assert!(s.schedule_next_for_cpu(3).is_none());
+            assert_eq!(s.table.running_cpu(watcher), Some(2));
+        });
+    }
+}
+
+#[test]
+fn automatic_routing_exceptions_preserve_affinity_for_both_selectors() {
+    for ordinary in [false, true] {
+        for (leader_target, explicit, automatic) in [(false, true, 3), (false, false, 0), (true, false, 3)] {
+            let (leader, watcher) = setup();
+            let tid = if leader_target { leader } else { watcher };
+            let allowed = if leader_target { 0 } else { 2 };
+            let denied = if leader_target { 1 } else { 0 };
+            assert!(set_surface_priority(tid));
+            with_state(|s| {
+                let index = if leader_target { 0 } else { 1 };
+                s.contexts[index].automatic_cpu = automatic;
+                s.contexts[index].affinity_user_set = explicit;
+                s.contexts[index].affinity_mask = 1 << allowed;
+                // Keep the unrelated context out of the denied-CPU check.
+                s.contexts[1 - index].startup_ready = false;
+                if ordinary {
+                    assert!(s.schedule_next_for_cpu(denied).is_none());
+                    assert_eq!(s.surface_priority_tid, tid);
+                    assert_eq!(s.schedule_next_for_cpu(allowed).unwrap().pid, tid);
+                } else {
+                    assert!(select_surface_priority(s, 0, denied).is_none());
+                    assert_eq!(s.surface_priority_tid, tid);
+                    assert_eq!(select_surface_priority(s, 0, allowed).unwrap().pid, tid);
+                }
+                assert_eq!(s.table.running_cpu(tid), Some(allowed));
+                assert_eq!((s.surface_priority_tid, s.surface_priority_deadline), (0, 0));
+            });
+        }
+    }
+}
+
+#[test]
+fn running_prior_rejects_wrong_cpu_and_retains_hint() {
+    let (_, watcher) = setup();
+    assert!(set_surface_priority(watcher));
+    with_state(|s| {
+        s.contexts[1].automatic_cpu = 2;
+        s.table.activate_on(2, watcher).unwrap();
+        assert!(select_surface_priority(s, watcher, 1).is_none(),
+            "Running prior cannot bypass automatic CPU eligibility");
+        assert_eq!(s.surface_priority_tid, watcher);
+        assert_eq!(s.table.running_cpu(watcher), Some(2));
+        assert_eq!(select_surface_priority(s, watcher, 2).unwrap().pid, watcher);
+        assert_eq!((s.surface_priority_tid, s.surface_priority_deadline), (0, 0));
+    });
+}
+
+#[test]
+fn ordinary_priority_preserves_startup_and_remote_stop_guards() {
+    let (leader, watcher) = setup();
+    assert!(set_surface_priority(watcher));
+    with_state(|s| {
+        s.contexts[1].startup_ready = false;
+        assert!(s.schedule_next_for_cpu(1).is_none());
+        assert_eq!(s.surface_priority_tid, watcher);
+        s.contexts[1].startup_ready = true;
+        REMOTE_GROUP_STOP_PID.store(leader, Ordering::Release);
+        assert!(s.schedule_next_for_cpu(1).is_none());
+        assert_eq!(s.surface_priority_tid, watcher);
+        REMOTE_GROUP_STOP_PID.store(0, Ordering::Release);
+        assert_eq!(s.schedule_next_for_cpu(1).unwrap().pid, watcher);
+    });
+}
 '''
 
 with tempfile.TemporaryDirectory(prefix="makos-surface-priority-") as temporary:
@@ -507,6 +711,11 @@ with tempfile.TemporaryDirectory(prefix="makos-surface-priority-") as temporary:
          "-o", str(library)], check=True,
     )
     (directory / "test.rs").write_text(host_fixture)
+    # Compile the actual balance policy, excluding its separately registered
+    # unit module so this fixture's case count remains explicit.
+    (directory / "aarch64_application_balance.rs").write_text(
+        (ROOT / "kernel/src/aarch64_application_balance.rs").read_text().split("#[cfg(test)]")[0]
+    )
 
     def compile_fixture(name: str, **changes: str) -> Path:
         functions = production_functions | changes
@@ -578,13 +787,41 @@ with tempfile.TemporaryDirectory(prefix="makos-surface-priority-") as temporary:
     reject("missing-ordinary-report", "ordinary_leader_selection_reports_main_once",
            "ordinary leader selection must emit exactly one main dispatch record",
            ordinary_consume=ordinary_unreported)
+    running_bypass = production_functions["select_surface_priority"].replace(
+        "if tid == prior_pid && surface_priority_cpu_eligible(slot, cpu) => Some(info)",
+        "if tid == prior_pid => Some(info)", 1,
+    )
+    assert running_bypass != production_functions["select_surface_priority"]
+    reject("running-placement-bypass",
+           "rebalance_running_priority_releases_source_before_unique_target_dispatch",
+           "migrating priority must not retain source ownership",
+           select_surface_priority=running_bypass)
+    ignored_automatic = production_functions["surface_priority_cpu_eligible"].replace(
+        "|| usize::from(slot.automatic_cpu) == cpu)", "|| true)", 1,
+    )
+    assert ignored_automatic != production_functions["surface_priority_cpu_eligible"]
+    reject("ignored-automatic-routing",
+           "ordinary_priority_rejects_automatic_source_without_priority_selector",
+           "ordinary priority must respect automatic target",
+           surface_priority_cpu_eligible=ignored_automatic)
+    ordinary_bypass = production_functions["ordinary_selection"].replace(
+        "surface_priority_cpu_eligible(slot, cpu)",
+        "slot.role == ProcessRole::Firefox && slot.affinity_mask & (1u8 << cpu) != 0", 1,
+    )
+    assert ordinary_bypass != production_functions["ordinary_selection"]
+    reject("ordinary-placement-bypass",
+           "ordinary_priority_rejects_automatic_source_without_priority_selector",
+           "ordinary priority must respect automatic target",
+           ordinary_selection=ordinary_bypass)
 
 print(
     "MAKOS_AARCH64_SURFACE_PRIORITY_HOST_OK priority=production-code "
-    "process_table=production-code lock,clock,serial=host-adapters cases=11 "
+    "process_table=production-code rebalance,ordinary-predicate=production-code "
+    "lock,clock,serial=host-adapters cases=16 "
     "negative_controls=unlocked-publication,old-report-clobber,unconsumed-priority,"
-    "ignored-affinity,partial-expiry-clear,ordinary-unconsumed,missing-ordinary-report "
-    "scope=hint-coherence-not-guest-latency"
+    "ignored-affinity,partial-expiry-clear,ordinary-unconsumed,missing-ordinary-report,"
+    "running-placement-bypass,ignored-automatic-routing,ordinary-placement-bypass "
+    "scope=hint-coherence-and-migration-ownership-not-guest-latency"
 )
 
 print(

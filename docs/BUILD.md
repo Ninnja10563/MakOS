@@ -13,6 +13,15 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Priority/migration repair (2026-10-16): exact Mac/HVF `36a291a24189`
+passes all twelve gates and original Firefox preflight, then real Firefox
+fails Ctrl-A delivery with final raw fatal `AArch64 timer migration retained
+source ownership`. See [evidence and repair](FIREFOX-PRIORITY-MIGRATION-20261016.md).
+Priority selection now respects automatic CPU routing; ownership invariant
+and all limits remain. `python3 scripts/test_aarch64_surface_priority.py`
+retains existing cases and adds migration/priority transition coverage.
+No browser rebuild/reintegration/restamp; fresh full qualification required.
+
 File-failure diagnostics (2026-10-16): exact Mac/HVF `10eb3684e3ca`
 passes all twelve runtime gates and original Firefox preflight. Firefox
 Ctrl-A5176ms and first-character110ms pass unchanged limits, then initial
