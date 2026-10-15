@@ -9,7 +9,17 @@ spec breadth remains; `Missing` means no qualifying implementation.
 Last audit: 2026-10-15. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: exact Mac/HVF diagnostic commit
+Current qualification: exact Mac/HVF
+`0f415ab5b30e282d092a88f7c08a0cea71de030b` passes unit/check, image,
+all twelve runtime gates and unchanged Firefox preflight. Strict Firefox
+fails Ctrl-A15446ms/10000ms after verified paint33187ms; later browser
+assertions/login did not run. Complete preserved evidence is in
+`build/logs/macos-vm-first-fit-20261015-he9KQb/`; no QEMU remains.
+The [MakFS4 prefix-COW repair](FIREFOX-MAKFS4-PREFIX-COW-20261015.md)
+addresses source-proven write amplification, not proven complete latency
+attribution. No browser qualification or Partial/Missing row upgrade.
+
+Earlier qualification: exact Mac/HVF diagnostic commit
 `40db5c225d7129ac7990704516e41acd00293037` passes all twelve runtime gates
 and Firefox preflight, but Ctrl-A fails24215ms/10000ms after paint92030ms.
 Evidence: `build/logs/macos-interaction-trace-20261015-FV7TML/`. Bounded

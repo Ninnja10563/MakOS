@@ -681,15 +681,39 @@ fn rewrite_inode(
         active.block_count - active.data_start,
     )
     .map_err(format_error)?;
-    let next_extents = allocate_extent_map(&mut bitmap, needed_blocks)?;
-
-    for file_block in 0..needed_blocks {
-        let mut block = [0u8; 4096];
-        if file_block * BLOCK_BYTES < inode.size {
-            read_inode_block(&mut disk, &inode, file_block, &mut block)?;
+    // Retain only whole, unchanged blocks. The old partial EOF block always
+    // belongs to the COW tail, including appends and truncate growth.
+    let unchanged_bytes = if patch.is_empty() {
+        inode.size.min(new_size)
+    } else {
+        inode.size.min(new_size).min(patch_offset)
+    };
+    let mut prefix_blocks = unchanged_bytes / BLOCK_BYTES;
+    let (prefix, _) = inode.extents.split_at(prefix_blocks).map_err(format_error)?;
+    let next_extents = if prefix_blocks != 0 {
+        match bitmap.allocate_after_prefix(prefix, needed_blocks - prefix_blocks) {
+            Ok(extents) => extents,
+            // The plan rolls back all new reservations. Keep the original
+            // whole-file COW path when ordered tail space is unavailable.
+            Err(FormatError::NoSpace | FormatError::TooFragmented) => {
+                prefix_blocks = 0;
+                allocate_extent_map(&mut bitmap, needed_blocks)?
+            }
+            Err(error) => return Err(format_error(error)),
         }
+    } else {
+        allocate_extent_map(&mut bitmap, needed_blocks)?
+    };
+
+    for file_block in prefix_blocks..needed_blocks {
+        let mut block = [0u8; 4096];
         let block_start = file_block * BLOCK_BYTES;
         let block_end = block_start + BLOCK_BYTES;
+        if block_start < inode.size
+            && !(patch_offset <= block_start && patch_end >= block_end)
+        {
+            read_inode_block(&mut disk, &inode, file_block, &mut block)?;
+        }
         let copy_start = block_start.max(patch_offset);
         let copy_end = block_end.min(patch_end);
         if copy_start < copy_end {
@@ -714,7 +738,8 @@ fn rewrite_inode(
             return Err(MountError::Io);
         }
     }
-    for extent in inode.extents.extents() {
+    let (_, replaced) = inode.extents.split_at(prefix_blocks).map_err(format_error)?;
+    for extent in replaced.extents() {
         bitmap.release(*extent).map_err(format_error)?;
     }
     drop(bitmap);

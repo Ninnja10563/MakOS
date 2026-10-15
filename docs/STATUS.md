@@ -4,6 +4,19 @@ Last updated: 2026-10-15.
 
 ## Current qualification update
 
+Exact `0f415ab5b30e282d092a88f7c08a0cea71de030b` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.
+Firefox verified paint is 33187 ms; Ctrl-A then fails at 15446 ms against
+10000 ms. No retry, later assertion or visible login. Complete evidence,
+final raw serial, screenshots and retained private disks remain in
+`build/logs/macos-vm-first-fit-20261015-he9KQb/`; QEMU exited.
+Bounded spans now include slow file-write/truncate calls, without FD or
+whole-delay attribution. The [MakFS4 prefix-COW repair](FIREFOX-MAKFS4-PREFIX-COW-20261015.md)
+targets source-proven whole-file rewrite amplification while retaining
+ordered extents, copy-on-write and both commit flushes. Host regression
+and fresh exact-commit qualification are required; browser success and
+audit upgrades remain unproven. Existing Firefox bytes remain unchanged.
+
 Exact diagnostic commit `40db5c225d7129ac7990704516e41acd00293037` passes
 all twelve Mac/HVF runtime gates and unchanged Firefox preflight, then fails
 Ctrl-A at24215ms versus10000ms after paint92030ms. Full evidence remains in

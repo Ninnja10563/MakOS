@@ -29,6 +29,28 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-15 follow-up: MakFS4 write amplification
+
+Exact `0f415ab5b30e282d092a88f7c08a0cea71de030b` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.
+Strict Firefox fails Ctrl-A15446ms/limit10000ms after paint33187ms.
+Preserve `build/logs/macos-vm-first-fit-20261015-he9KQb/`, its complete
+report/logs/final raw serial/screenshots, all retained private disks and
+post-exit hashes. No retry/login; QEMU exited. Two launch idle samples
+95.94%/98.70%, normal pressure; no concurrent guest/heavy build.
+
+Bounded spans include28 CPU0/TID4 syscall17 calls totaling501ms and one
+syscall96 call132ms; FD/arguments and later spans are unavailable. Do not
+attribute all calls or the entire delay to MakFS4. Source nevertheless
+rewrites every data block on every mutation under the VFS lock. The
+[prefix-COW repair](FIREFOX-MAKFS4-PREFIX-COW-20261015.md) retains only
+unchanged whole prefix blocks, COWs the remaining tail, and preserves the
+existing full-rewrite fallback, format and both commit flushes. Add real
+production-path failure-injection coverage before any new guest run.
+No Firefox rebuild/reintegration/restamp/profile edits, no threshold or
+audit upgrades. Fresh exact-commit qualification still stops at first
+failure. Only strict Firefox pass permits the private-clone visible login.
+
 ### 2026-10-15 diagnostic follow-up: VM mapping search
 
 Exact `40db5c225d7129ac7990704516e41acd00293037` passes unit/check, image,

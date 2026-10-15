@@ -109,6 +109,36 @@ impl ExtentMap {
         }
         None
     }
+
+    /// Split logical file blocks without changing physical ownership.
+    pub fn split_at(&self, blocks: u64) -> Result<(Self, Self), Error> {
+        if blocks > self.blocks() {
+            return Err(Error::OutOfRange);
+        }
+        let mut prefix = Self::EMPTY;
+        let mut suffix = Self::EMPTY;
+        let mut remaining = blocks;
+        for extent in self.extents().iter().copied() {
+            let kept = remaining.min(u64::from(extent.block_count)) as u32;
+            if kept != 0 {
+                prefix.push(Extent {
+                    block_count: kept,
+                    ..extent
+                })?;
+            }
+            if kept != extent.block_count {
+                suffix.push(Extent {
+                    start_block: extent
+                        .start_block
+                        .checked_add(u64::from(kept))
+                        .ok_or(Error::OutOfRange)?,
+                    block_count: extent.block_count - kept,
+                })?;
+            }
+            remaining -= u64::from(kept);
+        }
+        Ok((prefix, suffix))
+    }
 }
 
 pub struct BlockBitmap<'a> {
@@ -198,13 +228,20 @@ impl<'a> BlockBitmap<'a> {
     /// First-fit contiguous allocation. Metadata can chain fourteen extents;
     /// allocator never silently overlaps or partially commits.
     pub fn allocate(&mut self, block_count: u32) -> Result<Extent, Error> {
+        self.allocate_from(self.base_block, block_count)
+    }
+
+    /// First-fit allocation at or above a physical lower bound. Used when a
+    /// COW tail follows retained extents in the ordered on-disk extent map.
+    pub fn allocate_from(&mut self, min_block: u64, block_count: u32) -> Result<Extent, Error> {
         if block_count == 0 || u64::from(block_count) > self.block_count {
             return Err(Error::Invalid);
         }
         let wanted = u64::from(block_count);
-        let mut run_start = self.base_block;
+        let first = self.base_block.max(min_block);
+        let mut run_start = first;
         let mut run_length = 0;
-        for block in self.base_block..self.base_block + self.block_count {
+        for block in first..self.base_block + self.block_count {
             if self.allocated(block)? {
                 run_length = 0;
                 run_start = block.saturating_add(1);
@@ -221,6 +258,50 @@ impl<'a> BlockBitmap<'a> {
             }
         }
         Err(Error::NoSpace)
+    }
+
+    /// Allocate an ordered COW tail without freeing or modifying the prefix.
+    /// Failure restores every bit reserved by this call, including an extent
+    /// that could not be represented. Existing file blocks remain allocated.
+    pub fn allocate_after_prefix(
+        &mut self,
+        prefix: ExtentMap,
+        mut block_count: u64,
+    ) -> Result<ExtentMap, Error> {
+        let mut result = prefix;
+        let mut allocated = ExtentMap::EMPTY;
+        let mut minimum = match prefix.extents().last() {
+            Some(last) => last.end_block().ok_or(Error::OutOfRange)?,
+            None => self.base_block,
+        };
+        let outcome = (|| {
+            while block_count != 0 {
+                let mut attempt = u32::try_from(block_count).unwrap_or(u32::MAX);
+                let extent = loop {
+                    match self.allocate_from(minimum, attempt) {
+                        Ok(extent) => break extent,
+                        Err(Error::NoSpace) if attempt > 1 => attempt = attempt.div_ceil(2),
+                        Err(error) => return Err(error),
+                    }
+                };
+                // Record reservations separately: result may merge a new
+                // extent with retained prefix blocks, which must not roll back.
+                if let Err(error) = allocated.push(extent) {
+                    self.release(extent)?;
+                    return Err(error);
+                }
+                result.push(extent)?;
+                minimum = extent.end_block().ok_or(Error::OutOfRange)?;
+                block_count -= u64::from(extent.block_count);
+            }
+            Ok(result)
+        })();
+        if outcome.is_err() {
+            for extent in allocated.extents().iter().copied() {
+                self.release(extent)?;
+            }
+        }
+        outcome
     }
 
     fn set(&mut self, block: u64, allocated: bool) -> Result<(), Error> {
@@ -739,6 +820,200 @@ mod tests {
         assert_eq!(map.file_block_to_device(4), Some(24));
         assert_eq!(map.file_block_to_device(5), Some(40));
         assert_eq!(map.file_block_to_device(6), None);
+    }
+
+    #[test]
+    fn extent_split_preserves_logical_prefix_and_suffix() {
+        let mut map = ExtentMap::EMPTY;
+        map.push(Extent {
+            start_block: 20,
+            block_count: 3,
+        })
+        .unwrap();
+        map.push(Extent {
+            start_block: 40,
+            block_count: 4,
+        })
+        .unwrap();
+        for split in 0..=7 {
+            let (prefix, suffix) = map.split_at(split).unwrap();
+            assert_eq!(prefix.blocks(), split);
+            assert_eq!(suffix.blocks(), 7 - split);
+            for block in 0..7 {
+                assert_eq!(
+                    map.file_block_to_device(block),
+                    if block < split {
+                        prefix.file_block_to_device(block)
+                    } else {
+                        suffix.file_block_to_device(block - split)
+                    }
+                );
+            }
+        }
+        assert_eq!(map.split_at(8), Err(Error::OutOfRange));
+    }
+
+    #[test]
+    fn bitmap_lower_bound_keeps_earlier_free_blocks_untouched() {
+        let mut words = [0u64; 1];
+        let mut bitmap = BlockBitmap::new_at(&mut words, 100, 64).unwrap();
+        assert_eq!(
+            bitmap.allocate_from(120, 3).unwrap(),
+            Extent {
+                start_block: 120,
+                block_count: 3
+            }
+        );
+        assert!(!bitmap.allocated(100).unwrap());
+        assert_eq!(bitmap.allocate_from(0, 2).unwrap().start_block, 100);
+        assert_eq!(bitmap.allocate_from(164, 1), Err(Error::NoSpace));
+        assert_eq!(bitmap.allocate_from(u64::MAX, 1), Err(Error::NoSpace));
+    }
+
+    #[test]
+    fn cow_tail_keeps_prefix_allocated_and_orders_fragmented_tail() {
+        let mut words = [0u64; 1];
+        let mut bitmap = BlockBitmap::new_at(&mut words, 100, 16).unwrap();
+        let mut prefix = ExtentMap::EMPTY;
+        prefix
+            .push(Extent {
+                start_block: 104,
+                block_count: 2,
+            })
+            .unwrap();
+        bitmap.reserve(prefix.extents()[0]).unwrap();
+        // Old suffix and another allocation stay live during planning.
+        bitmap
+            .reserve(Extent {
+                start_block: 106,
+                block_count: 2,
+            })
+            .unwrap();
+        bitmap
+            .reserve(Extent {
+                start_block: 111,
+                block_count: 1,
+            })
+            .unwrap();
+        let plan = bitmap.allocate_after_prefix(prefix, 5).unwrap();
+        assert_eq!(plan.blocks(), 7);
+        assert_eq!(plan.extents()[0], prefix.extents()[0]);
+        assert_eq!(
+            plan.extents()[1],
+            Extent {
+                start_block: 108,
+                block_count: 3
+            }
+        );
+        assert_eq!(
+            plan.extents()[2],
+            Extent {
+                start_block: 112,
+                block_count: 2
+            }
+        );
+        for block in 104..108 {
+            assert!(bitmap.allocated(block).unwrap());
+        }
+        for block in 100..104 {
+            assert!(!bitmap.allocated(block).unwrap());
+        }
+    }
+
+    #[test]
+    fn cow_tail_failure_rolls_back_even_when_plan_merged_with_prefix() {
+        let mut words = [0u64; 1];
+        let mut prefix = ExtentMap::EMPTY;
+        prefix
+            .push(Extent {
+                start_block: 10,
+                block_count: 2,
+            })
+            .unwrap();
+        {
+            let mut bitmap = BlockBitmap::new_at(&mut words, 10, 6).unwrap();
+            bitmap.reserve(prefix.extents()[0]).unwrap();
+            bitmap
+                .reserve(Extent {
+                    start_block: 15,
+                    block_count: 1,
+                })
+                .unwrap();
+        }
+        let before = words;
+        let mut bitmap = BlockBitmap::new_at(&mut words, 10, 6).unwrap();
+        // First partial allocation merges with retained prefix; later failure
+        // must free only the newly allocated blocks 12..15, never 10..12.
+        assert_eq!(bitmap.allocate_after_prefix(prefix, 5), Err(Error::NoSpace));
+        assert_eq!(words, before);
+    }
+
+    #[test]
+    fn cow_tail_extent_limit_rolls_back_new_reservation() {
+        let mut words = [0u64; 1];
+        let mut prefix = ExtentMap::EMPTY;
+        {
+            let mut bitmap = BlockBitmap::new_at(&mut words, 100, 64).unwrap();
+            for index in 0..MAX_EXTENTS {
+                let extent = Extent {
+                    start_block: 100 + index as u64 * 2,
+                    block_count: 1,
+                };
+                prefix.push(extent).unwrap();
+                bitmap.reserve(extent).unwrap();
+            }
+            bitmap
+                .reserve(Extent {
+                    start_block: 127,
+                    block_count: 1,
+                })
+                .unwrap();
+        }
+        let before = words;
+        {
+            let mut bitmap = BlockBitmap::new_at(&mut words, 100, 64).unwrap();
+            assert_eq!(
+                bitmap.allocate_after_prefix(prefix, 1),
+                Err(Error::TooFragmented)
+            );
+        }
+        assert_eq!(words, before);
+        let mut bitmap = BlockBitmap::new_at(&mut words, 100, 64).unwrap();
+        bitmap
+            .release(Extent {
+                start_block: 127,
+                block_count: 1,
+            })
+            .unwrap();
+        // At the limit, contiguous extension still fits the existing extent.
+        let plan = bitmap.allocate_after_prefix(prefix, 1).unwrap();
+        assert_eq!(plan.count(), MAX_EXTENTS);
+        assert_eq!(plan.blocks(), MAX_EXTENTS as u64 + 1);
+    }
+
+    #[test]
+    fn cow_tail_shortage_leaves_lower_space_available_for_full_fallback() {
+        let mut words = [0u64; 1];
+        let mut bitmap = BlockBitmap::new_at(&mut words, 100, 64).unwrap();
+        let mut prefix = ExtentMap::EMPTY;
+        prefix
+            .push(Extent {
+                start_block: 150,
+                block_count: 2,
+            })
+            .unwrap();
+        bitmap
+            .reserve(Extent {
+                start_block: 150,
+                block_count: 14,
+            })
+            .unwrap();
+        assert_eq!(bitmap.allocate_after_prefix(prefix, 1), Err(Error::NoSpace));
+        assert_eq!(bitmap.allocate(3).unwrap().start_block, 100);
+        assert_eq!(bitmap.allocate_after_prefix(prefix, 0).unwrap(), prefix);
+        for block in 150..164 {
+            assert!(bitmap.allocated(block).unwrap());
+        }
     }
 
     #[test]

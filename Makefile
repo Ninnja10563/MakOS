@@ -247,6 +247,7 @@ unit:
 	cargo test -p makos-package-store
 	python3 scripts/test_makfs4_block_io.py
 	python3 scripts/test_makfs4_directory_scale.py
+	python3 scripts/test_makfs4_prefix_cow.py
 	cargo test -p makos-readiness
 	cargo test -p makos-structured-log
 	cargo test -p makos-vm-space
@@ -332,6 +333,7 @@ check:
 	cargo test -p makos-package-store
 	python3 scripts/test_makfs4_block_io.py
 	python3 scripts/test_makfs4_directory_scale.py
+	python3 scripts/test_makfs4_prefix_cow.py
 	cargo test -p makos-readiness
 	cargo test -p makos-structured-log
 	cargo test -p makos-vm-space

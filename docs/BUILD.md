@@ -13,6 +13,16 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+MakFS4 prefix-COW repair (2026-10-15): exact Mac/HVF `0f415ab5b30e`
+passes all twelve runtime gates and unchanged Firefox preflight, then fails
+Ctrl-A15446ms/10000ms after paint33187ms. See
+[preserved evidence and repair contract](FIREFOX-MAKFS4-PREFIX-COW-20261015.md).
+Unchanged whole file prefixes can remain shared across COW generations;
+changed tails still use new blocks and the original two-flush publication.
+Core allocator tests and `python3 scripts/test_makfs4_prefix_cow.py` run in
+unit/check. No on-disk format, test limit, browser image or provenance change.
+Fresh full exact-commit qualification remains mandatory.
+
 VM first-fit search repair (2026-10-15): exact diagnostic Mac/HVF
 `40db5c225d71` passes all twelve runtime gates and Firefox preflight, then
 fails Ctrl-A24215ms/10000ms after paint92030ms. Bounded spans show slow
