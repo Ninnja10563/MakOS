@@ -24,6 +24,7 @@ test -s "$port_dir/patches/0060-makos-stage-process-artifacts.patch"
 test -s "$port_dir/patches/0061-makos-runtime-evidence.patch"
 test -s "$port_dir/patches/0062-makos-navigation-diagnostics.patch"
 test -s "$port_dir/patches/0063-makos-channel-diagnostics.patch"
+test -s "$port_dir/patches/0064-makos-channel-admission.patch"
 test -s "$port_dir/toolchain-probe.c"
 toolchain_status=$("$port_dir/toolchain-audit.sh")
 

@@ -1,5 +1,10 @@
 # Firefox accepted-load/channel diagnostics
 
+Historical63-patch contract. Its completed `9388336` qualification failed
+first navigation; startup exhausted all128 diagnostics. See the superseding
+[result and admission correction](FIREFOX-CHANNEL-ADMISSION-20261017.md).
+Pending statements below describe the state before that preserved run.
+
 ## Preserved Mac/HVF result
 
 Exact commit `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,

@@ -13,7 +13,17 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current channel diagnostics (2026-10-16): exact Mac/HVF `b57cfe2bf31a`
+Current channel admission (2026-10-17): exact Mac/HVF `9388336974a4`
+passes earlier gates and63-patch preflight, then fails first navigation after
+paint35145ms, Ctrl-A3822ms and first-character101ms. Startup exhausted all128
+diagnostic records. [Patch0064](FIREFOX-CHANNEL-ADMISSION-20261017.md) reserves
+the unchanged budget until known top-content HTTP/HTTPS metadata. It requires
+a new supported64-patch release and private integration, not restamped63
+bytes. Supported release/integration and final preflight pass; use the exact
+new image recorded in the Mac protocol. Fresh runtime qualification remains
+pending; all assertions remain.
+
+Historical channel diagnostics (2026-10-16): exact Mac/HVF `b57cfe2bf31a`
 passes earlier gates and62-patch preflight, then fails first navigation after
 paint42315ms, Ctrl-A4749ms and first-character110ms. Accepted-load records do
 not prove asynchronous channel completion. See

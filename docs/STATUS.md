@@ -1,8 +1,26 @@
 # Implementation status
 
-Last updated: 2026-10-16.
+Last updated: 2026-10-17.
 
 ## Current qualification update
+
+Exact Mac/HVF `9388336974a4195c9b32e4311e18dc72ae486193` passes every
+pre-Firefox gate and63-patch preflight. Paint35145ms, Ctrl-A3822ms and first
+character101ms pass; first HTTPS navigation fails, with no target page-stop/
+TLS proof and no pixel comparison. No final raw fatal, retry or login. All39
+private disks and final logs remain in
+`build/logs/macos-channel-diagnostic-20261016-FfcY3B/`; QEMU exited.
+Startup exhausted all128 channel diagnostics before typed navigation.
+[Admission correction](FIREFOX-CHANNEL-ADMISSION-20261017.md) reserves the same
+cap until a known top-content HTTP/HTTPS load, without changing browser policy
+or any qualification assertion. Supported64-patch release/integration and
+final preflight pass; fresh exact-commit qualification is pending. Published
+image `build/makos-firefox-admission-5ttx11ow/makos-integrated-e0752622edd1667b.img`,
+SHA-256 `e0752622edd1667ba5e221847d39a79fd8f67f07ba1420830e51f465f68257f3`.
+Old63-patch output is preserved,
+not restamped. No browser fix or audit upgrade is claimed.
+
+### Historical 63-patch release and preceding result
 
 Exact `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,
 image, all twelve Mac/HVF runtime gates and unchanged62-patch image preflight.

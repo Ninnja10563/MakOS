@@ -29,6 +29,35 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-17 startup exhausted channel diagnostics
+
+Exact Mac/HVF `9388336974a4195c9b32e4311e18dc72ae486193` passes unit/check,
+image, all twelve earlier runtime gates and63-patch/all-five-artifact preflight.
+Firefox paint35145ms, Ctrl-A3822ms, first-character101ms pass; first navigation
+fails without target page-stop/TLS proof. Pixel comparison is not reached.
+No final raw fatal, retry, later browser assertion or login; QEMU exited.
+All39 private disks and final raw/logs/captures remain in
+`build/logs/macos-channel-diagnostic-20261016-FfcY3B/`.
+Its128 complete channel records all precede typed navigation and have no
+HTTP/HTTPS flag. Observation budget exhaustion is proven, navigation cause
+is not. See [bounded admission correction](FIREFOX-CHANNEL-ADMISSION-20261017.md).
+Patch0064 arms only on known top-content HTTP/HTTPS, then retains unknown/error
+callbacks within the original128-attempt cap. No policy/threshold changes.
+New supported64-patch release passes2001.14s; supported integration passes
+4273.49s, final preflight0.74s, all exit0. Actual published image:
+`build/makos-firefox-admission-5ttx11ow/makos-integrated-e0752622edd1667b.img`,
+SHA-256 `e0752622edd1667ba5e221847d39a79fd8f67f07ba1420830e51f465f68257f3`,
+manifest `ea88fc387142af444cb4ee5cd5c6a3b42496c60c832b3996b6ebd8d7d0f1e551`.
+Source master and account/profile hashes remain unchanged. Fresh exact-commit
+qualification remains pending. Preserve old63 source/release/master/profiles and evidence;
+never restamp. Development evidence:
+`build/logs/firefox-channel-admission-20261016-aPxKo4/`.
+Keep T3 Code open. No audit Partial/Missing row is upgraded.
+
+Historical subsections retain then-current pending instructions; this entry
+supersedes them. During the completed qualification only Activity Monitor was
+normally quit (permission granted), no process suspended or service disabled.
+
 ### 2026-10-16 accepted load observed; channel completion unresolved
 
 Exact `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,

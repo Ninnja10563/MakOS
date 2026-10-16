@@ -6,10 +6,23 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-16. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-17. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
+
+Exact Mac/HVF `9388336974a4195c9b32e4311e18dc72ae486193` passes earlier
+gates/63-patch preflight and paint35145ms/Ctrl-A3822ms/first-character101ms,
+then fails first navigation. No target page-stop/TLS or pixel comparison;
+no final raw fatal, retry or login. QEMU exited; all39 private disks and raw
+evidence remain in `build/logs/macos-channel-diagnostic-20261016-FfcY3B/`.
+All128 channel diagnostics were consumed before typed navigation. The
+[admission correction](FIREFOX-CHANNEL-ADMISSION-20261017.md) changes only
+bounded observation, not browser policy or qualification limits. Supported
+64-patch release/integration and final preflight pass; fresh exact-commit
+runtime qualification remains pending. See the Mac protocol for the actual
+published image/manifest identities, not the historical63-patch image.
+No audit row is upgraded. The following entries retain historical results.
 
 Exact `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,
 image, all twelve Mac/HVF runtime gates and unchanged62-patch image preflight.

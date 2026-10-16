@@ -16,6 +16,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 PORT = ROOT / "ports/firefox"
 PATCH = PORT / "patches/0063-makos-channel-diagnostics.patch"
+ADMISSION_PATCH = PORT / "patches/0064-makos-channel-admission.patch"
 HEADER = "mfbt/MakOSRuntimeEvidence.h"
 DOC = "docshell/base/nsDocShell.cpp"
 URI = "uriloader/base/nsURILoader.cpp"
@@ -51,6 +52,8 @@ def private_apply(source: Path, directory: Path) -> tuple[dict, dict]:
     before = {path: (checkout / path).read_text() for path in (HEADER, DOC, URI)}
     subprocess.run(["git", "apply", "--check", str(PATCH)], cwd=checkout, check=True)
     subprocess.run(["git", "apply", str(PATCH)], cwd=checkout, check=True)
+    subprocess.run(["git", "apply", "--check", str(ADMISSION_PATCH)], cwd=checkout, check=True)
+    subprocess.run(["git", "apply", str(ADMISSION_PATCH)], cwd=checkout, check=True)
     after = {path: (checkout / path).read_text() for path in (HEADER, DOC, URI)}
     return before, after
 
@@ -80,6 +83,27 @@ def patch_fragments() -> tuple[dict, dict]:
         before[path], after[path] = "\n".join(old) + "\n", "\n".join(new) + "\n"
     assert set(after) == {HEADER, DOC, URI}
     subprocess.run(["git", "apply", "--numstat", str(PATCH)], check=True,
+                   stdout=subprocess.PIPE)
+    # Apply exact admission hunks to the contiguous extracted production header.
+    # No invented omitted source or independent admission implementation.
+    sections = ADMISSION_PATCH.read_text().split("diff --git ")[1:]
+    assert len(sections) == 1 and sections[0].splitlines()[0].endswith(" b/" + HEADER)
+    hunks = re.split(r"(?m)^@@ [^\n]+\n", sections[0])[1:]
+    assert hunks
+    for hunk in hunks:
+        old, new = [], []
+        for line in hunk.splitlines():
+            if not line or line.startswith("\\ No newline"):
+                continue
+            assert line[:1] in (" ", "+", "-")
+            if line[0] != "+":
+                old.append(line[1:])
+            if line[0] != "-":
+                new.append(line[1:])
+        previous, revised = "\n".join(old) + "\n", "\n".join(new) + "\n"
+        assert after[HEADER].count(previous) == 1, "admission hunk must match exact extracted production bytes"
+        after[HEADER] = after[HEADER].replace(previous, revised, 1)
+    subprocess.run(["git", "apply", "--numstat", str(ADMISSION_PATCH)], check=True,
                    stdout=subprocess.PIPE)
     return before, after
 
@@ -151,6 +175,7 @@ template<class T> class Atomic {
  public:
   explicit Atomic(T initial):value(initial) {}
   operator T() const { return value.load(); }
+  Atomic& operator=(T next) { value.store(next); return *this; }
   bool compareExchange(T old, T next) { return value.compare_exchange_strong(old,next); }
 };
 std::mutex transportMutex;
@@ -286,7 +311,12 @@ std::string record(const std::string& stage,uint32_t result,uint64_t loadId,uint
 }
 bool has(const std::string& stage,uint32_t result) {
  for(const auto& value:records) if(value==record(stage,result,0,0xfedcba9876543210ULL,4)) return true;
- return false;
+  return false;
+}
+void armForCallbacks() {
+ assert(mozilla::makos::WriteLoadDiagnostic("arm",3,NS_OK,1,2,13));
+ assert(writes==1);
+ records.clear(); writes=0; // Static admission count remains one; never reset.
 }
 int main(int argc,char** argv) {
  assert(argc==2); std::string mode=argv[1];
@@ -296,6 +326,34 @@ int main(int argc,char** argv) {
    else emit();
    assert(writes==128 && "bounded admission");
    for(const auto& value:records)assert(value==record("test",NS_ERROR_FAILURE,1,2,15) && "exact fields");
+ } else if(mode=="admission-http" || mode=="admission-https") {
+   const uint32_t rejected[]={0,8,9,2,4,10,12,1};
+   errno=EACCES;
+   for(int repeat=0;repeat<150;++repeat)for(uint32_t flags:rejected)
+     assert(!mozilla::makos::WriteLoadDiagnostic("startup",7,0,1,2,flags) && "startup unarmed rejection");
+   assert(writes==0 && errno==EACCES && "startup consumes zero attempts");
+   uint32_t trigger=mode=="admission-http"?11:13;
+   assert(mozilla::makos::WriteLoadDiagnostic("trigger",7,NS_ERROR_FAILURE,3,4,trigger));
+   assert(records.back()==record("trigger",NS_ERROR_FAILURE,3,4,trigger));
+   for(int i=0;i<127;++i) {
+     uint32_t flags=rejected[i%8];
+     assert(mozilla::makos::WriteLoadDiagnostic("callback",8,0,0,5,flags) && "unknown callbacks retained after arm");
+     assert(records.back()==record("callback",0,0,5,flags));
+   }
+   assert(writes==128 && "startup consumes zero attempts");
+   for(int i=0;i<150;++i) {
+     assert(!mozilla::makos::WriteLoadDiagnostic("trigger",7,0,3,4,trigger) && "trigger never resets budget");
+     assert(!mozilla::makos::WriteLoadDiagnostic("callback",8,0,0,0,0) && "exhaustion stays closed");
+   }
+   assert(writes==128 && errno==EACCES);
+ } else if(mode=="invalid-stage") {
+   assert(!mozilla::makos::WriteLoadDiagnostic("012345678901234567890123456789012",33,0,1,2,13));
+   assert(!mozilla::makos::WriteLoadDiagnostic("unknown",7,0,0,0,0) && "invalid stage must not arm");
+   assert(writes==0);
+   assert(mozilla::makos::WriteLoadDiagnostic("trigger",7,0,1,2,13));
+   for(int i=0;i<127;++i)assert(mozilla::makos::WriteLoadDiagnostic("callback",8,0,0,0,0));
+   assert(writes==128 && "invalid stage consumes zero attempts");
+   assert(!mozilla::makos::WriteLoadDiagnostic("trigger",7,0,1,2,13));
  } else if(mode=="transport") {
    errno=EACCES;
    assert(!mozilla::makos::WriteLoadDiagnostic("012345678901234567890123456789012",33,0,0,0,0));
@@ -326,6 +384,7 @@ int main(int argc,char** argv) {
    MakOSChannelTrace("no-uri",&channel,NS_OK);
    assert(errno==EBUSY && records.back()==record("no-uri",0,0,0xfedcba9876543210ULL,0));
  } else if(mode.rfind("open",0)==0) {
+   armForCallbacks();
    int n=std::stoi(mode.substr(4));
    if(n==1)scenario.open=NS_ERROR_WONT_HANDLE_CONTENT;
    if(n==2)scenario.open=NS_ERROR_FAILURE;
@@ -340,6 +399,7 @@ int main(int argc,char** argv) {
    else assert(has("loader-async-return",scenario.async) && "raw async result");
    if(n==4)assert(actual==NS_OK && has("loader-no-content",NS_ERROR_NO_CONTENT));
  } else if(mode.rfind("start",0)==0) {
+   armForCallbacks();
    int n=std::stoi(mode.substr(5));
    if(n==1)scenario.response=204;
    if(n==2)scenario.status=NS_ERROR_FAILURE;
@@ -352,6 +412,7 @@ int main(int argc,char** argv) {
    assert(actual==expected && calls==originalCalls && "start behavior unchanged");
    assert(has("request-start-enter",NS_OK) && "start entry diagnostic");
  } else if(mode.rfind("stop",0)==0) {
+   armForCallbacks();
    int n=std::stoi(mode.substr(4));nsresult status=0x81234567;
    if(n==1){scenario.response=500;scenario.decoded=0;}
    if(n==2){scenario.response=404;scenario.decoded=0;}
@@ -414,7 +475,8 @@ def main() -> None:
             return binary
 
         binary = native("channel", code)
-        modes = ["cap", "concurrent", "transport", "metadata"]
+        modes = ["cap", "concurrent", "transport", "metadata",
+                 "admission-http", "admission-https", "invalid-stage"]
         if full:
             modes += [f"open{i}" for i in range(5)] + [f"start{i}" for i in range(6)] + [f"stop{i}" for i in range(5)]
         for mode in modes:
@@ -424,6 +486,11 @@ def main() -> None:
             ("wrong-result", code.replace("hex(aResult, 28);", "hex(aResult & 0u, 28);"), "cap", "exact fields"),
             ("missing-restore", code.replace("~RestoreErrno() { errno = saved; }", "~RestoreErrno() { (void)saved; }"), "metadata", "metadata destructor errno restored"),
             ("repeat-write", code.replace("const ssize_t written = write(STDERR_FILENO, record, length);", "(void)write(STDERR_FILENO, record, length);\n  const ssize_t written = write(STDERR_FILENO, record, length);"), "cap", "bounded admission"),
+            ("startup-unfiltered", code.replace("if (!armed)", "if (false && !armed)"), "admission-http", "startup unarmed rejection"),
+            ("scheme-only", code.replace("(aFlags & 9u) == 9u && (aFlags & 6u) != 0", "(aFlags & 6u) != 0"), "admission-https", "startup unarmed rejection"),
+            ("unknown-callback-filtered", code.replace("static Atomic<uint32_t> attempts(0);", "if ((aFlags & 9u) != 9u) return false;\n  static Atomic<uint32_t> attempts(0);"), "admission-http", "unknown callbacks retained after arm"),
+            ("rearm-budget-reset", code.replace("uint32_t prior = attempts;", "if ((aFlags & 9u) == 9u && (aFlags & 6u) != 0) attempts = 0;\n  uint32_t prior = attempts;"), "admission-https", "trigger never resets budget"),
+            ("invalid-stage-arms", code.replace("  if (aStageLength > 32) {\n    return false;\n  }\n", "", 1), "invalid-stage", "invalid stage must not arm"),
         ]
         if full:
             controls += [
@@ -443,6 +510,7 @@ def main() -> None:
           + ("source=pinned-private-apply structural=exact-policy-restoration " if full else
              "source=patch-extracted-only structural=patch-fragment-policy-restoration ")
           + "transport=128-single-write errno=getter,destructor-preserved "
+          + "admission=known-top-http-https-once startup=unspent callbacks-after-arm=unfiltered "
           + ("callbacks=production-start,stop,content-length-override " if full else "callbacks=not-executed ")
           +
           "guest_execution=not-run browser_qualification=not-run")

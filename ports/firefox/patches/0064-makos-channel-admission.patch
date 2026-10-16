@@ -1,0 +1,32 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] diagnostics: reserve channel trace admission until a web load
+
+Startup non-web loads exhausted all 128 diagnostic attempts before navigation
+in the preserved Mac run. Arm once on actual known top-content HTTP/HTTPS
+metadata, then retain every stage including unknown-metadata error callbacks.
+No reset, larger cap, retry, navigation policy or qualification-limit change.
+This is diagnostic admission, not proof that navigation is repaired.
+
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+--- a/mfbt/MakOSRuntimeEvidence.h
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -79,6 +79,19 @@
+ inline bool WriteLoadDiagnostic(const char* aStage, size_t aStageLength,
+                                 uint32_t aResult, uint64_t aLoad,
+                                 uint64_t aChannel, uint32_t aFlags) {
++  if (aStageLength > 32) {
++    return false;
++  }
++  // Arm once for a known top-content HTTP/HTTPS load. Do not spend the
++  // bounded diagnostic budget on earlier non-web startup loads. Once armed,
++  // retain unknown-metadata callbacks too; never reset admission on a load.
++  static Atomic<bool> armed(false);
++  if ((aFlags & 9u) == 9u && (aFlags & 6u) != 0) {
++    armed = true;
++  }
++  if (!armed) {
++    return false;
++  }
+   static Atomic<uint32_t> attempts(0);
+   uint32_t prior = attempts;
+   for (;;) {
