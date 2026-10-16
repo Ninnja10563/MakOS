@@ -4,6 +4,35 @@ Last updated: 2026-10-16.
 
 ## Current qualification update
 
+Exact `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged62-patch image preflight.
+Firefox paint42315ms, Ctrl-A4749ms, first-character110ms pass; first navigation
+fails without target page-stop/TLS proof. Pixel comparison is not reached.
+No final raw fatal/failure-detail; no retry, later assertion or login. QEMU
+exited. All39 private disks, raw serial and available screenshots remain in
+`build/logs/macos-navigation-diagnostic-20261016-y1zlrf/`.
+New diagnostics establish synchronous URL-bar/native accepted-load return,
+not asynchronous channel completion. See
+[channel diagnostic contract](FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md).
+Patch0063 and errno staging cache correction require fresh supported63-patch
+release/integration, actual new image identity, then full exact-commit
+qualification. Old61/62 artifacts cannot be restamped or treated as current
+runtime inputs. No audit upgrade or browser fix is claimed.
+
+Development unit/check passes218.59s and all focused release checks pass.
+Supported63-patch release now passes exit0, real1941.82s, with all five
+artifact audits and source treeb21ed8765615bdd1db206c17f8598c6782fbfe6c.
+Supported private integration passes exit0, real4180.64s; final unchanged
+runtime preflight passes exit0 in0.80s. Published image:
+`build/makos-firefox-channel-s25zw5qr/makos-integrated-efc352303ed6888c.img`,
+SHA-256 `efc352303ed6888c0cce8f33098791350869b9456da3c7d8b4b954a9159ebf57`.
+Manifest SHA-256:
+`2592fa40ec5289a9e6ac17b82b2b39a24121ed7e216d316205ea4c02b1be35ab`.
+Source master/manifest and account/profile regions remain unchanged.
+Fresh exact-commit runtime qualification remains pending; no browser pass.
+
+## Historical release and qualification updates
+
 User freed storage to about53GiB; resumed preflight verifies unchanged master/
 manifest and all five preserved historical Firefox binaries. Full development
 unit/check including final private-copy wiring passes210.20s (exit0). The

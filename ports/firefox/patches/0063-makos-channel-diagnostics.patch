@@ -1,0 +1,414 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] navigation: trace accepted loads through channel dispatch
+
+Diagnostic only. Preserve synchronous returns, asynchronous callbacks,
+normalization and every qualification limit. IDs/flags only, no URI text.
+128 attempted single writes per process; no retry or missing-record inference.
+Entry/call NS_OK is neutral metadata, not a completion.
+
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+--- a/mfbt/MakOSRuntimeEvidence.h
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -68,7 +68,57 @@
+   errno = savedErrno;
+   return written == static_cast<ssize_t>(length);
+ }
+ 
++
++// Bounded load-path diagnostics, never page/TLS success proof. IDs come from
++// real load/channel objects; zero means unavailable. Flags: bit0 top-content,
++// bit1 HTTP, bit2 HTTPS, bit3 top-content known. No URI/user-input text.
++// This separate cap does not change earlier evidence/diagnostic admission.
++inline bool WriteLoadDiagnostic(const char* aStage, size_t aStageLength,
++                                uint32_t aResult, uint64_t aLoad,
++                                uint64_t aChannel, uint32_t aFlags) {
++  static Atomic<uint32_t> attempts(0);
++  uint32_t prior = attempts;
++  for (;;) {
++    if (prior >= 128 || aStageLength > 32) {
++      return false;
++    }
++    if (attempts.compareExchange(prior, prior + 1)) {
++      break;
++    }
++    prior = attempts;
++  }
++  char record[256];
++  size_t length = 0;
++  auto append = [&](const char* text) {
++    while (*text) {
++      record[length++] = *text++;
++    }
++  };
++  auto hex = [&](uint64_t value, int highShift) {
++    for (int shift = highShift; shift >= 0; shift -= 4) {
++      record[length++] = "0123456789abcdef"[(value >> shift) & 15];
++    }
++  };
++  append("MAKOS_FIREFOX_LOAD_DIAGNOSTIC stage=");
++  for (size_t index = 0; index < aStageLength; ++index) {
++    record[length++] = aStage[index];
++  }
++  append(" result=0x");
++  hex(aResult, 28);
++  append(" load=0x");
++  hex(aLoad, 60);
++  append(" channel=0x");
++  hex(aChannel, 60);
++  append(" flags=0x");
++  hex(aFlags, 28);
++  append(" scope=diagnostic-only\n");
++  const int savedErrno = errno;
++  const ssize_t written = write(STDERR_FILENO, record, length);
++  errno = savedErrno;
++  return written == static_cast<ssize_t>(length);
++}
++
+ }  // namespace mozilla::makos
+ #endif  // XP_MAKOS
+ #endif  // mozilla_MakOSRuntimeEvidence_h
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -683,16 +683,54 @@
+   }
+   return NS_ERROR_DOM_BAD_CROSS_ORIGIN_URI;
+ }
+ 
++#ifdef XP_MAKOS
++template <size_t Size>
++static void MakOSDocLoadTrace(const char (&aStage)[Size], nsresult aResult,
++                             nsDocShellLoadState* aState, nsIChannel* aChannel,
++                             bool aTopContent) {
++  // Declared first: restore after metadata COM pointers are released too.
++  struct RestoreErrno final {
++    int saved;
++    ~RestoreErrno() { errno = saved; }
++  } restore{errno};
++  uint64_t channelId = 0;
++  nsCOMPtr<nsIIdentChannel> identified = do_QueryInterface(aChannel);
++  if (identified) {
++    channelId = identified->ChannelId();
++  }
++  nsCOMPtr<nsIURI> uri;
++  if (aState) {
++    uri = aState->URI();
++  } else if (aChannel) {
++    aChannel->GetURI(getter_AddRefs(uri));
++  }
++  uint32_t flags = 8 | (aTopContent ? 1 : 0);
++  if (uri) {
++    flags |= uri->SchemeIs("http") ? 2 : 0;
++    flags |= uri->SchemeIs("https") ? 4 : 0;
++  }
++  mozilla::makos::WriteLoadDiagnostic(
++      aStage, Size - 1, static_cast<uint32_t>(aResult),
++      aState ? aState->GetLoadIdentifier() : 0, channelId, flags);
++}
++#  define MAKOS_DOC_LOAD(stage, result, state, channel) \
++    MakOSDocLoadTrace(stage, result, state, channel, \
++                      mBrowsingContext->IsTopContent())
++#else
++#  define MAKOS_DOC_LOAD(stage, result, state, channel) ((void)0)
++#endif
++
+ NS_IMETHODIMP
+ nsDocShell::LoadURI(nsDocShellLoadState* aLoadState, bool aSetNavigating) {
+   return LoadURI(aLoadState, aSetNavigating, false);
+ }
+ 
+ nsresult nsDocShell::LoadURI(nsDocShellLoadState* aLoadState,
+                              bool aSetNavigating,
+                              bool aContinueHandlingSubframeHistory) {
++  MAKOS_DOC_LOAD("load-enter", NS_OK, aLoadState, nullptr);
+   MOZ_ASSERT(aLoadState, "Must have a valid load state!");
+   // NOTE: This comparison between what appears to be internal/external load
+   // flags is intentional, as it's ensuring that the caller isn't using any of
+   // the flags reserved for implementations by the `nsIWebNavigation` interface.
+@@ -739,8 +777,9 @@
+   // However, we don't allow the page to change location *in the middle of*
+   // firing beforeunload, so we do need to check if *beforeunload* is currently
+   // firing, so we call IsNavigationAllowed rather than just IsPrintingOrPP.
+   if (!IsNavigationAllowed(true, false)) {
++    MAKOS_DOC_LOAD("load-navigation-denied", NS_OK, aLoadState, nullptr);
+     return NS_OK;  // JS may not handle returning of an error code
+   }
+ 
+   nsLoadFlags defaultLoadFlags = mBrowsingContext->GetDefaultLoadFlags();
+@@ -778,8 +817,9 @@
+     if (MaybeHandleSubframeHistory(aLoadState,
+                                    aContinueHandlingSubframeHistory)) {
+       // MaybeHandleSubframeHistory returns true if we need to continue loading
+       // asynchronously.
++      MAKOS_DOC_LOAD("load-history-queued", NS_OK, aLoadState, nullptr);
+       return NS_OK;
+     }
+   }
+ 
+@@ -807,8 +847,9 @@
+   // LOAD_STOP_CONTENT:  location.href = ..., location.assign(...)
+   if ((aLoadState->LoadType() == LOAD_NORMAL ||
+        aLoadState->LoadType() == LOAD_STOP_CONTENT) &&
+       ShouldBlockLoadingForBackButton()) {
++    MAKOS_DOC_LOAD("load-back-redirect-blocked", NS_OK, aLoadState, nullptr);
+     return NS_OK;
+   }
+ 
+   BrowsingContext::Type bcType = mBrowsingContext->GetType();
+@@ -854,9 +895,11 @@
+       }
+     }
+   }
+ 
++  MAKOS_DOC_LOAD("load-internal-call", NS_OK, aLoadState, nullptr);
+   rv = InternalLoad(aLoadState);
++  MAKOS_DOC_LOAD("load-internal-return", rv, aLoadState, nullptr);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   if (aLoadState->GetOriginalURIString().isSome()) {
+     // Save URI string in case it's needed later when
+@@ -9325,8 +9368,9 @@
+ // InternalLoad performs several of the steps from
+ // https://html.spec.whatwg.org/#navigate.
+ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
+                                   Maybe<uint32_t> aCacheKey) {
++  MAKOS_DOC_LOAD("internal-enter", NS_OK, aLoadState, nullptr);
+   MOZ_ASSERT(aLoadState, "need a load state!");
+   MOZ_ASSERT(aLoadState->TriggeringPrincipal(),
+              "need a valid TriggeringPrincipal");
+ 
+@@ -9410,12 +9454,14 @@
+       }
+ 
+       // Do this asynchronously
+       nsCOMPtr<nsIRunnable> ev = new InternalLoadEvent(this, aLoadState);
++      MAKOS_DOC_LOAD("internal-unload-dispatch", NS_OK, aLoadState, nullptr);
+       return Dispatch(ev.forget());
+     }
+ 
+     // Just ignore this load attempt
++    MAKOS_DOC_LOAD("internal-unload-ignored", NS_OK, aLoadState, nullptr);
+     return NS_OK;
+   }
+ 
+   // If we are loading a URI that should inherit a security context (basically
+@@ -9505,8 +9551,9 @@
+     if (shouldTakeFocus) {
+       mBrowsingContext->Focus(CallerType::System, IgnoreErrors());
+     }
+     if (sameDocument) {
++      MAKOS_DOC_LOAD("internal-same-document", rv, aLoadState, nullptr);
+       return rv;
+     }
+   }
+ 
+@@ -9571,8 +9618,9 @@
+               /* aClassicHistoryAPIState */ nullptr);
+ 
+           // Step 20.5
+           if (!shouldContinue) {
++            MAKOS_DOC_LOAD("internal-event-cancelled", NS_OK, aLoadState, nullptr);
+             return NS_OK;
+           }
+         }
+       }
+@@ -9619,8 +9667,9 @@
+     if (NS_SUCCEEDED(rv) && !okToUnload) {
+       // The user chose not to unload the page, interrupt the
+       // load.
+       MaybeResetInitTiming(toBeReset);
++      MAKOS_DOC_LOAD("internal-unload-denied", NS_OK, aLoadState, nullptr);
+       return NS_OK;
+     }
+   }
+ 
+@@ -9798,9 +9847,11 @@
+   PredictorPredict(aLoadState->URI(), nullptr,
+                    nsINetworkPredictor::PREDICT_LOAD, attrs, nullptr);
+ 
+   nsCOMPtr<nsIRequest> req;
++  MAKOS_DOC_LOAD("internal-uri-call", NS_OK, aLoadState, nullptr);
+   rv = DoURILoad(aLoadState, aCacheKey, getter_AddRefs(req));
++  MAKOS_DOC_LOAD("internal-uri-return", rv, aLoadState, nullptr);
+ 
+   if (NS_SUCCEEDED(rv)) {
+     if (shouldTakeFocus) {
+       mBrowsingContext->Focus(CallerType::System, IgnoreErrors());
+@@ -9821,8 +9872,9 @@
+     // We won't report any error if this is an unknown protocol error. The
+     // reason behind this is that it will allow enumeration of external
+     // protocols if we report an error for each unknown protocol.
+     if (NS_ERROR_UNKNOWN_PROTOCOL == rv) {
++      MAKOS_DOC_LOAD("internal-unknown-protocol", rv, aLoadState, nullptr);
+       return NS_OK;
+     }
+   }
+ 
+@@ -10325,13 +10377,15 @@
+ 
+ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
+                                Maybe<uint32_t> aCacheKey,
+                                nsIRequest** aRequest) {
++  MAKOS_DOC_LOAD("uri-enter", NS_OK, aLoadState, nullptr);
+   // Double-check that we're still around to load this URI.
+   if (mIsBeingDestroyed) {
+     // Return NS_OK despite not doing anything to avoid throwing exceptions
+     // from nsLocation::SetHref if the unload handler of the existing page
+     // tears us down.
++    MAKOS_DOC_LOAD("uri-destroyed", NS_OK, aLoadState, nullptr);
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIURILoader> uriLoader = components::URILoader::Service();
+@@ -10755,9 +10809,12 @@
+   }
+ 
+   uint32_t openFlags =
+       nsDocShell::ComputeURILoaderFlags(mBrowsingContext, mLoadType);
+-  return OpenInitializedChannel(channel, uriLoader, openFlags);
++  MAKOS_DOC_LOAD("uri-channel-call", NS_OK, aLoadState, channel);
++  nsresult openResult = OpenInitializedChannel(channel, uriLoader, openFlags);
++  MAKOS_DOC_LOAD("uri-channel-return", openResult, aLoadState, channel);
++  return openResult;
+ }
+ 
+ static nsresult AppendSegmentToString(nsIInputStream* aIn, void* aClosure,
+                                       const char* aFromRawSegment,
+@@ -10897,9 +10954,11 @@
+                                 GetMainThreadSerialEventTarget());
+   }
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
++  MAKOS_DOC_LOAD("channel-loader-call", NS_OK, nullptr, aChannel);
+   rv = aURILoader->OpenURI(aChannel, aOpenFlags, this);
++  MAKOS_DOC_LOAD("channel-loader-return", rv, nullptr, aChannel);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // We're about to load a new page and it may take time before necko
+   // gives back any data, so main thread might have a chance to process a
+diff --git a/uriloader/base/nsURILoader.cpp b/uriloader/base/nsURILoader.cpp
+--- a/uriloader/base/nsURILoader.cpp
++++ b/uriloader/base/nsURILoader.cpp
+@@ -41,8 +41,10 @@
+ #include "nsMimeTypes.h"
+ 
+ #include "nsDocLoader.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
++#include "nsIURI.h"
+ #include "mozilla/IntegerPrintfMacros.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/Result.h"
+ #include "mozilla/Unused.h"
+@@ -58,8 +60,40 @@
+ #define LOG_ERROR(args) \
+   MOZ_LOG(nsURILoader::mLog, mozilla::LogLevel::Error, args)
+ #define LOG_ENABLED() MOZ_LOG_TEST(nsURILoader::mLog, mozilla::LogLevel::Debug)
+ 
++#ifdef XP_MAKOS
++template <size_t Size>
++static void MakOSChannelTrace(const char (&aStage)[Size], nsIRequest* aRequest,
++                             nsresult aResult) {
++  struct RestoreErrno final {
++    int saved;
++    ~RestoreErrno() { errno = saved; }
++  } restore{errno};
++  uint64_t channelId = 0;
++  nsCOMPtr<nsIIdentChannel> identified = do_QueryInterface(aRequest);
++  if (identified) {
++    channelId = identified->ChannelId();
++  }
++  uint32_t flags = 0;  // top-content unknown here; never infer false.
++  nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
++  nsCOMPtr<nsIURI> uri;
++  if (channel) {
++    channel->GetURI(getter_AddRefs(uri));
++  }
++  if (uri) {
++    flags |= uri->SchemeIs("http") ? 2 : 0;
++    flags |= uri->SchemeIs("https") ? 4 : 0;
++  }
++  mozilla::makos::WriteLoadDiagnostic(
++      aStage, Size - 1, static_cast<uint32_t>(aResult), 0, channelId, flags);
++}
++#  define MAKOS_CHANNEL_TRACE(stage, request, result) \
++    MakOSChannelTrace(stage, request, result)
++#else
++#  define MAKOS_CHANNEL_TRACE(stage, request, result) ((void)0)
++#endif
++
+ NS_IMPL_ADDREF(nsDocumentOpenInfo)
+ NS_IMPL_RELEASE(nsDocumentOpenInfo)
+ 
+ NS_INTERFACE_MAP_BEGIN(nsDocumentOpenInfo)
+@@ -99,8 +133,9 @@
+   return rv;
+ }
+ 
+ NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest* request) {
++  MAKOS_CHANNEL_TRACE("request-start-enter", request, NS_OK);
+   LOG(("[0x%p] nsDocumentOpenInfo::OnStartRequest", this));
+   MOZ_ASSERT(request);
+   if (!request) {
+     return NS_ERROR_UNEXPECTED;
+@@ -297,8 +332,9 @@
+ }
+ 
+ NS_IMETHODIMP nsDocumentOpenInfo::OnStopRequest(nsIRequest* request,
+                                                 nsresult aStatus) {
++  MAKOS_CHANNEL_TRACE("request-stop-enter", request, aStatus);
+   LOG(("[0x%p] nsDocumentOpenInfo::OnStopRequest", this));
+ 
+   // Bug 1945855 - Show error page for 4xx/5xx responses with no content,
+   // whether the Content-Length header is missing or lying
+@@ -313,8 +349,9 @@
+     // If this is a multipart stream, we could get another
+     // OnStartRequest after this... reset state.
+     m_targetStreamListener = nullptr;
+     mContentType.Truncate();
++    MAKOS_CHANNEL_TRACE("request-stop-forward", request, aStatus);
+     listener->OnStopRequest(request, aStatus);
+   }
+   mUsedContentHandler = false;
+ 
+@@ -856,8 +893,9 @@
+ 
+ NS_IMETHODIMP nsURILoader::OpenURI(nsIChannel* channel, uint32_t aFlags,
+                                    nsIInterfaceRequestor* aWindowContext) {
+   NS_ENSURE_ARG_POINTER(channel);
++  MAKOS_CHANNEL_TRACE("loader-enter", channel, NS_OK);
+ 
+   if (LOG_ENABLED()) {
+     nsCOMPtr<nsIURI> uri;
+     channel->GetURI(getter_AddRefs(uri));
+@@ -868,11 +906,13 @@
+ 
+   nsCOMPtr<nsIStreamListener> loader;
+   nsresult rv = OpenChannel(channel, aFlags, aWindowContext, false,
+                             getter_AddRefs(loader));
++  MAKOS_CHANNEL_TRACE("loader-content-return", channel, rv);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_WONT_HANDLE_CONTENT) {
+       // Not really an error, from this method's point of view
++      MAKOS_CHANNEL_TRACE("loader-content-declined", channel, rv);
+       return NS_OK;
+     }
+   }
+ 
+@@ -881,13 +921,16 @@
+   // if they don't give us one, we need to go to the registry and get
+   // the preferred protocol handler.
+ 
+   // But for now, I'm going to let necko do the work for us....
++  MAKOS_CHANNEL_TRACE("loader-async-call", channel, NS_OK);
+   rv = channel->AsyncOpen(loader);
++  MAKOS_CHANNEL_TRACE("loader-async-return", channel, rv);
+ 
+   // no content from this load - that's OK.
+   if (rv == NS_ERROR_NO_CONTENT) {
+     LOG(("  rv is NS_ERROR_NO_CONTENT -- doing nothing"));
++    MAKOS_CHANNEL_TRACE("loader-no-content", channel, rv);
+     return NS_OK;
+   }
+   return rv;
+ }

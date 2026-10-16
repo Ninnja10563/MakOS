@@ -16,8 +16,27 @@ test "$crate_version" = 0.3.8 || {
     exit 1
 }
 
+# Reconstruct and validate the complete patched candidate every time. Reverse
+# patch applicability alone cannot detect unrelated drift in the staged crate.
+# Do not expose an unpatched or partially patched crate on preparation failure.
+private_dir=$(mktemp -d "${TMPDIR:-/tmp}/makos-firefox-errno-stage.XXXXXXXX")
+trap 'rm -rf -- "$private_dir"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# rsync copies the source root's permissions too; retain a separate 0700 parent.
+candidate="$private_dir/candidate"
+mkdir "$candidate"
+rsync -a --delete --checksum "$source_dir/" "$candidate/"
+patch -s -d "$candidate" -p1 < "$patch_file"
+find "$candidate" -type f -name '*.orig' -delete
+
 mkdir -p "$stage_dir"
-rsync -a --delete --checksum "$source_dir/" "$stage_dir/"
-patch -s -d "$stage_dir" -p1 < "$patch_file"
-find "$stage_dir" -type f -name '*.orig' -delete
+# Archive semantics except timestamps: checksum comparison retains identical
+# destination files (including their inode/mtime), even if upstream timestamps
+# changed. Changed bytes are written with a fresh mtime, invalidating consumers.
+# Publish the final patched tree, never its intermediate unpatched inputs.
+# This is not a transactional directory swap: publication I/O failure is fatal
+# and may leave a partially updated stage, as with the previous rsync path.
+rsync -rlpgoD --delete --checksum "$candidate/" "$stage_dir/"
 printf '%s\n' 'MAKOS_FIREFOX_ERRNO_OK version=0.3.8 accessor=__errno_location tls=musl checksum-safe=1'

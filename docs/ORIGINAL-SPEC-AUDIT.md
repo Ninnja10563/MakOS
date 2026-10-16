@@ -9,7 +9,30 @@ spec breadth remains; `Missing` means no qualifying implementation.
 Last audit: 2026-10-16. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
-Current qualification: exact Mac/HVF
+Current qualification:
+
+Exact `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged62-patch image preflight.
+Firefox paint42315ms, Ctrl-A4749ms, first-character110ms pass; first navigation
+fails without target page-stop/TLS proof. Pixel comparison is not reached.
+No final raw fatal/failure-detail; no retry, later assertion or login. QEMU
+exited. All39 private disks, raw serial and available screenshots remain in
+`build/logs/macos-navigation-diagnostic-20261016-y1zlrf/`.
+New diagnostics establish synchronous URL-bar/native accepted-load return,
+not asynchronous channel completion. See
+[channel diagnostic contract](FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md).
+Patch0063 and errno staging cache correction require fresh supported63-patch
+release/integration, actual new image identity, then full exact-commit
+qualification. Old61/62 artifacts cannot be restamped or treated as current
+runtime inputs. No audit upgrade or browser fix is claimed.
+
+Supported63-patch release/integration and final all-five-artifact runtime
+preflight now pass. New image `efc352303ed6888c` and manifest identities are
+recorded in the diagnostic contract; source/account/profile regions are
+unchanged. Fresh exact-commit Mac/HVF runtime remains pending. No audit row
+is upgraded from packaging or diagnostic evidence.
+
+Historical qualification: exact Mac/HVF
 `d762db55d5cf5c0992bf6592151bcf401e6b84b4` passes unit/check, image,
 all twelve runtime gates and original Firefox preflight. Paint36540ms,
 Ctrl-A5242ms, first-character101ms pass; first HTTPS navigation fails without

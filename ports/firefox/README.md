@@ -35,7 +35,15 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
-Current qualification (2026-10-16): exact Mac/HVF `d762db55d5cf` passes all
+Current qualification (2026-10-16): exact Mac/HVF `b57cfe2bf31a` passes
+all earlier gates,62-patch preflight, paint42315ms, Ctrl-A4749ms and first
+character110ms, then fails first HTTPS navigation. Accepted-load diagnostics
+prove synchronous dispatch/return, not channel completion. The
+[channel diagnostic](../../docs/FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md)
+requires a supported63-patch release and new private integration; all original
+limits remain. Old61/62 outputs remain preserved, never restamped.
+
+Historical qualification (2026-10-16): exact Mac/HVF `d762db55d5cf` passes all
 pre-Firefox gates, original preflight, verified paint36540ms, Ctrl-A5242ms and
 first-character101ms. First HTTPS navigation then fails without target
 page-stop/TLS proof; pixel comparison is not reached. No final raw fatal,
@@ -70,11 +78,11 @@ claim generated-code execution or completed scanout. All strict pixel and
 interaction assertions remain mandatory. Build/package/image audits now
 reject libxul without either loaded emitter literal.
 
-The exact current 62-patch SHA-256 is
-`3bc2756c89e093968e99481bd390e78d0f8e6aabb8d141b52c65d6117d558326`.
+The exact current 63-patch SHA-256 is
+`4cf457045160e993a6e66a78b8901971719c34a63ce4fff351520225778c85f9`.
 Preserve previous images/provenance, private account/profile data and release
 caches. Run the supported release wrapper with developer mode unset and
-normal package/integration again; old 59/60/61-patch outputs cannot be restamped
+normal package/integration again; old 59/60/61/62-patch outputs cannot be restamped
 or reused as qualification input. See [the evidence repair](../../docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md)
 and [the sequential Mac protocol](../../docs/MACOS-HVF-TEST-AGENT-PROMPT.md).
 `test-runtime-evidence.py` adds host success/failure/negative-control coverage;

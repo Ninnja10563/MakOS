@@ -29,6 +29,55 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-16 accepted load observed; channel completion unresolved
+
+Exact `b57cfe2bf31a5910a1cdaf9363a1627cbde554e9` passes unit/check,
+image, all twelve Mac/HVF runtime gates and unchanged62-patch image preflight.
+Firefox paint42315ms, Ctrl-A4749ms, first-character110ms pass; first navigation
+fails without target page-stop/TLS proof. Pixel comparison is not reached.
+No final raw fatal/failure-detail; no retry, later assertion or login. QEMU
+exited. All39 private disks, raw serial and available screenshots remain in
+`build/logs/macos-navigation-diagnostic-20261016-y1zlrf/`.
+New diagnostics establish synchronous URL-bar/native accepted-load return,
+not asynchronous channel completion. See
+[channel diagnostic contract](FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md).
+Patch0063 and errno staging cache correction require fresh supported63-patch
+release/integration, actual new image identity, then full exact-commit
+qualification. Old61/62 artifacts cannot be restamped or treated as current
+runtime inputs. No audit upgrade or browser fix is claimed.
+
+Development/preservation evidence:
+`build/logs/firefox-channel-diagnostic-20261016-5NfTUX/`.
+Its independent full62-patch source/release backup matches all five old
+binary hashes and stamp. About42GiB was available after preservation.
+No QEMU is running during development. Keep T3 Code open; do not delete
+preserved caches, images or evidence. Historical subsections below retain
+then-current pending instructions, superseded by this subsection.
+
+Full development unit/check passes218.59s; widget/source verification and
+package-manifest/runtime-evidence/navigation/channel regressions pass.
+Supported63-patch release exits0 at UTC2026-10-16T11:02:49.946714,
+real1941.82/user230.58/sys387.98. All five artifact audits and new truthful
+stamp pass; source treeb21ed8765615bdd1db206c17f8598c6782fbfe6c,
+libxul3aef7386a6bd5d5d79b88bb1f1bcce0728de848c4a9aace73688af2414ad10c8.
+Integration started11:03:26UTC into `build/makos-firefox-channel-s25zw5qr/`,
+using unchanged5baa master and preserved CPython cache. Integration completes
+exit0, real4180.64/user484.10/sys802.41; final preflight exits0 in0.80s.
+Controller and scoped caffeinate exit0 at12:13:09UTC; host monitor exits0.
+Published image:
+`build/makos-firefox-channel-s25zw5qr/makos-integrated-efc352303ed6888c.img`.
+Image SHA-256:
+`efc352303ed6888c0cce8f33098791350869b9456da3c7d8b4b954a9159ebf57`.
+Manifest SHA-256:
+`2592fa40ec5289a9e6ac17b82b2b39a24121ed7e216d316205ea4c02b1be35ab`.
+All5 build/runtime artifacts,63-patch provenance and source/account/profile
+preservation pass; exact identities and cleanup limits are in the diagnostic
+contract. Candidate and runtime record independently retained before cleanup.
+No runtime pass yet. Commit/push reviewed increment, then fresh full
+exact-commit qualification in `build/logs/macos-channel-diagnostic-20261016-FfcY3B/`.
+Prepared external recorder retains original gates, readiness requirements,
+first-failure stop and private-disk capture. No application was closed/paused.
+
 ### 2026-10-16 storage restored; supported release and integration pass
 
 User freed storage to about53GiB. New evidence directory:

@@ -1,5 +1,15 @@
 # Firefox navigation-boundary diagnostics
 
+## Follow-up
+
+The release described below was qualified at exact `b57cfe2bf31a`.
+Earlier gates pass; Firefox paint42315ms, Ctrl-A4749ms and first-character110ms
+pass, then first navigation fails. Synchronous JS/native load returns are now
+observed; asynchronous channel completion remains unresolved. See the
+[next channel diagnostic and preserved results](FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md).
+Historical pending-runtime/reuse instructions below describe62-patch state,
+not authority for the new63-patch increment.
+
 ## Preserved Mac/HVF failure
 
 Exact `d762db55d5cf5c0992bf6592151bcf401e6b84b4` passes unit/check,

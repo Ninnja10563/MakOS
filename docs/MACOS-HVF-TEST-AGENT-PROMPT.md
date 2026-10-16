@@ -15,15 +15,16 @@ Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
 Previous exact Mac-tested baseline: fc9338bbef4cb45c1c6a5548ca0511917d3ef10e
 
-Use the exact full navigation-diagnostic release commit supplied in chat,
+Use the exact full channel-diagnostic release commit supplied in chat,
 including the preceding kernel repairs. Read
-docs/FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md first. Exact latest Mac/HVF
-kernel commit d762db55d5cf5c0992bf6592151bcf401e6b84b4 passes every pre-Firefox
-gate and old-image preflight, verified paint36540ms, Ctrl-A5242ms and first
-character101ms. First HTTPS navigation then fails without target page-stop/TLS
+docs/FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md first. Exact latest Mac/HVF
+commit b57cfe2bf31a5910a1cdaf9363a1627cbde554e9 passes every pre-Firefox
+gate and62-patch image preflight, verified paint42315ms, Ctrl-A4749ms and first
+character110ms. First HTTPS navigation fails without target page-stop/TLS
 evidence; pixel comparison is not reached. No final raw fatal, retry or login.
-This next change adds bounded diagnostics, not a Firefox fix. Preserve the
-failed run at build/logs/macos-priority-migration-20261016-S3Y5tR/.
+Synchronous accepted-load dispatch/return is now observed, not asynchronous
+channel completion. This next change adds bounded diagnostics, not a Firefox
+fix. Preserve build/logs/macos-navigation-diagnostic-20261016-y1zlrf/.
 
 Historical scheduler qualification, retained without relabeling:
 That increment required the exact scheduler FIFO-lock/AP-startup repair
@@ -60,8 +61,8 @@ self-host proof. That local run is not Mac/HVF qualification. Require all
 original self-host proofs below, without bypass, retry or reduced assertions.
 
 The preceding kernel-only repairs used unchanged 61-patch Firefox bytes.
-Current navigation diagnostic appends patch0062 and requires a supported new
-release/package/integration with truthful 62-patch provenance. Preserve the
+Current channel diagnostic appends patch0063 and requires a supported new
+release/package/integration with truthful 63-patch provenance. Preserve the
 October10 master, source/release caches, accounts, profiles and all evidence;
 never restamp old binaries, manually stage executables or edit profile prefs.
 The old image is integration source, not current runtime qualification input.
@@ -86,7 +87,8 @@ remote main to match, and record the exact tested commit.
    docs/FIREFOX-NET-OWNER-20261009.md and
    docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md and
    docs/AARCH64-SMP-SCHEDULER.md and
-   docs/FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md.
+   docs/FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md and
+   docs/FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -368,22 +370,23 @@ remote main to match, and record the exact tested commit.
    `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`
    and matching manifest SHA-256
    `4cb2b6ef3a7d4c4d852755ce33ebd0cbbbb4de5291b53a3d6dfc7a68fe2a6f6a`.
-   Current supported release/package markers must report 62 patches with exact ordered
+   Current supported release/package markers must report 63 patches with exact ordered
    series SHA-256
-   `3bc2756c89e093968e99481bd390e78d0f8e6aabb8d141b52c65d6117d558326`,
+   `4cf457045160e993a6e66a78b8901971719c34a63ce4fff351520225778c85f9`,
    pinned Firefox 140.13.0esr source
    `90ad18aabeaa9cbd63a1f749a57f266e758e50da`, and all five audited build
    and stripped-runtime artifacts. Require the unchanged all-five-ELF,
    loaded-literal, hash and provenance preflight, not just an image hash.
    Historical61-patch series remains
    `770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab`;
-   its old preflight is not a current62-patch pass. Preserve release/source
+   old61/62-patch preflight is not a current63-patch pass. Preserve release/source
    outputs before supported suffix application and build. Run sequentially:
 
        ports/firefox/test-widget.sh
        python3 ports/firefox/test-package-manifest.py --source-dir build/ports/firefox/source
        python3 ports/firefox/test-runtime-evidence.py --source-dir build/ports/firefox/source
        python3 ports/firefox/test-runtime-navigation.py --source-dir build/ports/firefox/source
+       python3 ports/firefox/test-runtime-channel.py --source-dir build/ports/firefox/source
        env -u MAKOS_FIREFOX_DEVELOPER_BUILD ports/firefox/build-makos.sh -j1
 
    Use documented Mac toolchain and host Python3.11/3.12 for Firefox, Python3.14
@@ -393,21 +396,33 @@ remote main to match, and record the exact tested commit.
    current provenance and content-addressed publication. Record actual new
    image and manifest hashes. If the current release has already been built,
    reuse only its exact recorded new image after unchanged preflight; no
-   redundant rebuild. Never restamp/transplant or reuse old60/61-patch images
+   redundant rebuild. Never restamp/transplant or reuse old60/61/62-patch images
    as current qualification input. Set INTEGRATED_IMAGE to the new recorded
    path, then run:
 
-       INTEGRATED_IMAGE=build/makos-firefox-navigation-iis0begx/makos-integrated-b5e45cf171c5bc44.img
        shasum -a 256 "$INTEGRATED_IMAGE"
        python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
 
-   This supported62-patch image is now published and preflight-verified.
-   Require image SHA-256
-   `b5e45cf171c5bc44c211fc9b4dfb1d521237ce4ac86fadc362d0010206c47316`
+   Set INTEGRATED_IMAGE only to the recorded supported63-patch publication,
+   with its actual recorded image and manifest hashes. Supported publication
+   completed2026-10-16; reuse this exact new image without a redundant rebuild:
+
+       INTEGRATED_IMAGE=build/makos-firefox-channel-s25zw5qr/makos-integrated-efc352303ed6888c.img
+
+   Require exact SHA-256
+   `efc352303ed6888c0cce8f33098791350869b9456da3c7d8b4b954a9159ebf57`
    and sibling manifest SHA-256
+   `2592fa40ec5289a9e6ac17b82b2b39a24121ed7e216d316205ea4c02b1be35ab`.
+   Final runtime preflight passed; fresh exact-commit runtime is still pending.
+   Preserve the previous62-patch master
+   build/makos-firefox-navigation-iis0begx/makos-integrated-b5e45cf171c5bc44.img,
+   SHA-256
+   `b5e45cf171c5bc44c211fc9b4dfb1d521237ce4ac86fadc362d0010206c47316`,
+   sibling manifest SHA-256
    `9bde1add278f3ac0dc95f2f17d8dfb7a56e5c7e6cc6ca1a0bc18ee6a3be70e38`.
-   If missing or mismatched, stop; no silent rebuild or substitute. Reuse this
-   release for fresh qualification; release success is not a browser pass.
+   That historical image is not current runtime authority. If the newly
+   recorded image is missing or mismatched, stop; no substitute or restamp.
+   Supported release success is not a browser pass.
 
    Preserve the current master, manifest, build/runtime provenance, release
    cache and all private account/profile/evidence disks. The previous private
@@ -420,7 +435,7 @@ remote main to match, and record the exact tested commit.
    recovery of the earlier lost account. A manifest or compact evidence ZIP
    cannot restore missing image bytes. If this exact SOURCE master is absent
    or its recorded image/manifest hash mismatches, stop and report the input
-   blocker. Current62-patch runtime preflight applies to the newly integrated
+   blocker. Current63-patch runtime preflight applies to the newly integrated
    image, not the historical61-patch source. Do not silently
    create a different test baseline or run another historical image.
 
@@ -442,7 +457,7 @@ remote main to match, and record the exact tested commit.
    assertions. Do not weaken or reinterpret any of them.
 
    Before QEMU, the target must print `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the
-   pinned source, 62-patch series identity above,
+   pinned source, 63-patch series identity above,
    `artifacts=build-audited,runtime-sha256-matched`, and
    `elf=aarch64-pie,libxul
    all_five_elf=aarch64-et-dyn,interp-and-deps-by-kind`. Missing provenance,

@@ -13,7 +13,18 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Navigation diagnostics (2026-10-16): exact Mac/HVF `d762db55d5cf`
+Current channel diagnostics (2026-10-16): exact Mac/HVF `b57cfe2bf31a`
+passes earlier gates and62-patch preflight, then fails first navigation after
+paint42315ms, Ctrl-A4749ms and first-character110ms. Accepted-load records do
+not prove asynchronous channel completion. See
+[channel diagnostic/release contract](FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md).
+New patch0063 requires a supported63-patch release and new integrated clone;
+all five artifact audits, original assertions and deadlines remain. Preserve
+old outputs and profiles. The errno staging helper now avoids republishing
+identical bytes with new mtimes, without skipping patch/provenance checks.
+No new release or runtime pass is claimed until recorded.
+
+Historical navigation diagnostics (2026-10-16): exact Mac/HVF `d762db55d5cf`
 passes all twelve gates, preflight and Firefox input latency (Ctrl-A5242ms,
 first-character101ms), then fails first HTTPS navigation. No final raw fatal
 is observed. See [bounded diagnostics and release contract](FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md).
