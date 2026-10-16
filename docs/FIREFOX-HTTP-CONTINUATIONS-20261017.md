@@ -1,5 +1,16 @@
 # Firefox HTTP continuation diagnostics
 
+## Subsequent exact qualification
+
+Exact `f3cfdfea28311811aa54f4dcf02a169886466df2` passes all earlier Mac/HVF
+gates and65-patch preflight, then fails first navigation after paint41937ms,
+Ctrl-A6213ms and first-character142ms pass. All39 private disks/raw evidence
+remain, QEMU exits, no retry/login.128 complete records establish target
+classifier/proxy callbacks and Connect entry, not downstream completion.
+[Native network boundary observation](FIREFOX-NETWORK-BOUNDARY-20261017.md)
+records full result and next kernel-only diagnostic scope. Historical release
+and pending-work text below is retained, superseded by this result.
+
 ## Preserved Mac/HVF failure
 
 Exact commit `d671da168a79c1b89b77c78c66fb7e07ce0208bd` passes unit/check,

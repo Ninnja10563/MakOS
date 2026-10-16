@@ -13,7 +13,16 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current HTTP continuation diagnostics (2026-10-17): exact Mac/HVF
+Current native network observation (2026-10-17): exact Mac/HVF
+`f3cfdfea28311` passes earlier gates/65-patch preflight and paint41937ms,
+Ctrl-A6213ms, first-character142ms, then fails first navigation. All private
+evidence remains. [Kernel boundary diagnostics](FIREFOX-NETWORK-BOUNDARY-20261017.md)
+add no Firefox source/policy or gate changes. Host regression8cases/9negative
+controls, unit/check347.47s and image/artifact checks15.11s pass exit0.
+Fresh qualification pending. Reuse the exact65-patch image/manifest below and in the Mac protocol;
+no browser rebuild, reintegration, restamp or profile change.
+
+Historical HTTP continuation diagnostics (2026-10-17): exact Mac/HVF
 `d671da168a79` passes earlier gates/64-patch preflight, paint41938ms,
 Ctrl-A6461ms and first-character110ms, then fails first navigation.
 Fifteen complete records show synchronous AsyncOpen return; no callback record

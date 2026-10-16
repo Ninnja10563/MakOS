@@ -3384,6 +3384,13 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 || !user_range_readable(address, bytes)
                 || !user_range_writable(address, bytes)
             {
+                crate::aarch64_socket::trace_firefox_poll_denial(
+                    "scheduled",
+                    frame.registers[1],
+                    timeout,
+                    wait_mask,
+                    wait_mask_present,
+                );
                 frame.registers[0] = (-22i64) as u64;
             } else if let Err(error) =
                 crate::aarch64_tty::begin_wait_mask((wait_mask_present != 0).then_some(wait_mask))
@@ -4445,6 +4452,13 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 || !user_range_readable(address, bytes)
                 || !user_range_writable(address, bytes)
             {
+                crate::aarch64_socket::trace_firefox_poll_denial(
+                    "direct",
+                    frame.registers[1],
+                    timeout,
+                    frame.registers[3],
+                    frame.registers[4],
+                );
                 (-22i64) as u64
             } else if timeout != 0 {
                 (-95i64) as u64
@@ -4931,15 +4945,32 @@ fn handle_svc(frame: &mut ExceptionFrame) {
             if !crate::aarch64_process::network_control_allowed()
                 || !user_range_readable(address, length)
             {
+                crate::aarch64_socket::trace_firefox_connect_denial(
+                    frame.registers[0],
+                    frame.registers[2],
+                    "permission-or-user-range",
+                    ERROR_INVALID,
+                );
                 ERROR_INVALID
             } else {
-                read_socket_endpoint(address, length).map_or(ERROR_INVALID, |endpoint| {
-                    u64::from(crate::aarch64_socket::connect_address(
-                        frame.registers[0],
-                        endpoint.address,
-                        endpoint.port,
-                    ))
-                })
+                read_socket_endpoint(address, length).map_or_else(
+                    || {
+                        crate::aarch64_socket::trace_firefox_connect_denial(
+                            frame.registers[0],
+                            frame.registers[2],
+                            "endpoint-parse",
+                            ERROR_INVALID,
+                        );
+                        ERROR_INVALID
+                    },
+                    |endpoint| {
+                        u64::from(crate::aarch64_socket::connect_address(
+                            frame.registers[0],
+                            endpoint.address,
+                            endpoint.port,
+                        ))
+                    },
+                )
             }
         }
         SYS_SOCKET_SEND => {

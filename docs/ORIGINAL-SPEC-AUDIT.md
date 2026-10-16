@@ -11,6 +11,19 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+Exact Mac/HVF `f3cfdfea28311811aa54f4dcf02a169886466df2` passes all earlier
+gates/65-patch preflight, paint41937ms/Ctrl-A6213ms/first-character142ms, then
+fails first navigation without target page-stop/TLS or pixel comparison.
+No final raw fatal, retry or login; all39 private disks and raw evidence remain
+in `build/logs/macos-http-continuation-20261017-366oqF/`, QEMU exited.
+128 complete diagnostic records establish target classifier/proxy callbacks and
+Connect entry, not downstream completion. The next
+[kernel network observation](FIREFOX-NETWORK-BOUNDARY-20261017.md) is not a
+browser fix. Host regression8cases/9negative controls, unit/check347.47s and
+image/artifact checks15.11s pass exit0; fresh qualification pending.
+Reuse unchanged65-patch image. Earlier host fixture failure is preserved.
+No policy, assertion, threshold or audit row is weakened/upgraded.
+
 Exact Mac/HVF `d671da168a79c1b89b77c78c66fb7e07ce0208bd` passes all
 earlier gates/64-patch preflight, paint41938ms, Ctrl-A6461ms and first
 character110ms, then fails first navigation. No target page-stop/TLS or pixel

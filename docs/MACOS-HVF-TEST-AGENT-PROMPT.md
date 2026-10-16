@@ -15,8 +15,22 @@ Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
 Previous exact Mac-tested baseline: fc9338bbef4cb45c1c6a5548ca0511917d3ef10e
 
-Use the exact full HTTP-continuation release commit supplied in chat,
-including the preceding kernel repairs. Read
+Use the exact full native-network-boundary commit supplied in chat,
+including preceding kernel repairs and65-patch Firefox release. Read
+docs/FIREFOX-NETWORK-BOUNDARY-20261017.md first. Latest exact Mac/HVF
+f3cfdfea28311811aa54f4dcf02a169886466df2 passes all earlier gates and65-patch
+preflight; paint41937ms, Ctrl-A6213ms, first character142ms pass. First
+navigation fails without target page-stop/TLS or pixel comparison; no final
+raw fatal, retry or login. All39 private disks/logs remain in
+build/logs/macos-http-continuation-20261017-366oqF/.128 complete diagnostics
+show target classifier/proxy callbacks and Connect entry, not downstream
+completion. Current kernel-only observation does not change network semantics.
+Reuse the exact completed65-patch image/manifest below. No Firefox rebuild,
+reintegration, restamp or profile preference edit. Host regression passes
+8cases/9negative controls, unit/check347.47s and image/artifact checks15.11s
+exit0; earlier host fixture failure remains preserved. Fresh qualification pending.
+
+Historical HTTP-continuation release contract: read
 docs/FIREFOX-HTTP-CONTINUATIONS-20261017.md first. Latest exact Mac/HVF
 d671da168a79c1b89b77c78c66fb7e07ce0208bd passes all earlier gates and64-patch
 preflight; paint41938ms, Ctrl-A6461ms, first character110ms pass. First HTTPS

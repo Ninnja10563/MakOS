@@ -4,6 +4,23 @@ Last updated: 2026-10-17.
 
 ## Current qualification update
 
+Exact Mac/HVF `f3cfdfea28311811aa54f4dcf02a169886466df2` passes all earlier
+gates, exact65-patch image/manifest and runtime preflight. Paint41937ms,
+Ctrl-A6213ms and first-character142ms pass; first navigation fails without
+target page-stop/TLS or pixel comparison. No final raw fatal, retry or login;
+QEMU exits and all39 private disks/raw/logs remain in
+`build/logs/macos-http-continuation-20261017-366oqF/`. Its128 complete diagnostics
+show target classifier/proxy callbacks and Connect entry, not downstream
+completion. [Native network boundary diagnostics](FIREFOX-NETWORK-BOUNDARY-20261017.md)
+add bounded kernel-only observation. Host regression passes8cases/9negative
+controls; unit/check passes347.47s, image/artifact checks15.11s, all exit0.
+The earlier deliberate-mutant compilation failure remains preserved.
+Fresh exact-commit qualification is pending;
+reuse exact65-patch master without rebuild/restamp/profile changes. No browser
+fix or audit upgrade is claimed.
+
+### Historical 65-patch release and preceding result
+
 Exact Mac/HVF `d671da168a79c1b89b77c78c66fb7e07ce0208bd` passes all
 pre-Firefox gates and64-patch preflight. Paint41938ms, Ctrl-A6461ms and first
 character110ms pass; first navigation fails without target page-stop/TLS.

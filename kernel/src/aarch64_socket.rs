@@ -30,6 +30,11 @@ static FIREFOX_SOCKET_FAILURES: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_SOCKET_POLLS: AtomicU64 = AtomicU64::new(0);
 static FIREFOX_SOCKET_RECEIVES: AtomicU64 = AtomicU64::new(0);
 const FIREFOX_SOCKET_TRACE_LIMIT: u64 = 8;
+static FIREFOX_CONNECT_DIAGNOSTICS: AtomicU64 = AtomicU64::new(0);
+static FIREFOX_CONNECT_DENIAL_DIAGNOSTICS: AtomicU64 = AtomicU64::new(0);
+static FIREFOX_POLL_DENIAL_DIAGNOSTICS: AtomicU64 = AtomicU64::new(0);
+const FIREFOX_CONNECT_DIAGNOSTIC_LIMIT: u64 = 32;
+const FIREFOX_DENIAL_DIAGNOSTIC_LIMIT: u64 = 8;
 static UDP_DNS_TRACES: AtomicU64 = AtomicU64::new(0);
 static IPV6_SOCKET_REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -253,6 +258,104 @@ pub fn connect(handle: u64, remote_ip: [u8; 4], remote_port: u16) -> bool {
 }
 
 pub fn connect_address(handle: u64, address: IpAddress, remote_port: u16) -> bool {
+    // Capture scheduler identity before the unchanged implementation takes any
+    // socket/device lock. A result uses the entry identity, not a later lookup.
+    let trace = firefox_network_trace_slot(
+        &FIREFOX_CONNECT_DIAGNOSTICS,
+        FIREFOX_CONNECT_DIAGNOSTIC_LIMIT,
+        "connect",
+    );
+    if let Some((trace, pid, tid, cpu)) = trace {
+        crate::serial_println!(
+            "MAKOS_FIREFOX_SOCKET_CONNECT_ATTEMPT trace={} pid={} tid={} cpu={} handle={:#x} remote={:?}:{} scope=diagnostic-only",
+            trace, pid, tid, cpu, handle, address, remote_port,
+        );
+    }
+    let connected = connect_address_untraced(handle, address, remote_port);
+    if let Some((trace, pid, tid, cpu)) = trace {
+        crate::serial_println!(
+            "MAKOS_FIREFOX_SOCKET_CONNECT_RESULT trace={} pid={} tid={} entry_cpu={} handle={:#x} remote={:?}:{} result={} scope=diagnostic-only",
+            trace, pid, tid, cpu, handle, address, remote_port, u8::from(connected),
+        );
+    }
+    connected
+}
+
+// Diagnostic counters count admission attempts, not successful serial writes.
+// Each independent budget has one additional slot for a saturation notice;
+// the counter then stops, never wraps, and is not a final dropped-record count.
+// Call only outside socket/device/scheduler locks: identity getters take the
+// scheduler lock. No diagnostics here assert endpoint ownership or success.
+fn firefox_network_trace_slot(
+    counter: &AtomicU64,
+    limit: u64,
+    kind: &str,
+) -> Option<(u64, u64, u64, usize)> {
+    if crate::aarch64_process::current_app_role() != crate::aarch64_process::ProcessRole::Firefox {
+        return None;
+    }
+    let trace = counter
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            if value <= limit && value < u64::MAX {
+                Some(value + 1)
+            } else {
+                None
+            }
+        })
+        .ok()?;
+    let pid = crate::aarch64_process::current_pid();
+    let tid = crate::aarch64_process::current_tid();
+    let cpu = crate::arch::cpu_index();
+    if trace == limit {
+        crate::serial_println!(
+            "MAKOS_FIREFOX_NETWORK_DIAGNOSTIC_SATURATED kind={} admitted={} pid={} tid={} cpu={} further_records=omitted scope=diagnostic-only",
+            kind, limit, pid, tid, cpu,
+        );
+        return None;
+    }
+    Some((trace, pid, tid, cpu))
+}
+
+pub(crate) fn trace_firefox_connect_denial(
+    handle: u64,
+    length: u64,
+    reason: &str,
+    result: u64,
+) {
+    if let Some((trace, pid, tid, cpu)) = firefox_network_trace_slot(
+        &FIREFOX_CONNECT_DENIAL_DIAGNOSTICS,
+        FIREFOX_DENIAL_DIAGNOSTIC_LIMIT,
+        "connect-denial",
+    ) {
+        crate::serial_println!(
+            "MAKOS_FIREFOX_SOCKET_CONNECT_DENIED trace={} pid={} tid={} cpu={} handle={:#x} length={} reason={} result={} scope=diagnostic-only",
+            trace, pid, tid, cpu, handle, length, reason, result as i64,
+        );
+    }
+}
+
+pub(crate) fn trace_firefox_poll_denial(
+    abi: &str,
+    count: u64,
+    timeout: i64,
+    wait_mask: u64,
+    wait_mask_present: u64,
+) {
+    if let Some((trace, pid, tid, cpu)) = firefox_network_trace_slot(
+        &FIREFOX_POLL_DENIAL_DIAGNOSTICS,
+        FIREFOX_DENIAL_DIAGNOSTIC_LIMIT,
+        "poll-denial",
+    ) {
+        // The caller's compound predicate already failed. Do not repeat user
+        // range checks merely to distinguish which operand rejected the call.
+        crate::serial_println!(
+            "MAKOS_FIREFOX_SOCKET_POLL_DENIED trace={} pid={} tid={} cpu={} abi={} count={} timeout={} wait_mask={:#x} wait_mask_present={} reason=compound-validation result=-22 scope=diagnostic-only",
+            trace, pid, tid, cpu, abi, count, timeout, wait_mask, wait_mask_present,
+        );
+    }
+}
+
+fn connect_address_untraced(handle: u64, address: IpAddress, remote_port: u16) -> bool {
     if remote_port == 0 || !valid_remote(address) {
         return false;
     }

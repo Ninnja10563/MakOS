@@ -29,6 +29,28 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-17 native network boundary observation
+
+Exact `f3cfdfea28311811aa54f4dcf02a169886466df2` passes every earlier Mac/HVF
+gate and65-patch preflight. Firefox paint41937ms, Ctrl-A6213ms and first
+character142ms pass, then first navigation fails without target page-stop/TLS;
+pixel comparison is not reached. No final raw fatal, retry or visible login.
+All39 private disks, final serial, logs and captures remain in
+`build/logs/macos-http-continuation-20261017-366oqF/`; QEMU exits.
+128 complete records identify target classifier completion/proxy callback and
+Connect entry. No downstream cache/socket cause is proved. See
+[native network boundary diagnostics](FIREFOX-NETWORK-BOUNDARY-20261017.md).
+Next increment observes existing native connect/denial boundaries without
+network-policy changes. Host regression passes8cases/9negative controls;
+unit/check347.47s and image/artifact checks15.11s pass exit0 in
+`build/logs/firefox-network-boundary-fixed-20261017-HL8Rid/`.
+Earlier host mutation-fixture failure remains in
+`build/logs/firefox-network-boundary-20261017-uq238J/`, no guest launched.
+Fresh exact-commit qualification is pending. Reuse preserved65
+master2b113938/manifest0e109cbf from the Mac protocol, no browser rebuild,
+reintegration, restamp or profile edit. Keep T3 open and all runtime conditions.
+No audit row is upgraded. This supersedes historical pending instructions below.
+
 ### 2026-10-17 HTTP continuation observation
 
 Latest exact Mac/HVF `d671da168a79c1b89b77c78c66fb7e07ce0208bd`
