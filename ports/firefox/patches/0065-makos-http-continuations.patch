@@ -1,0 +1,415 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] diagnostics: trace HTTP acceptance continuations by channel
+
+Observe accepted parent/child HTTP loads, classifier dispatch and callbacks,
+proxy resolution, suspend/resume and connection entry. Preserve every return,
+callback order, ignored-dispatch policy and browser security decision.
+Reuse existing 128-attempt admission and single-write transport unchanged.
+Only real channel IDs and raw results; zero flags mean metadata unavailable.
+Classifier workers use a main-thread snapshot, never off-thread COM getters.
+No URL text, retry, forced callback, preference or qualification-limit change.
+NS_OK on entry/void boundaries is neutral metadata, not a completed request.
+
+diff --git a/netwerk/protocol/http/nsHttpChannel.cpp b/netwerk/protocol/http/nsHttpChannel.cpp
+index b09056b..7793fda 100644
+--- a/netwerk/protocol/http/nsHttpChannel.cpp
++++ b/netwerk/protocol/http/nsHttpChannel.cpp
+@@ -7,6 +7,18 @@
+ // HttpLog.h should generally be included first
+ #include "HttpLog.h"
+
++#ifdef XP_MAKOS
++#  include "mozilla/MakOSRuntimeEvidence.h"
++// IDs and raw results only. The existing process admission/cap stays shared.
++#  define MAKOS_HTTP_SNAPSHOT() const uint64_t makosChannelId = mChannelId
++#  define MAKOS_HTTP_CONT(stage, result, channel) \
++    mozilla::makos::WriteLoadDiagnostic( \
++        stage, sizeof(stage) - 1, static_cast<uint32_t>(result), 0, channel, 0)
++#else
++#  define MAKOS_HTTP_SNAPSHOT() ((void)0)
++#  define MAKOS_HTTP_CONT(stage, result, channel) ((void)0)
++#endif
++
+ #include <inttypes.h>
+
+ #include "mozilla/ScopeExit.h"
+@@ -431,6 +443,8 @@ nsHttpChannel::LogMimeTypeMismatch(const nsACString& aMessageName,
+ //-----------------------------------------------------------------------------
+
+ nsresult nsHttpChannel::PrepareToConnect() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-prepare-enter", NS_OK, makosChannelId);
+   LOG(("nsHttpChannel::PrepareToConnect [this=%p]\n", this));
+
+   // notify "http-on-modify-request-before-cookies" observers
+@@ -541,9 +555,13 @@ nsresult nsHttpChannel::PrepareToConnect() {
+ }
+
+ nsresult nsHttpChannel::ContinuePrepareToConnect() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-continue-prepare", NS_OK, makosChannelId);
+   // notify "http-on-modify-request" observers
+   CallOnModifyRequestObservers();
+
++  MAKOS_HTTP_CONT("http-modify-return", NS_OK, makosChannelId);
++
+   return CallOrWaitForResume(
+       [](auto* self) { return self->OnBeforeConnect(); });
+ }
+@@ -599,6 +617,8 @@ void nsHttpChannel::SetPriorityHeader() {
+ }
+
+ nsresult nsHttpChannel::OnBeforeConnect() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-before-connect", NS_OK, makosChannelId);
+   nsresult rv = NS_OK;
+
+   // Check if request was cancelled during suspend AFTER on-modify-request
+@@ -1085,6 +1105,8 @@ nsresult nsHttpChannel::HandleOverrideResponse() {
+ }
+
+ nsresult nsHttpChannel::Connect() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-connect-enter", NS_OK, makosChannelId);
+   LOG(("nsHttpChannel::Connect [this=%p]\n", this));
+
+   if (mAPIRedirectTo) {
+@@ -3654,12 +3676,15 @@ nsresult nsHttpChannel::AsyncDoReplaceWithProxy(nsIProxyInfo* pi) {
+ }
+
+ nsresult nsHttpChannel::ResolveProxy() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-proxy-resolve-enter", NS_OK, makosChannelId);
+   LOG(("nsHttpChannel::ResolveProxy [this=%p]\n", this));
+
+   nsresult rv;
+
+   nsCOMPtr<nsIProtocolProxyService> pps;
+   pps = mozilla::components::ProtocolProxy::Service(&rv);
++  MAKOS_HTTP_CONT("http-proxy-service-return", rv, makosChannelId);
+   if (NS_FAILED(rv)) return rv;
+
+   // using the nsIProtocolProxyService2 allows a minor performance
+@@ -3674,6 +3699,7 @@ nsresult nsHttpChannel::ResolveProxy() {
+                            this, nullptr, getter_AddRefs(mProxyRequest));
+   }
+
++  MAKOS_HTTP_CONT("http-proxy-resolve-return", rv, makosChannelId);
+   return rv;
+ }
+
+@@ -6656,6 +6682,8 @@ nsHttpChannel::GetSecurityInfo(nsITransportSecurityInfo** securityInfo) {
+ // any error.
+ NS_IMETHODIMP
+ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-parent-open-enter", NS_OK, makosChannelId);
+   // doContentSecurityCheck and OnOpeningRequest fire observers that may
+   // spin nested event loops; hold a strong ref to this.
+   RefPtr<nsHttpChannel> self(this);
+@@ -6698,6 +6726,7 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
+   }
+
+   if (MaybeWaitForUploadStreamNormalization(listener, nullptr)) {
++    MAKOS_HTTP_CONT("http-upload-wait", NS_OK, makosChannelId);
+     return NS_OK;
+   }
+
+@@ -6748,6 +6777,8 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
+     MOZ_DIAGNOSTIC_ASSERT(!mOnTailUnblock);
+     mOnTailUnblock = &nsHttpChannel::AsyncOpenOnTailUnblock;
+
++    MAKOS_HTTP_CONT("http-tail-wait", NS_OK, makosChannelId);
++
+     LOG(("  put on hold until tail is unblocked"));
+     return NS_OK;
+   }
+@@ -6783,6 +6814,7 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
+
+   if (nsIOService::UseSocketProcess() &&
+       !gIOService->IsSocketProcessLaunchComplete()) {
++    MAKOS_HTTP_CONT("http-socket-process-wait", NS_OK, makosChannelId);
+     RefPtr<nsHttpChannel> self = this;
+     gIOService->CallOrWaitForSocketProcess(
+         [self]() { self->AsyncOpenFinal(TimeStamp::Now()); });
+@@ -6791,10 +6823,13 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
+
+   AsyncOpenFinal(TimeStamp::Now());
+
++  MAKOS_HTTP_CONT("http-parent-open-return", NS_OK, makosChannelId);
+   return NS_OK;
+ }
+
+ void nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-final-enter", NS_OK, makosChannelId);
+   // We save this timestamp from outside of the if block in case we enable the
+   // profiler after AsyncOpen().
+   mLastStatusReported = TimeStamp::Now();
+@@ -6836,8 +6871,10 @@ void nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
+   if (!LoadAuthRedirectedChannel() &&
+       NS_ShouldClassifyChannel(this, ClassifyType::ETP)) {
+     RefPtr<nsHttpChannel> self = this;
+-    willCallback = NS_SUCCEEDED(
++    MAKOS_HTTP_CONT("http-classifier-call", NS_OK, makosChannelId);
++    nsresult classifierResult =
+         AsyncUrlChannelClassifier::CheckChannel(this, [self]() -> void {
++          MAKOS_HTTP_CONT("http-classifier-callback", NS_OK, self->mChannelId);
+           nsCOMPtr<nsIURI> uri;
+           self->GetURI(getter_AddRefs(uri));
+           MOZ_ASSERT(uri);
+@@ -6847,10 +6884,13 @@ void nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
+           FinishAntiTrackingRedirectHeuristic(self, uri);
+
+           self->MaybeResolveProxyAndBeginConnect();
+-        }));
++        });
++    MAKOS_HTTP_CONT("http-classifier-return", classifierResult, makosChannelId);
++    willCallback = NS_SUCCEEDED(classifierResult);
+   }
+
+   if (!willCallback) {
++    MAKOS_HTTP_CONT("http-classifier-direct", NS_OK, makosChannelId);
+     // We can do MaybeResolveProxyAndBeginConnect immediately if
+     // CheckIsTrackerWithLocalTable is failed. Note that we don't need to
+     // handle the failure because BeginConnect() will return synchronously and
+@@ -6860,6 +6900,8 @@ void nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
+ }
+
+ void nsHttpChannel::MaybeResolveProxyAndBeginConnect() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-proxy-or-connect", NS_OK, makosChannelId);
+   nsresult rv;
+
+   // The common case for HTTP channels is to begin proxy resolution and return
+@@ -6869,6 +6911,7 @@ void nsHttpChannel::MaybeResolveProxyAndBeginConnect() {
+   if (!mProxyInfo &&
+       !(mLoadFlags & (LOAD_ONLY_FROM_CACHE | LOAD_NO_NETWORK_IO)) &&
+       !BypassProxy() && NS_SUCCEEDED(ResolveProxy())) {
++    MAKOS_HTTP_CONT("http-proxy-accepted", NS_OK, makosChannelId);
+     return;
+   }
+
+@@ -6880,6 +6923,7 @@ void nsHttpChannel::MaybeResolveProxyAndBeginConnect() {
+     rv = NS_ERROR_NOT_AVAILABLE;
+   } else {
+     rv = BeginConnect();
++    MAKOS_HTTP_CONT("http-begin-connect-return", rv, makosChannelId);
+   }
+   if (NS_FAILED(rv)) {
+     CloseCacheEntry(false);
+@@ -6888,6 +6932,8 @@ void nsHttpChannel::MaybeResolveProxyAndBeginConnect() {
+ }
+
+ nsresult nsHttpChannel::AsyncOpenOnTailUnblock() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-tail-callback", NS_OK, makosChannelId);
+   AUTO_PROFILER_FLOW_MARKER("nsHttpChannel::AsyncOpenOnTailUnblock", NETWORK,
+                             Flow::FromPointer(this));
+   return AsyncOpen(mListener);
+@@ -6931,6 +6977,8 @@ nsHttpChannel::GetProxyDNSStrategy(
+ // MaybeResolveProxyAndBeginConnect and OnProxyAvailable ever call
+ // BeginConnect.
+ nsresult nsHttpChannel::BeginConnect() {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-begin-connect-enter", NS_OK, makosChannelId);
+   LOG(("nsHttpChannel::BeginConnect [this=%p]\n", this));
+   nsresult rv;
+
+@@ -7539,6 +7587,8 @@ nsHttpChannel::SetIncremental(bool incremental) {
+ NS_IMETHODIMP
+ nsHttpChannel::OnProxyAvailable(nsICancelable* request, nsIChannel* channel,
+                                 nsIProxyInfo* pi, nsresult status) {
++  MAKOS_HTTP_SNAPSHOT();
++  MAKOS_HTTP_CONT("http-proxy-callback", status, makosChannelId);
+   LOG(("nsHttpChannel::OnProxyAvailable [this=%p pi=%p status=%" PRIx32
+        " mStatus=%" PRIx32 "]\n",
+        this, pi, static_cast<uint32_t>(status),
+@@ -7615,6 +7665,7 @@ nsHttpChannel::OnProxyAvailable(nsICancelable* request, nsIChannel* channel,
+     CloseCacheEntry(false);
+     Unused << AsyncAbort(rv);
+   }
++  MAKOS_HTTP_CONT("http-proxy-callback-return", rv, makosChannelId);
+   return rv;
+ }
+
+@@ -10308,7 +10359,9 @@ nsHttpChannel::OnPreflightFailed(nsresult aError) {
+
+ nsresult nsHttpChannel::CallOrWaitForResume(
+     const std::function<nsresult(nsHttpChannel*)>& aFunc) {
++  MAKOS_HTTP_SNAPSHOT();
+   if (mCanceled) {
++    MAKOS_HTTP_CONT("http-resume-canceled", static_cast<nsresult>(mStatus), makosChannelId);
+     MOZ_ASSERT(NS_FAILED(mStatus));
+     return mStatus;
+   }
+@@ -10317,10 +10370,14 @@ nsresult nsHttpChannel::CallOrWaitForResume(
+     LOG(("Waiting until resume [this=%p]\n", this));
+     MOZ_ASSERT(!mCallOnResume);
+     mCallOnResume = aFunc;
++    MAKOS_HTTP_CONT("http-resume-queued", NS_OK, makosChannelId);
+     return NS_OK;
+   }
+
+-  return aFunc(this);
++  MAKOS_HTTP_CONT("http-resume-call", NS_OK, makosChannelId);
++  nsresult continuationResult = aFunc(this);
++  MAKOS_HTTP_CONT("http-resume-return", continuationResult, makosChannelId);
++  return continuationResult;
+ }
+
+ // This is loosely based on:
+
+diff --git a/netwerk/protocol/http/HttpChannelChild.cpp b/netwerk/protocol/http/HttpChannelChild.cpp
+index 276eb9f..35a69d5 100644
+--- a/netwerk/protocol/http/HttpChannelChild.cpp
++++ b/netwerk/protocol/http/HttpChannelChild.cpp
+@@ -8,6 +8,17 @@
+ // HttpLog.h should generally be included first
+ #include "HttpLog.h"
+
++#ifdef XP_MAKOS
++#  include "mozilla/MakOSRuntimeEvidence.h"
++#  define MAKOS_HTTP_CHILD_SNAPSHOT() const uint64_t makosChannelId = mChannelId
++#  define MAKOS_HTTP_CHILD_CONT(stage, result, channel) \
++    mozilla::makos::WriteLoadDiagnostic( \
++        stage, sizeof(stage) - 1, static_cast<uint32_t>(result), 0, channel, 0)
++#else
++#  define MAKOS_HTTP_CHILD_SNAPSHOT() ((void)0)
++#  define MAKOS_HTTP_CHILD_CONT(stage, result, channel) ((void)0)
++#endif
++
+ #include "nsError.h"
+ #include "nsHttp.h"
+ #include "nsICacheEntry.h"
+@@ -2169,10 +2180,13 @@ HttpChannelChild::GetSecurityInfo(nsITransportSecurityInfo** aSecurityInfo) {
+
+ NS_IMETHODIMP
+ HttpChannelChild::AsyncOpen(nsIStreamListener* aListener) {
++  MAKOS_HTTP_CHILD_SNAPSHOT();
++  MAKOS_HTTP_CHILD_CONT("http-child-open-enter", NS_OK, makosChannelId);
+   AUTO_PROFILER_LABEL("HttpChannelChild::AsyncOpen", NETWORK);
+   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
+
+   nsresult rv = AsyncOpenInternal(aListener);
++  MAKOS_HTTP_CHILD_CONT("http-child-open-return", rv, makosChannelId);
+   if (NS_FAILED(rv)) {
+     uint32_t blockingReason = 0;
+     mLoadInfo->GetRequestBlockingReason(&blockingReason);
+
+diff --git a/netwerk/url-classifier/AsyncUrlChannelClassifier.cpp b/netwerk/url-classifier/AsyncUrlChannelClassifier.cpp
+index e27542d..5a5064a 100644
+--- a/netwerk/url-classifier/AsyncUrlChannelClassifier.cpp
++++ b/netwerk/url-classifier/AsyncUrlChannelClassifier.cpp
+@@ -5,6 +5,15 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+ #include "Classifier.h"
++
++#ifdef XP_MAKOS
++#  include "mozilla/MakOSRuntimeEvidence.h"
++#  define MAKOS_CLASS_CONT(stage, result, channel) \
++    mozilla::makos::WriteLoadDiagnostic( \
++        stage, sizeof(stage) - 1, static_cast<uint32_t>(result), 0, channel, 0)
++#else
++#  define MAKOS_CLASS_CONT(stage, result, channel) ((void)0)
++#endif
+ #include "mozilla/Components.h"
+ #include "mozilla/ErrorNames.h"
+ #include "mozilla/net/AsyncUrlChannelClassifier.h"
+@@ -567,6 +576,11 @@ class FeatureTask {
+   // Called on the main-thread to process the channel.
+   void CompleteClassification();
+
++#ifdef XP_MAKOS
++  // Captured on the main thread before publication; workers read only this ID.
++  uint64_t MakOSDiagnosticChannelId() const { return mMakOSDiagnosticChannelId; }
++#endif
++
+   nsresult GetOrCreateURIData(nsIURI* aURI, nsIURI* aInnermostURI,
+                               nsIUrlClassifierFeature::URIType aURIType,
+                               URIData** aData);
+@@ -581,6 +595,10 @@ class FeatureTask {
+   nsCOMPtr<nsIChannel> mChannel;
+   RefPtr<CallbackHolder> mCallbackHolder;
+
++#ifdef XP_MAKOS
++  uint64_t mMakOSDiagnosticChannelId = 0;
++#endif
++
+   nsTArray<FeatureData> mFeatures;
+   nsTArray<RefPtr<URIData>> mURIs;
+   nsTArray<RefPtr<TableData>> mTables;
+@@ -637,6 +655,15 @@ FeatureTask::FeatureTask(nsIChannel* aChannel,
+
+   std::function<void()> callback = std::move(aCallback);
+   mCallbackHolder = new CallbackHolder(std::move(callback));
++
++#ifdef XP_MAKOS
++  const int savedErrno = errno;
++  {
++    nsCOMPtr<nsIIdentChannel> identified = do_QueryInterface(aChannel);
++    mMakOSDiagnosticChannelId = identified ? identified->ChannelId() : 0;
++  }
++  errno = savedErrno;
++#endif
+ }
+
+ FeatureTask::~FeatureTask() {
+@@ -749,6 +776,7 @@ void FeatureTask::DoLookup(nsUrlClassifierDBServiceWorker* aWorkerClassifier) {
+
+ void FeatureTask::CompleteClassification() {
+   MOZ_ASSERT(NS_IsMainThread());
++  MAKOS_CLASS_CONT("classifier-complete-enter", NS_OK, MakOSDiagnosticChannelId());
+
+   for (FeatureData& feature : mFeatures) {
+     if (!feature.MaybeCompleteClassification(mChannel)) {
+@@ -762,7 +790,9 @@ void FeatureTask::CompleteClassification() {
+        "channel %p [this=%p]",
+        mChannel.get(), this));
+
++  MAKOS_CLASS_CONT("classifier-callback-call", NS_OK, MakOSDiagnosticChannelId());
+   mCallbackHolder->Exec();
++  MAKOS_CLASS_CONT("classifier-callback-return", NS_OK, MakOSDiagnosticChannelId());
+ }
+
+ nsresult FeatureData::InitializeList(
+@@ -908,6 +938,8 @@ nsresult AsyncUrlChannelClassifier::CheckChannel(
+   RefPtr<nsUrlClassifierDBServiceWorker> workerClassifier =
+       nsUrlClassifierDBService::GetWorker();
+   if (NS_WARN_IF(!workerClassifier)) {
++    MAKOS_CLASS_CONT("classifier-worker-missing", NS_ERROR_FAILURE,
++                     task->MakOSDiagnosticChannelId());
+     return NS_ERROR_FAILURE;
+   }
+
+@@ -915,17 +947,27 @@ nsresult AsyncUrlChannelClassifier::CheckChannel(
+       "AsyncUrlChannelClassifier::CheckChannel",
+       [task, workerClassifier]() -> void {
+         MOZ_ASSERT(!NS_IsMainThread());
++        MAKOS_CLASS_CONT("classifier-lookup-enter", NS_OK,
++                         task->MakOSDiagnosticChannelId());
+         task->DoLookup(workerClassifier);
++        MAKOS_CLASS_CONT("classifier-lookup-return", NS_OK,
++                         task->MakOSDiagnosticChannelId());
+
+         nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+             "AsyncUrlChannelClassifier::CheckChannel - return",
+             [task]() -> void { task->CompleteClassification(); });
+
+-        NS_DispatchToMainThread(r);
++        const nsresult dispatchResult = NS_DispatchToMainThread(r);
++        MAKOS_CLASS_CONT("classifier-main-dispatch", dispatchResult,
++                         task->MakOSDiagnosticChannelId());
++        (void)dispatchResult;  // Preserve the original ignored-result policy.
+       });
+
+-  return nsUrlClassifierDBService::BackgroundThread()->Dispatch(
++  rv = nsUrlClassifierDBService::BackgroundThread()->Dispatch(
+       r, NS_DISPATCH_NORMAL);
++  MAKOS_CLASS_CONT("classifier-worker-dispatch", rv,
++                   task->MakOSDiagnosticChannelId());
++  return rv;
+ }
+
+ }  // namespace net

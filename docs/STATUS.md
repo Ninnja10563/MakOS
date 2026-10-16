@@ -4,6 +4,27 @@ Last updated: 2026-10-17.
 
 ## Current qualification update
 
+Exact Mac/HVF `d671da168a79c1b89b77c78c66fb7e07ce0208bd` passes all
+pre-Firefox gates and64-patch preflight. Paint41938ms, Ctrl-A6461ms and first
+character110ms pass; first navigation fails without target page-stop/TLS.
+Pixel comparison is not reached. No final raw fatal, retry or login; QEMU
+exited. All39 private disks/final raw/logs/captures remain in
+`build/logs/macos-channel-admission-20261017-56tIBi/`.
+The15 complete records show real channel AsyncOpen returning NS_OK but no
+request callback; asynchronous completion remains unresolved. New
+[HTTP continuation diagnostics](FIREFOX-HTTP-CONTINUATIONS-20261017.md)
+preserve policy and limits, adding production-derived host regression
+(23cases/14negative controls). Supported65-patch release passes exit0,
+real1938.28s, all five build audits and truthful provenance. Supported private
+integration passes exit0, real4260.36s; final preflight passes exit0, real0.71s.
+Published image `build/makos-firefox-http-yd85u8ir/makos-integrated-2b11393804661aa8.img`,
+SHA-256 `2b11393804661aa88b5b36bb1c8db73b4a8c57aeffc3b1d77b831298bd91c6cb`,
+manifest `0e109cbf5f5da900f5da92d3e5f85227f10eedd3600b0483f1a55ffc49496aba`.
+Fresh exact-commit qualification remains pending. Old outputs remain preserved;
+no browser fix, profile change, provenance restamp or audit upgrade.
+
+### Historical 64-patch release and preceding result
+
 Exact Mac/HVF `9388336974a4195c9b32e4311e18dc72ae486193` passes every
 pre-Firefox gate and63-patch preflight. Paint35145ms, Ctrl-A3822ms and first
 character101ms pass; first HTTPS navigation fails, with no target page-stop/

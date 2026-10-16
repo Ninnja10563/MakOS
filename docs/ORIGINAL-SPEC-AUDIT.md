@@ -11,6 +11,20 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+Exact Mac/HVF `d671da168a79c1b89b77c78c66fb7e07ce0208bd` passes all
+earlier gates/64-patch preflight, paint41938ms, Ctrl-A6461ms and first
+character110ms, then fails first navigation. No target page-stop/TLS or pixel
+comparison; no final raw fatal, retry or login. QEMU exits; all39 private
+disks/raw/logs/captures remain in
+`build/logs/macos-channel-admission-20261017-56tIBi/`.
+The15 complete records show synchronous AsyncOpen return, not asynchronous
+completion. [HTTP continuation diagnostics](FIREFOX-HTTP-CONTINUATIONS-20261017.md)
+add observation and host regression only. Supported65-patch release passes
+exit0, real1938.28s, with all five build audits/provenance. Supported private
+integration passes exit0, real4260.36s; final preflight exit0, real0.71s.
+Fresh qualification remains pending. No policy, assertion,
+deadline or audit row is changed. Entries below retain historical results.
+
 Exact Mac/HVF `9388336974a4195c9b32e4311e18dc72ae486193` passes earlier
 gates/63-patch preflight and paint35145ms/Ctrl-A3822ms/first-character101ms,
 then fails first navigation. No target page-stop/TLS or pixel comparison;

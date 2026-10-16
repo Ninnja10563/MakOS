@@ -13,7 +13,23 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current channel admission (2026-10-17): exact Mac/HVF `9388336974a4`
+Current HTTP continuation diagnostics (2026-10-17): exact Mac/HVF
+`d671da168a79` passes earlier gates/64-patch preflight, paint41938ms,
+Ctrl-A6461ms and first-character110ms, then fails first navigation.
+Fifteen complete records show synchronous AsyncOpen return; no callback record
+was captured, which does not prove callback nonexecution.
+[Patch0065](FIREFOX-HTTP-CONTINUATIONS-20261017.md) observes parent/child
+HTTP and accepted continuations without policy or threshold changes.
+Host regression passes23cases/14negative controls; supported65-patch release
+passes exit0, real1938.28s, with all five build audits/provenance. Supported
+private integration passes exit0, real4260.36s, final preflight exit0, real0.71s.
+Use the exact65-patch image/manifest in the Mac protocol; no redundant rebuild.
+Fresh exact-commit runtime qualification remains pending.
+Preserve all old source/release/images/profiles; never restamp or manually
+transplant binaries. Add `python3 ports/firefox/test-runtime-http.py
+--source-dir build/ports/firefox/source` to supported release checks.
+
+Historical channel admission (2026-10-17): exact Mac/HVF `9388336974a4`
 passes earlier gates and63-patch preflight, then fails first navigation after
 paint35145ms, Ctrl-A3822ms and first-character101ms. Startup exhausted all128
 diagnostic records. [Patch0064](FIREFOX-CHANNEL-ADMISSION-20261017.md) reserves

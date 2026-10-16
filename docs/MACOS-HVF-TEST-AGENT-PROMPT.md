@@ -15,18 +15,22 @@ Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
 Previous exact Mac-tested baseline: fc9338bbef4cb45c1c6a5548ca0511917d3ef10e
 
-Use the exact full channel-admission release commit supplied in chat,
+Use the exact full HTTP-continuation release commit supplied in chat,
 including the preceding kernel repairs. Read
-docs/FIREFOX-CHANNEL-ADMISSION-20261017.md first. Latest exact Mac/HVF
-9388336974a4195c9b32e4311e18dc72ae486193 passes all earlier gates and63-patch
-preflight; paint35145ms, Ctrl-A3822ms, first character101ms pass. First HTTPS
-navigation fails without page-stop/TLS proof or pixel comparison; no fatal,
-retry or login. All39 private disks/logs remain in
-build/logs/macos-channel-diagnostic-20261016-FfcY3B/. Startup consumed128
-diagnostic records before typed navigation. Patch0064 changes admission only,
-not browser policy, the128 cap or any gate. It needs a new supported64-patch
-release/integration, now completed with final preflight as recorded below.
-Fresh exact-commit runtime qualification remains pending.
+docs/FIREFOX-HTTP-CONTINUATIONS-20261017.md first. Latest exact Mac/HVF
+d671da168a79c1b89b77c78c66fb7e07ce0208bd passes all earlier gates and64-patch
+preflight; paint41938ms, Ctrl-A6461ms, first character110ms pass. First HTTPS
+navigation fails without target page-stop/TLS or pixel comparison; no final
+raw fatal, retry or login. All39 private disks/logs remain in
+build/logs/macos-channel-admission-20261017-56tIBi/. Fifteen complete records
+reach synchronous AsyncOpen return but capture no request callback record.
+Missing diagnostics do not prove nonexecution. Patch0065 adds
+HTTP continuation observations, not browser policy, cap or gate changes.
+Supported65-patch release passes all five build audits/provenance, exit0,
+real1938.28s. Supported private integration passes exit0, real4260.36s;
+final unchanged preflight passes exit0, real0.71s. Use the exact new image
+and manifest recorded below. Fresh exact-commit runtime qualification remains
+pending; never substitute a historical image.
 
 Historical63-patch contract, retained in
 docs/FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md. Exact then-latest Mac/HVF
@@ -73,8 +77,8 @@ self-host proof. That local run is not Mac/HVF qualification. Require all
 original self-host proofs below, without bypass, retry or reduced assertions.
 
 The preceding kernel-only repairs used unchanged 61-patch Firefox bytes.
-Current channel admission appends patch0064 and requires a supported new
-release/package/integration with truthful 64-patch provenance. Preserve the
+Current HTTP continuations append patch0065 and require a supported new
+release/package/integration with truthful 65-patch provenance. Preserve the
 October10 master, source/release caches, accounts, profiles and all evidence;
 never restamp old binaries, manually stage executables or edit profile prefs.
 The old image is integration source, not current runtime qualification input.
@@ -101,7 +105,8 @@ remote main to match, and record the exact tested commit.
    docs/AARCH64-SMP-SCHEDULER.md and
    docs/FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md and
    docs/FIREFOX-CHANNEL-DIAGNOSTICS-20261016.md and
-   docs/FIREFOX-CHANNEL-ADMISSION-20261017.md.
+   docs/FIREFOX-CHANNEL-ADMISSION-20261017.md and
+   docs/FIREFOX-HTTP-CONTINUATIONS-20261017.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load
@@ -383,16 +388,16 @@ remote main to match, and record the exact tested commit.
    `5baa9467ca510b8a1a207365abed12fe8b03f228432a80b2238b3b46042d00ce`
    and matching manifest SHA-256
    `4cb2b6ef3a7d4c4d852755ce33ebd0cbbbb4de5291b53a3d6dfc7a68fe2a6f6a`.
-   Current supported release/package markers must report 64 patches with exact ordered
+   Current supported release/package markers must report 65 patches with exact ordered
    series SHA-256
-   `117c028eda1c76c6c001b7fed6a6fc320e280e810e9f01e4c0d36917efa080b7`,
+   `465b7e7a990c1421241629bb32f1bcb08c0fa57b0aa733a6a1b90f1105d4c83c`,
    pinned Firefox 140.13.0esr source
    `90ad18aabeaa9cbd63a1f749a57f266e758e50da`, and all five audited build
    and stripped-runtime artifacts. Require the unchanged all-five-ELF,
    loaded-literal, hash and provenance preflight, not just an image hash.
    Historical61-patch series remains
    `770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab`;
-   old61/62/63-patch preflight is not a current64-patch pass. Preserve release/source
+   old61/62/63/64-patch preflight is not a current65-patch pass. Preserve release/source
    outputs before supported suffix application and build. Run sequentially:
 
        ports/firefox/test-widget.sh
@@ -400,6 +405,7 @@ remote main to match, and record the exact tested commit.
        python3 ports/firefox/test-runtime-evidence.py --source-dir build/ports/firefox/source
        python3 ports/firefox/test-runtime-navigation.py --source-dir build/ports/firefox/source
        python3 ports/firefox/test-runtime-channel.py --source-dir build/ports/firefox/source
+       python3 ports/firefox/test-runtime-http.py --source-dir build/ports/firefox/source
        env -u MAKOS_FIREFOX_DEVELOPER_BUILD ports/firefox/build-makos.sh -j1
 
    Use documented Mac toolchain and host Python3.11/3.12 for Firefox, Python3.14
@@ -409,26 +415,35 @@ remote main to match, and record the exact tested commit.
    current provenance and content-addressed publication. Record actual new
    image and manifest hashes. If the current release has already been built,
    reuse only its exact recorded new image after unchanged preflight; no
-   redundant rebuild. Never restamp/transplant or reuse old60/61/62/63-patch images
+   redundant rebuild. Never restamp/transplant or reuse old60/61/62/63/64-patch images
    as current qualification input. Set INTEGRATED_IMAGE to the new recorded
    path, then run:
 
        shasum -a 256 "$INTEGRATED_IMAGE"
        python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
 
-   Set INTEGRATED_IMAGE only to the recorded supported64-patch publication,
-   with actual recorded image and manifest hashes. Supported publication and
-   final preflight completed2026-10-17 local date; reuse without rebuilding:
+   Set INTEGRATED_IMAGE only to the recorded supported65-patch publication,
+   with actual recorded image and manifest hashes:
 
-       INTEGRATED_IMAGE=build/makos-firefox-admission-5ttx11ow/makos-integrated-e0752622edd1667b.img
+       INTEGRATED_IMAGE=build/makos-firefox-http-yd85u8ir/makos-integrated-2b11393804661aa8.img
 
-   Require image SHA-256
+   Required image SHA-256:
+   `2b11393804661aa88b5b36bb1c8db73b4a8c57aeffc3b1d77b831298bd91c6cb`
+   Required sibling manifest SHA-256:
+   `0e109cbf5f5da900f5da92d3e5f85227f10eedd3600b0483f1a55ffc49496aba`.
+   Supported release/integration and unchanged final preflight passed. Source
+   master, manifest, filesystem metadata and account/profile regions remain
+   unchanged. Evidence: build/logs/firefox-http-continuation-20261017-QloAyq/.
+   This is release authority, not a browser runtime pass. Do not rebuild,
+   reintegrate, restamp or edit profile preferences for this qualification.
+   Preserve the completed64-patch historical image
+   build/makos-firefox-admission-5ttx11ow/makos-integrated-e0752622edd1667b.img,
+   exact SHA-256
    `e0752622edd1667ba5e221847d39a79fd8f67f07ba1420830e51f465f68257f3`
    and sibling manifest SHA-256
    `ea88fc387142af444cb4ee5cd5c6a3b42496c60c832b3996b6ebd8d7d0f1e551`.
-   Source master, filesystem metadata and account/profile hashes match before
-   and after integration. Fresh exact-commit runtime qualification is pending.
-   Do not launch a historical image or manufacture an expected identity.
+   Its then-current preflight passed; exactd671da1 runtime failed navigation.
+   It is not current65-patch qualification authority.
    Preserve the completed63-patch historical image
    build/makos-firefox-channel-s25zw5qr/makos-integrated-efc352303ed6888c.img,
    exact SHA-256
@@ -436,7 +451,7 @@ remote main to match, and record the exact tested commit.
    and sibling manifest SHA-256
    `2592fa40ec5289a9e6ac17b82b2b39a24121ed7e216d316205ea4c02b1be35ab`.
    Its then-current preflight passed; exact9388336 runtime failed navigation.
-   It is not current64-patch qualification authority.
+   It is not current65-patch qualification authority.
    Preserve the previous62-patch master
    build/makos-firefox-navigation-iis0begx/makos-integrated-b5e45cf171c5bc44.img,
    SHA-256
@@ -458,7 +473,7 @@ remote main to match, and record the exact tested commit.
    recovery of the earlier lost account. A manifest or compact evidence ZIP
    cannot restore missing image bytes. If this exact SOURCE master is absent
    or its recorded image/manifest hash mismatches, stop and report the input
-   blocker. Current64-patch runtime preflight applies to the newly integrated
+   blocker. Current65-patch runtime preflight applies to the newly integrated
    image, not the historical61-patch source. Do not silently
    create a different test baseline or run another historical image.
 
@@ -480,7 +495,7 @@ remote main to match, and record the exact tested commit.
    assertions. Do not weaken or reinterpret any of them.
 
    Before QEMU, the target must print `MAKOS_FIREFOX_RUNTIME_IMAGE_OK` with the
-   pinned source, 64-patch series identity above,
+   pinned source, 65-patch series identity above,
    `artifacts=build-audited,runtime-sha256-matched`, and
    `elf=aarch64-pie,libxul
    all_five_elf=aarch64-et-dyn,interp-and-deps-by-kind`. Missing provenance,

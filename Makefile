@@ -269,6 +269,7 @@ unit:
 	python3 ports/firefox/test-runtime-evidence.py
 	python3 ports/firefox/test-runtime-navigation.py
 	python3 ports/firefox/test-runtime-channel.py
+	python3 ports/firefox/test-runtime-http.py
 	python3 ports/firefox/test-copy-private.py
 	python3 scripts/test_firefox_objdir.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py
@@ -360,6 +361,7 @@ check:
 	python3 ports/firefox/test-runtime-evidence.py
 	python3 ports/firefox/test-runtime-navigation.py
 	python3 ports/firefox/test-runtime-channel.py
+	python3 ports/firefox/test-runtime-http.py
 	python3 ports/firefox/test-copy-private.py
 	python3 scripts/test_firefox_objdir.py
 	python3 scripts/test_aarch64_firefox_trace_budget.py

@@ -29,6 +29,41 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-17 HTTP continuation observation
+
+Latest exact Mac/HVF `d671da168a79c1b89b77c78c66fb7e07ce0208bd`
+passes unit/check, image, all twelve earlier runtime gates and64-patch
+preflight. Paint41938ms, Ctrl-A6461ms and first-character110ms pass; first
+HTTPS navigation fails without target page-stop/TLS proof. Pixel comparison
+is not reached. No final raw fatal, retry, later assertion or visible login.
+All39 private disks, raw serial, screenshots and logs remain in
+`build/logs/macos-channel-admission-20261017-56tIBi/`; QEMU exited.
+The15 complete channel records identify load0x17/channel0x1c, all NS_OK,
+through synchronous AsyncOpen return. No request callback is recorded;
+attempt exhaustion is not established by15 captured records. Async completion
+and cause remain unknown; failed or short writes can also consume attempts.
+
+[Patch0065](FIREFOX-HTTP-CONTINUATIONS-20261017.md) observes actual HTTP
+parent/child entry, accepted waits, classifier dispatch/callback, proxy and
+suspend/resume continuations without changing policy, cap or thresholds.
+New production-derived host regression passes23cases/14negative controls;
+selected functions execute with explicit adapters, remaining branches have
+structural coverage only. Full64 source/release is independently preserved.
+Supported65-patch release passes exit0, real1938.28s, with all five artifact
+audits and truthful provenance. Supported private integration passes exit0,
+real4260.36s; final preflight passes exit0, real0.71s. Published image
+`build/makos-firefox-http-yd85u8ir/makos-integrated-2b11393804661aa8.img`,
+SHA-256 `2b11393804661aa88b5b36bb1c8db73b4a8c57aeffc3b1d77b831298bd91c6cb`,
+manifest `0e109cbf5f5da900f5da92d3e5f85227f10eedd3600b0483f1a55ffc49496aba`.
+Source5baa/manifest and account/profile regions remain unchanged. CPython
+cache and candidate image/runtime record are independently retained.
+Fresh exact-commit qualification remains pending;
+old64 image cannot be restamped as current input.
+Development evidence: `build/logs/firefox-http-continuation-20261017-QloAyq/`.
+Keep T3 Code open. No audit row is upgraded. This entry supersedes historical
+pending instructions below. During latest qualification no app was closed or
+paused; no system service was disabled.
+
 ### 2026-10-17 startup exhausted channel diagnostics
 
 Exact Mac/HVF `9388336974a4195c9b32e4311e18dc72ae486193` passes unit/check,

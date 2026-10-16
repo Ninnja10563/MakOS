@@ -1,5 +1,13 @@
 # Firefox channel diagnostic admission
 
+Superseded runtime result and next diagnostic contract:
+[HTTP continuations](FIREFOX-HTTP-CONTINUATIONS-20261017.md).
+Exact d671da168a79 qualification passes all earlier gates and64-patch
+preflight, then fails first navigation (paint41938ms/Ctrl-A6461ms/character110ms).
+Fifteen complete admitted records are captured; attempt exhaustion is not
+established and asynchronous completion remains unresolved. Historical identities remain
+preserved, not65-patch runtime authority.
+
 ## Preserved first failure
 
 Exact Mac/HVF commit `9388336974a4195c9b32e4311e18dc72ae486193` passes
