@@ -4,6 +4,27 @@ Last updated: 2026-10-17.
 
 ## Current qualification update
 
+Exact Mac/HVF `f666a8a5cb849427f6d89d9ef60375a5bcb82da0` passes all earlier
+gates and65-patch preflight, paint46312ms/Ctrl-A6391ms/first-character110ms,
+then fails first navigation without target page-stop/TLS or pixel comparison.
+No final raw fatal, retry or login; all39 private disks/raw/logs remain in
+`build/logs/macos-network-boundary-20261017-UvBwf1/`, QEMU exited. Six native
+connect pairs succeed before target navigation, without channel correlation.
+Target load0x17/channel0x1f reaches Gecko Connect; downstream cause unresolved.
+[First-channel HTTP state diagnostics](FIREFOX-HTTP-STATE-20261017.md) are the
+next bounded observation. Patch0066 and production-derived host regression
+pass33cases/21negative controls; unit/check422.96s and widget978.64s pass.
+Supported66-patch release passes exit0,1971.88s, with all five audits/provenance.
+Supported private integration passes exit0,4183.25s; final preflight exit0,0.78s.
+Published image2482999bc8233d3e/manifest5a7f5ac9 and all-five-artifact66-patch
+provenance are recorded in the Mac protocol. Source master/manifest and
+account/profile regions remain unchanged. New qualification remains pending.
+Preserve65 source/release/master, never restamp
+it as66. Two earlier host-development failures remain recorded, not guest failures.
+No network workaround, browser fix or audit upgrade is claimed.
+
+### Historical native boundary observation and preceding result
+
 Exact Mac/HVF `f3cfdfea28311811aa54f4dcf02a169886466df2` passes all earlier
 gates, exact65-patch image/manifest and runtime preflight. Paint41937ms,
 Ctrl-A6213ms and first-character142ms pass; first navigation fails without

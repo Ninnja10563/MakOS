@@ -1,0 +1,303 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] net: capture first top-web channel cache and transaction state
+
+Diagnostic-only: preserve HTTP control flow, existing load-record admission,
+returns and browser gates. Select the first real nonzero top-content web channel,
+retain 32 independent state-record attempts and one truthful saturation notice.
+No URLs, preferences, retries, cache bypass or network-policy changes.
+
+---
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+--- a/mfbt/MakOSRuntimeEvidence.h
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -70,6 +70,84 @@
+ }
+ 
+ 
++// BEGIN MakOS HTTP boundary diagnostics
++// First known top-content HTTP(S) channel only. No reset or redirect inference.
++inline Atomic<uint64_t>& HttpStateChannel() {
++  static Atomic<uint64_t> channel(0);
++  return channel;
++}
++
++inline void ObserveHttpStateChannel(uint64_t aChannel, uint32_t aFlags) {
++  if (aChannel && (aFlags & 9u) == 9u && (aFlags & 6u) != 0) {
++    HttpStateChannel().compareExchange(0, aChannel);
++  }
++}
++
++// Independent diagnostic budget; the original load-record cap is unchanged.
++// Attempts include short/error writes. The extra slot reports saturation once,
++// not a final count of omitted records. No retries or fragmented reconstruction.
++// True means the requested stage was fully written; saturation returns false.
++inline bool WriteHttpStateDiagnostic(const char* aStage, size_t aStageLength,
++                                    uint32_t aResult, bool aActualResult,
++                                    bool aAfterState, uint64_t aChannel,
++                                    uint32_t aWait, uint32_t aState,
++                                    uint32_t aSuspend) {
++  if (aStageLength > 32 || !aChannel || aChannel != HttpStateChannel()) {
++    return false;
++  }
++  static Atomic<uint32_t> attempts(0);
++  uint32_t prior = attempts;
++  for (;;) {
++    if (prior >= 33) {
++      return false;
++    }
++    if (attempts.compareExchange(prior, prior + 1)) {
++      break;
++    }
++    prior = attempts;
++  }
++  char record[256];
++  size_t length = 0;
++  auto append = [&](const char* text) {
++    while (*text) {
++      record[length++] = *text++;
++    }
++  };
++  auto hex = [&](uint64_t value, int highShift) {
++    for (int shift = highShift; shift >= 0; shift -= 4) {
++      record[length++] = "0123456789abcdef"[(value >> shift) & 15];
++    }
++  };
++  if (prior == 32) {
++    append("MAKOS_FIREFOX_HTTP_STATE_SATURATED channel=0x");
++    hex(aChannel, 60);
++    append(" cap=32 further_records=omitted scope=diagnostic-only\n");
++  } else {
++    append("MAKOS_FIREFOX_HTTP_STATE stage=");
++    for (size_t index = 0; index < aStageLength; ++index) {
++      record[length++] = aStage[index];
++    }
++    append(" result=0x");
++    hex(aResult, 28);
++    append(aActualResult ? " result_kind=actual" : " result_kind=neutral");
++    append(aAfterState ? " state_phase=after" : " state_phase=entry");
++    append(" channel=0x");
++    hex(aChannel, 60);
++    append(" wait=0x");
++    hex(aWait, 28);
++    append(" state=0x");
++    hex(aState, 28);
++    append(" suspend=0x");
++    hex(aSuspend, 28);
++    append(" scope=diagnostic-only\n");
++  }
++  const int savedErrno = errno;
++  const ssize_t written = write(STDERR_FILENO, record, length);
++  errno = savedErrno;
++  return prior < 32 && written == static_cast<ssize_t>(length);
++}
++// END MakOS HTTP boundary diagnostics
++
+ // Bounded load-path diagnostics, never page/TLS success proof. IDs come from
+ // real load/channel objects; zero means unavailable. Flags: bit0 top-content,
+ // bit1 HTTP, bit2 HTTPS, bit3 top-content known. No URI/user-input text.
+@@ -80,6 +158,7 @@
+   if (aStageLength > 32) {
+     return false;
+   }
++  ObserveHttpStateChannel(aChannel, aFlags);
+   // Arm once for a known top-content HTTP/HTTPS load. Do not spend the
+   // bounded diagnostic budget on earlier non-web startup loads. Once armed,
+   // retain unknown-metadata callbacks too; never reset admission on a load.
+diff --git a/netwerk/protocol/http/nsHttpChannel.cpp b/netwerk/protocol/http/nsHttpChannel.cpp
+--- a/netwerk/protocol/http/nsHttpChannel.cpp
++++ b/netwerk/protocol/http/nsHttpChannel.cpp
+@@ -18,6 +18,43 @@
+ #  define MAKOS_HTTP_SNAPSHOT() ((void)0)
+ #  define MAKOS_HTTP_CONT(stage, result, channel) ((void)0)
+ #endif
++
++// BEGIN MakOS HTTP boundary diagnostics
++#ifdef XP_MAKOS
++struct MakosHttpBoundaryState {
++  uint64_t channel;
++  uint32_t wait;
++  uint32_t state;
++  uint32_t suspend;
++};
++// Main-thread scalar snapshots only. Bits: 0 network-triggered, 1 proxy request,
++// 2 waiting-proxy, 3 DNS promise pending, 4 cache entry, 5 canceled, 6 pending,
++// 7 transaction, 8 transaction pump, 9 cache pump, 10 async resume, 11 cache race.
++#  define MAKOS_HTTP_STATE_CAPTURE(name)                                      \
++    const MakosHttpBoundaryState name {                                      \
++      mChannelId, LoadWaitForCacheEntry(),                                    \
++          (uint32_t(bool(mNetworkTriggered)) << 0) |                         \
++              (uint32_t(bool(mProxyRequest)) << 1) |                         \
++              (uint32_t(bool(mWaitingForProxy)) << 2) |                      \
++              (uint32_t(!mDNSBlockingPromise.IsEmpty()) << 3) |              \
++              (uint32_t(bool(mCacheEntry)) << 4) |                           \
++              (uint32_t(bool(mCanceled)) << 5) |                             \
++              (uint32_t(LoadIsPending()) << 6) |                             \
++              (uint32_t(bool(mTransaction)) << 7) |                          \
++              (uint32_t(bool(mTransactionPump)) << 8) |                      \
++              (uint32_t(bool(mCachePump)) << 9) |                            \
++              (uint32_t(LoadAsyncResumePending()) << 10) |                   \
++              (uint32_t(bool(mRaceCacheWithNetwork)) << 11), mSuspendCount   \
++    }
++#  define MAKOS_HTTP_STATE_TRACE(snapshot, stage, result, actual, after)       \
++    mozilla::makos::WriteHttpStateDiagnostic(                                 \
++        stage, sizeof(stage) - 1, static_cast<uint32_t>(result), actual,       \
++        after, snapshot.channel, snapshot.wait, snapshot.state, snapshot.suspend)
++#else
++#  define MAKOS_HTTP_STATE_CAPTURE(name) ((void)0)
++#  define MAKOS_HTTP_STATE_TRACE(snapshot, stage, result, actual, after) ((void)0)
++#endif
++// END MakOS HTTP boundary diagnostics
+ 
+ #include <inttypes.h>
+ 
+@@ -1107,9 +1144,12 @@
+ nsresult nsHttpChannel::Connect() {
+   MAKOS_HTTP_SNAPSHOT();
+   MAKOS_HTTP_CONT("http-connect-enter", NS_OK, makosChannelId);
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
++  MAKOS_HTTP_STATE_TRACE(makosState, "connect-enter", NS_OK, false, false);
+   LOG(("nsHttpChannel::Connect [this=%p]\n", this));
+ 
+   if (mAPIRedirectTo) {
++    MAKOS_HTTP_STATE_TRACE(makosState, "connect-redirect", NS_OK, false, false);
+     LOG(("nsHttpChannel::Connect [transparent=%d]\n",
+          mAPIRedirectTo->second()));
+ 
+@@ -1128,6 +1168,7 @@
+   // If mOverrideResponse is set, bypass the rest of the connection and reply
+   // immediately with a response built using the data from mOverrideResponse.
+   if (mOverrideResponse) {
++    MAKOS_HTTP_STATE_TRACE(makosState, "connect-override", NS_OK, false, false);
+     return HandleOverrideResponse();
+   }
+ 
+@@ -1181,6 +1222,7 @@
+   }
+ 
+   if (WaitingForTailUnblock()) {
++    MAKOS_HTTP_STATE_TRACE(makosState, "connect-tail-wait", NS_OK, false, false);
+     MOZ_DIAGNOSTIC_ASSERT(!mOnTailUnblock);
+     mOnTailUnblock = &nsHttpChannel::ConnectOnTailUnblock;
+     return NS_OK;
+@@ -1200,7 +1242,11 @@
+   SpeculativeConnect();
+ 
+   // open a cache entry for this channel...
++  MAKOS_HTTP_STATE_CAPTURE(makosCacheEntry);
++  MAKOS_HTTP_STATE_TRACE(makosCacheEntry, "cache-open-call", NS_OK, false, false);
+   rv = OpenCacheEntry(mURI->SchemeIs("https"));
++  MAKOS_HTTP_STATE_CAPTURE(makosCacheAfter);
++  MAKOS_HTTP_STATE_TRACE(makosCacheAfter, "cache-open-return", rv, true, true);
+ 
+   // do not continue if asyncOpenCacheEntry is in progress
+   if (AwaitingCacheCallbacks()) {
+@@ -1251,11 +1297,14 @@
+ }
+ 
+ nsresult nsHttpChannel::ContinueConnect() {
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
++  MAKOS_HTTP_STATE_TRACE(makosState, "continue-connect", NS_OK, false, false);
+   // If we need to start a CORS preflight, do it now!
+   // Note that it is important to do this before the early returns below.
+   AUTO_PROFILER_FLOW_MARKER("nsHttpChannel::ContinueConnect", NETWORK,
+                             Flow::FromPointer(this));
+   if (!LoadIsCorsPreflightDone() && LoadRequireCORSPreflight()) {
++    MAKOS_HTTP_STATE_TRACE(makosState, "continue-cors", NS_OK, false, false);
+     MOZ_ASSERT(!mPreflightChannel);
+     nsresult rv = nsCORSListenerProxy::StartCORSPreflight(
+         this, this, mUnsafeHeaders, getter_AddRefs(mPreflightChannel));
+@@ -1273,6 +1322,7 @@
+   if (mCacheEntry) {
+     // read straight from the cache if possible...
+     if (CachedContentIsValid()) {
++      MAKOS_HTTP_STATE_TRACE(makosState, "continue-cache", NS_OK, false, false);
+       // If we're forced offline, and set to bypass the cache, return offline.
+       if (bc && bc->Top()->GetForceOffline() &&
+           BYPASS_LOCAL_CACHE(mLoadFlags, LoadPreferCacheLoadOverBypass())) {
+@@ -1321,15 +1371,19 @@
+   }
+ 
+   // hit the net...
++  MAKOS_HTTP_STATE_TRACE(makosState, "continue-network", NS_OK, false, false);
+   nsresult rv = DoConnect(mTransactionSticky);
+   mTransactionSticky = nullptr;
+   return rv;
+ }
+ 
+ nsresult nsHttpChannel::DoConnect(HttpTransactionShell* aTransWithStickyConn) {
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
++  MAKOS_HTTP_STATE_TRACE(makosState, "do-connect-enter", NS_OK, false, false);
+   LOG(("nsHttpChannel::DoConnect [this=%p]\n", this));
+ 
+   if (!mDNSBlockingPromise.IsEmpty()) {
++    MAKOS_HTTP_STATE_TRACE(makosState, "do-connect-dns-wait", NS_OK, false, false);
+     LOG(("  waiting for DNS prefetch"));
+ 
+     // Transaction is passed only from auth retry for which we will definitely
+@@ -1364,10 +1418,12 @@
+ 
+ nsresult nsHttpChannel::DoConnectActual(
+     HttpTransactionShell* aTransWithStickyConn) {
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
+   LOG(("nsHttpChannel::DoConnectActual [this=%p, aTransWithStickyConn=%p]\n",
+        this, aTransWithStickyConn));
+ 
+   nsresult rv = SetupChannelForTransaction();
++  MAKOS_HTTP_STATE_TRACE(makosState, "transaction-setup-return", rv, true, false);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+@@ -1377,9 +1433,11 @@
+ 
+ nsresult nsHttpChannel::DispatchTransaction(
+     HttpTransactionShell* aTransWithStickyConn) {
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
+   LOG(("nsHttpChannel::DispatchTransaction [this=%p, aTransWithStickyConn=%p]",
+        this, aTransWithStickyConn));
+   nsresult rv = InitTransaction();
++  MAKOS_HTTP_STATE_TRACE(makosState, "transaction-init-return", rv, true, false);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+@@ -1389,12 +1447,14 @@
+   } else {
+     rv = gHttpHandler->InitiateTransaction(mTransaction, mPriority);
+   }
++  MAKOS_HTTP_STATE_TRACE(makosState, "transaction-dispatch-return", rv, true, false);
+ 
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   rv = mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
++  MAKOS_HTTP_STATE_TRACE(makosState, "transaction-read-return", rv, true, false);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+@@ -4758,6 +4818,8 @@
+ nsHttpChannel::OnCacheEntryAvailable(nsICacheEntry* entry, bool aNew,
+                                      nsresult status) {
+   MOZ_ASSERT(NS_IsMainThread());
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
++  MAKOS_HTTP_STATE_TRACE(makosState, "cache-callback-enter", status, true, false);
+ 
+   nsresult rv;
+ 
+@@ -4854,6 +4916,8 @@
+                                                     bool aNew,
+                                                     nsresult aEntryStatus) {
+   StoreWaitForCacheEntry(LoadWaitForCacheEntry() & ~WAIT_FOR_CACHE_ENTRY);
++  MAKOS_HTTP_STATE_CAPTURE(makosCacheAfter);
++  MAKOS_HTTP_STATE_TRACE(makosCacheAfter, "cache-wait-cleared", aEntryStatus, true, true);
+ 
+   if (NS_FAILED(aEntryStatus) || aNew) {
+     // Make sure this flag is dropped.  It may happen the entry is doomed
+@@ -10811,6 +10875,8 @@
+ 
+ nsresult nsHttpChannel::TriggerNetwork() {
+   MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
++  MAKOS_HTTP_STATE_CAPTURE(makosState);
++  MAKOS_HTTP_STATE_TRACE(makosState, "trigger-network", NS_OK, false, false);
+ 
+   LOG(("nsHttpChannel::TriggerNetwork [this=%p]\n", this));
+ 

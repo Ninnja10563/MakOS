@@ -29,6 +29,39 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-17 first-channel HTTP continuation state
+
+Exact `f666a8a5cb849427f6d89d9ef60375a5bcb82da0` passes all earlier Mac/HVF
+gates and65-patch preflight. Firefox paint46312ms, Ctrl-A6391ms and first
+character110ms pass, then first navigation fails without target page-stop/TLS;
+pixel comparison not reached. No final raw fatal/retry/login; QEMU exits.
+All39 private disks/final raw/logs/captures remain in
+`build/logs/macos-network-boundary-20261017-UvBwf1/`. Six native connect pairs
+succeed before target load, without channel identity. Target0x1f reaches Gecko
+Connect and actual NS_OK unwinding, not proven downstream completion.
+See [HTTP state diagnostics](FIREFOX-HTTP-STATE-20261017.md). Next patch0066
+adds first-channel cache/proxy/DNS/transaction state, not browser policy changes.
+Patch0066 implemented; host regression passes33cases/21negative controls.
+Unit/check422.96s, widget978.64s and all release host checks pass. Supported66
+release passes exit0,1971.88s, all five artifact audits/provenance. Private
+integration passes exit0,4183.25s; final preflight exit0,0.78s. Reuse
+`build/makos-firefox-state-djoburnx/makos-integrated-2482999bc8233d3e.img`,
+image SHA-256 `2482999bc8233d3e424575a58b4145036d90d7d4cab44a3cda7501bca5524fd8`,
+manifest SHA-256 `5a7f5ac96d21dbfbdfb98b1d8be949e1e8b54afa077f81367cc9e25aeaa7c4d7`.
+Source master/manifest and account/profile regions remain unchanged;
+independent candidate/runtime-record retention passes. Fresh qualification
+remains pending. Evidence:
+`build/logs/firefox-http-state-release-20261017-jV3KHo/`. Independent65 source/
+release preservation and first malformed-patch failure remain in
+`build/logs/firefox-http-boundary-20261017-FYObrM/`; a second deliberate-mutant
+compile failure remains in `build/logs/firefox-http-boundary-fixed-20261017-EkG7rx/`.
+Corrected focused passes are in `build/logs/http-boundary-focused-20261017-SVW1QA/`.
+Neither failure launched a guest. Preserve all historical masters,
+accounts/profiles and sealed failures. Truthful66-patch release used
+supported packaging/integration into a unique content-addressed clone; old65
+bytes are not new provenance. No assertions/thresholds weakened or audit rows
+upgraded. Keep T3 open. This supersedes historical pending instructions below.
+
 ### 2026-10-17 native network boundary observation
 
 Exact `f3cfdfea28311811aa54f4dcf02a169886466df2` passes every earlier Mac/HVF

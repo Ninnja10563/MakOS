@@ -1,5 +1,16 @@
 # Firefox native network boundary diagnostics
 
+## Subsequent exact qualification
+
+Exact `f666a8a5cb849427f6d89d9ef60375a5bcb82da0` passes all earlier Mac/HVF
+gates and65-patch preflight, then fails first navigation after paint46312ms,
+Ctrl-A6391ms and first-character110ms pass. All39 private disks/raw evidence
+remain, QEMU exits, no retry/login. Six successful native connect pairs precede
+target load; none identifies its Gecko channel. No captured denial/saturation
+or final fatal. [First-channel HTTP state observation](FIREFOX-HTTP-STATE-20261017.md)
+records the exact result and next bounded scope. Historical pending text below
+is retained, superseded by this result. No network root cause is established.
+
 ## Preserved failure, not a browser repair
 
 Exact Mac/HVF source `f3cfdfea28311811aa54f4dcf02a169886466df2` passes

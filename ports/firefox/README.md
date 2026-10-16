@@ -35,7 +35,20 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
-Current qualification (2026-10-17): exact Mac/HVF `f3cfdfea28311` passes
+Current qualification (2026-10-17): exact Mac/HVF `f666a8a5cb84` passes
+earlier gates/65-patch preflight, paint46312ms/Ctrl-A6391ms/first-character110ms,
+then fails first navigation. Six native connect pairs precede target load and
+do not identify its channel. All39 private disks/raw evidence remain; no retry
+or login, and no captured fatal. [HTTP state diagnostics](../../docs/FIREFOX-HTTP-STATE-20261017.md)
+are implemented, not a browser fix. Host regression33cases/21controls passes;
+unit/check422.96s, widget978.64s and supported66-patch release1971.88s pass
+with all five artifact audits/provenance. Supported private integration4183.25s
+and final preflight0.78s pass exit0. Reuse image2482999bc8233d3e/manifest5a7f5ac9
+from the Mac protocol; fresh qualification remains pending. Source/account/
+profile preservation passes. The65 release/source were independently retained
+before suffix application; never restamp old binaries.
+
+Historical qualification (2026-10-17): exact Mac/HVF `f3cfdfea28311` passes
 earlier gates/65-patch preflight, paint41937ms/Ctrl-A6213ms/first-character142ms,
 then fails first navigation.128 complete diagnostics reach target classifier/
 proxy callbacks and Connect entry, not downstream completion. Raw evidence and

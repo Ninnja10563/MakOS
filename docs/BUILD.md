@@ -13,7 +13,22 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current native network observation (2026-10-17): exact Mac/HVF
+Current first-channel state observation (2026-10-17): exact Mac/HVF
+`f666a8a5cb84` passes all earlier gates/65-patch preflight and
+paint46312ms/Ctrl-A6391ms/first-character110ms, then fails first navigation.
+All39 private disks/raw evidence remain; no retry/login. Native connect traces
+do not identify target channel or cause. [HTTP state diagnostics](FIREFOX-HTTP-STATE-20261017.md)
+pass host regression33cases/21controls, unit/check422.96s and widget978.64s.
+Supported66-patch release passes exit0,1971.88s, all five audits/provenance;
+private integration passes4183.25s and final preflight0.78s, both exit0.
+Reuse new66 image2482999bc8233d3e/manifest5a7f5ac9 from the Mac protocol after
+exact hash/preflight checks. Source master/account/profile preservation passes;
+fresh qualification remains pending. The65 source/release were preserved before
+supported suffix application. Do not restamp old bytes or
+change profiles, network policy or any gate. Add the source-free/full-source
+`ports/firefox/test-runtime-http-boundary.py` regression to existing checks.
+
+Historical native network observation (2026-10-17): exact Mac/HVF
 `f3cfdfea28311` passes earlier gates/65-patch preflight and paint41937ms,
 Ctrl-A6213ms, first-character142ms, then fails first navigation. All private
 evidence remains. [Kernel boundary diagnostics](FIREFOX-NETWORK-BOUNDARY-20261017.md)
