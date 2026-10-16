@@ -4,6 +4,45 @@ Last updated: 2026-10-16.
 
 ## Current qualification update
 
+User freed storage to about53GiB; resumed preflight verifies unchanged master/
+manifest and all five preserved historical Firefox binaries. Full development
+unit/check including final private-copy wiring passes210.20s (exit0). The
+supported release passes with all five artifact audits and truthful62-patch
+provenance in `build/logs/firefox-navigation-resume-20261016-GYJod4/`.
+Supported private integration passes exit0 in3804.61s; final preflight passes
+exit0 in0.57s. New image is
+`build/makos-firefox-navigation-iis0begx/makos-integrated-b5e45cf171c5bc44.img`,
+SHA-256 `b5e45cf171c5bc44c211fc9b4dfb1d521237ce4ac86fadc362d0010206c47316`.
+Source master/manifest and account/profile regions remain unchanged; see the
+[diagnostic contract](FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md) for manifest
+identity and full evidence. No new runtime has launched. Release timing domains differ:
+time-p real31059.07s, recorder monotonic7533.546231s; retain both unchanged.
+
+Historical state at the first interruption (superseded by the resumed results
+above): the navigation-diagnostic release was storage-blocked, not qualified. Host
+diagnostic/provenance/widget/package-manifest tests pass; development
+unit/check passed in194.71s before the final private-copy wiring (focused
+wiring checks passed; final full validation was then pending). Supported release
+source verification and Rust compilation completed, but free disk briefly
+fell to0.703GiB and recovered only to about1.5GiB. The agent interrupted the
+remaining build before exhaustion: exit241, real1346.93s. No new build stamp,
+integration, runtime or login is claimed. Preserved release/source/CPython
+clones and logs remain in `build/logs/firefox-navigation-release-20261016-UxPYJQ/`.
+Changes were then uncommitted on d762; the interrupted attempt stays preserved.
+
+Exact `d762db55d5cf5c0992bf6592151bcf401e6b84b4` passes unit/check,
+image, all twelve Mac/HVF gates and original Firefox preflight. Firefox
+paint36540ms, Ctrl-A5242ms and first-character101ms pass; first HTTPS navigation
+fails without target page-stop/TLS evidence. Pixel comparison is not reached.
+No fatal is observed in final raw serial; no later assertion/retry/login.
+All private disks/evidence remain in
+`build/logs/macos-priority-migration-20261016-S3Y5tR/`; QEMU exited.
+Failed shared-map calls near SQLite IOERR are observed, but their navigation
+causality is unproven. The [navigation-boundary diagnostic](FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md)
+adds bounded actual dispatch/result evidence, requiring a fresh supported
+62-patch Firefox release/integrated clone, not restamped historical binaries.
+Original assertions/thresholds and all Partial/Missing audit rows remain.
+
 Exact `36a291a24189ae35a267cb9c0180bff1f83fd5bc` passes unit/check,
 image, all twelve Mac/HVF runtime gates and unchanged Firefox preflight.
 Firefox paints at48336ms, then Ctrl-A delivery times out; final raw serial

@@ -1,0 +1,208 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] navigation: capture bounded dispatch-boundary diagnostics
+
+Diagnostic only: preserve navigation policy, exceptions, returns and all
+qualification requirements. Do not print URLs, search strings or exception
+messages. Native records use at most 64 attempted, checked single fd-2 writes
+per process; failed/short writes consume admission and are never retried.
+JS records use at most 32 dump attempts per module. That JS transport may be
+disabled, buffered, fragmented or lost: it is not atomic runtime proof. Neither
+transport's absence establishes that a navigation stage did not execute.
+
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+--- a/mfbt/MakOSRuntimeEvidence.h
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -7,6 +7,8 @@
+ 
+ #ifdef XP_MAKOS
++#  include <errno.h>
+ #  include <stddef.h>
++#  include <stdint.h>
+ #  include <unistd.h>
+ #  include "mozilla/Atomics.h"
+ 
+@@ -28,6 +30,45 @@
+   return written == static_cast<ssize_t>(Size - 1);
+ }
+ 
++// Diagnostic records are not page-load or interaction success evidence.
++// Shared across stages in this process. No retry, including interrupted or
++// short writes; no claim about how many later records the cap suppressed.
++inline bool WriteNavigationDiagnostic(const char* aStage, size_t aStageLength,
++                                      uint32_t aResult, bool aHasLoadState) {
++  static Atomic<uint32_t> attempts(0);
++  uint32_t prior = attempts;
++  for (;;) {
++    if (prior >= 64 || aStageLength > 32) {
++      return false;
++    }
++    if (attempts.compareExchange(prior, prior + 1)) {
++      break;
++    }
++    prior = attempts;
++  }
++  char record[192];
++  size_t length = 0;
++  auto append = [&](const char* text) {
++    while (*text) {
++      record[length++] = *text++;
++    }
++  };
++  append("MAKOS_FIREFOX_NAV_DIAGNOSTIC stage=");
++  for (size_t index = 0; index < aStageLength; ++index) {
++    record[length++] = aStage[index];
++  }
++  append(" result=0x");
++  for (int shift = 28; shift >= 0; shift -= 4) {
++    record[length++] = "0123456789abcdef"[(aResult >> shift) & 15];
++  }
++  append(aHasLoadState ? " load_state=1" : " load_state=0");
++  append(" scope=diagnostic-only\n");
++  const int savedErrno = errno;
++  const ssize_t written = write(STDERR_FILENO, record, length);
++  errno = savedErrno;
++  return written == static_cast<ssize_t>(length);
++}
++
+ }  // namespace mozilla::makos
+ #endif  // XP_MAKOS
+ #endif  // mozilla_MakOSRuntimeEvidence_h
+diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
+--- a/docshell/base/nsDocShell.cpp
++++ b/docshell/base/nsDocShell.cpp
+@@ -32,5 +32,6 @@
+ #include "mozilla/LoadInfo.h"
+ #include "mozilla/Logging.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
+ #include "mozilla/MediaFeatureChange.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/PresShell.h"
+@@ -3210,48 +3211,74 @@
+ nsresult nsDocShell::FixupAndLoadURIString(
+     const nsAString& aURIString, const LoadURIOptions& aLoadURIOptions) {
++#ifdef XP_MAKOS
++  auto diagnostic = [](const auto& stage, nsresult result, bool hasState) {
++    mozilla::makos::WriteNavigationDiagnostic(
++        stage, sizeof(stage) - 1, static_cast<uint32_t>(result), hasState);
++  };
++#endif
+   if (!IsNavigationAllowed()) {
++#ifdef XP_MAKOS
++    diagnostic("fixup-denied", NS_OK, false);
++#endif
+     return NS_OK;  // JS may not handle returning of an error code
+   }
++#ifdef XP_MAKOS
++  diagnostic("fixup-allowed", NS_OK, false);
++#endif
+ 
+   RefPtr<nsDocShellLoadState> loadState;
+   nsresult rv = nsDocShellLoadState::CreateFromLoadURIOptions(
+       mBrowsingContext, aURIString, aLoadURIOptions, getter_AddRefs(loadState));
++#ifdef XP_MAKOS
++  diagnostic("fixup-created", rv, !!loadState);
++#endif
+ 
+   uint32_t loadFlags = aLoadURIOptions.mLoadFlags;
+   if (NS_ERROR_MALFORMED_URI == rv) {
+     MOZ_LOG(gSHLog, LogLevel::Debug,
+             ("Creating an active entry on nsDocShell %p to %s (because "
+              "we're showing an error page)",
+              this, NS_ConvertUTF16toUTF8(aURIString).get()));
+ 
+     // We need to store a session history entry. We don't have a valid URI, so
+     // we use about:blank instead.
+     nsCOMPtr<nsIURI> uri;
+     MOZ_ALWAYS_SUCCEEDS(NS_NewURI(getter_AddRefs(uri), "about:blank"_ns));
+     nsCOMPtr<nsIPrincipal> triggeringPrincipal;
+     if (aLoadURIOptions.mTriggeringPrincipal) {
+       triggeringPrincipal = aLoadURIOptions.mTriggeringPrincipal;
+     } else {
+       triggeringPrincipal = nsContentUtils::GetSystemPrincipal();
+     }
+     if (mozilla::SessionHistoryInParent()) {
+       mActiveEntry = MakeUnique<SessionHistoryInfo>(
+           uri, triggeringPrincipal, nullptr, nullptr, nullptr,
+           nsLiteralCString("text/html"));
+       mBrowsingContext->SetActiveSessionHistoryEntry(
+           Nothing(), mActiveEntry.get(), MAKE_LOAD_TYPE(LOAD_NORMAL, loadFlags),
+           /* aUpdatedCacheKey = */ 0);
+     }
+     if (DisplayLoadError(rv, nullptr, PromiseFlatString(aURIString).get(),
+                          nullptr) &&
+         (loadFlags & LOAD_FLAGS_ERROR_LOAD_CHANGES_RV) != 0) {
++#ifdef XP_MAKOS
++      diagnostic("fixup-errorpage-return", NS_ERROR_LOAD_SHOWED_ERRORPAGE,
++                 !!loadState);
++#endif
+       return NS_ERROR_LOAD_SHOWED_ERRORPAGE;
+     }
+   }
+ 
+   if (NS_FAILED(rv) || !loadState) {
++#ifdef XP_MAKOS
++    diagnostic("fixup-failure-return", NS_ERROR_FAILURE, !!loadState);
++#endif
+     return NS_ERROR_FAILURE;
+   }
+ 
+-  return LoadURI(loadState, true);
++  rv = LoadURI(loadState, true);
++#ifdef XP_MAKOS
++  diagnostic("fixup-load-return", rv, !!loadState);
++#endif
++  return rv;
+ }
+diff --git a/browser/components/urlbar/UrlbarInput.sys.mjs b/browser/components/urlbar/UrlbarInput.sys.mjs
+--- a/browser/components/urlbar/UrlbarInput.sys.mjs
++++ b/browser/components/urlbar/UrlbarInput.sys.mjs
+@@ -7,5 +7,26 @@
+ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+ 
++// Best-effort JS transport, not atomic proof: dump may be disabled, buffered,
++// fragmented or lost. Consume attempts even if dump throws; never retry.
++// No URLs, user input or exception messages enter these records.
++let makosNavigationAttempts = 0;
++function reportMakOSNavigation(stage, result = null) {
++  try {
++    if (makosNavigationAttempts >= 32 || Services.appinfo.OS !== "MakOS") {
++      return;
++    }
++    ++makosNavigationAttempts;
++    const present = Number.isInteger(result) &&
++      result >= -2147483648 && result <= 4294967295;
++    const code = present ? "0x" + (result >>> 0).toString(16).padStart(8, "0")
++                         : "unavailable";
++    dump("MAKOS_FIREFOX_NAV_JS_DIAGNOSTIC stage=" + stage +
++         " result=" + code + " transport=js-dump scope=diagnostic-only\n");
++  } catch {
++    // Diagnostic failure must not alter navigation or exception handling.
++  }
++}
++
+ const lazy = {};
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+@@ -3351,17 +3372,21 @@
+     // Notify about the start of navigation.
+     this._notifyStartNavigation(resultDetails);
+ 
++    reportMakOSNavigation("urlbar-open-call");
+     try {
+       this.window.openTrustedLinkIn(url, openUILinkWhere, params);
++      reportMakOSNavigation("urlbar-open-return");
+     } catch (ex) {
++      const result = ex.result;
++      reportMakOSNavigation("urlbar-open-catch", result);
+       // This load can throw an exception in certain cases, which means
+       // we'll want to replace the URL with the loaded URL:
+-      if (ex.result != Cr.NS_ERROR_LOAD_SHOWED_ERRORPAGE) {
++      if (result != Cr.NS_ERROR_LOAD_SHOWED_ERRORPAGE) {
+         this.handleRevert();
+       }
+     }
+ 
+     // If we show the focus border after closing the view, it would appear to
+     // flash since this._on_blur would remove it immediately after.
+     this.view.close({ showFocusBorder: false });
+   }

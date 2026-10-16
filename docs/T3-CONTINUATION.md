@@ -29,6 +29,93 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-16 storage restored; supported release and integration pass
+
+User freed storage to about53GiB. New evidence directory:
+`build/logs/firefox-navigation-resume-20261016-GYJod4/`.
+Preflight reverified exact original image/manifest hashes and all five old
+backup binaries against the preserved61-patch stamp. HEAD/main/origin/main/
+live remote remain d762; documented uncommitted changes are preserved.
+Full unit/check with final private-copy wiring passes (exit0,
+real210.20/user98.02/sys25.13). Supported release resumes only after that
+success, with original release/provenance checks and one build job. Previous
+interruption remains failure-status evidence, not a success or guest failure.
+Supported release completed exit0, all-five ELF/binary audits and truthful
+62-patch provenance. Source tree157444175e6d07f4860a4dbcb4ea83915249361b;
+libxul build SHA256af31a7c3b95ab29769e94ac1f07efbd3787ef8b321f94f3005af7629c0d0dfde.
+StartUTC2026-10-15T20:20:34.817462, end2026-10-16T04:58:13.906464.
+Keep exact time-p real31059.07/user5110.88/sys827.00 and recorder monotonic
+7533.546231s separately; do not equate these timing domains or call them
+guest timings. Supported integration started2026-10-16T08:25:55.732653 into
+`build/makos-firefox-navigation-iis0begx/`, from the unchanged5baa master.
+CPython3.14 staging passes. Integration exits0 at09:29:21UTC,
+real3804.61/user424.12/sys691.93; final preflight exits0 in0.57s.
+New image: `build/makos-firefox-navigation-iis0begx/makos-integrated-b5e45cf171c5bc44.img`.
+Image SHA256: `b5e45cf171c5bc44c211fc9b4dfb1d521237ce4ac86fadc362d0010206c47316`.
+Manifest SHA256: `9bde1add278f3ac0dc95f2f17d8dfb7a56e5c7e6cc6ca1a0bc18ee6a3be70e38`.
+All five artifact hashes/audits,62-patch authority, source full hash and
+metadata/account/profile-region preservation pass. Reuse this exact new image
+after preflight, not the historical61-patch input. No new runtime has launched.
+Temporary `caffeinate -i -w` ended with the controller; no persistent power
+settings changed. Packaging removed only its normal invocation-private staging;
+independent candidate/provenance copies survive in GYJod4 alongside the final
+published image. Old masters/backups/evidence remain. Commit/push the reviewed
+diagnostic/helper/tests/docs increment, then run fresh exact-commit qualification.
+
+### 2026-10-16 historical release interruption: storage, not a guest failure
+
+This subsection records state and required next steps at the interruption;
+the resumed results above supersede its pending-work instructions.
+HEAD then remained `d762db55d5cf5c0992bf6592151bcf401e6b84b4`; navigation
+diagnostic, provenance pin, private-copy helper/tests and documentation are
+recorded as then-uncommitted work. Evidence root:
+`build/logs/firefox-navigation-release-20261016-UxPYJQ/`.
+Full old Firefox source/release tree and CPython tree have independent APFS
+copy clones there; original master image/accounts/profile remain unchanged.
+Focused navigation/provenance/copy tests, widget and runtime-evidence tests
+pass. Development unit/check passed194.71s before final copy-helper wiring;
+focused wired checks pass, but rerun full checks for the final source state.
+
+Supported full release started at UTC2026-10-15T15:02:36.885052. Source
+verification passed and Rust completed, but disk fell to0.703GiB then about
+1.5GiB, below the old2.1GiB libxul alone. SIGINT to mach73057 did not stop it;
+SIGTERM to its verified make subtree ended the command at15:25:03.826132,
+exit241, real1346.93/user887.30/sys228.87. No SIGKILL, source/provenance bypass
+or retry. No new release stamp/integrated image/preflight/runtime/login.
+Existing canonical build outputs are partially rebuilt; the historical stamp
+is not current release authority. Do not package them as a completed release.
+No QEMU remains. Raycast quit normally with user permission; T3 Code untouched.
+
+Obtain more storage without deleting preserved work. No external writable
+data volume was available. After the storage condition changes, complete the
+supported release in a newly logged attempt, then supported integration,
+final validation, commit/push and fresh full exact-commit qualification.
+`integrate-release.py` was prepared but NOT RUN; it intentionally requires a
+successful recorded release. Do not weaken this guard or reuse the interrupted
+attempt's status as success. Review/update the recorder for a new attempt.
+
+### 2026-10-16 follow-up: navigation boundary remains unobserved
+
+Exact `d762db55d5cf5c0992bf6592151bcf401e6b84b4` passes unit/check,
+image, all twelve Mac/HVF gates and original image/provenance preflight.
+Firefox paint36540ms, Ctrl-A5242ms and first-character101ms pass; first HTTPS
+navigation fails without target page-stop/TLS proof. Pixel check is not
+reached; no final raw fatal appears. No later assertions/retry/login.
+QEMU43172/harness43155 exited; preserve complete report/raw serial/screenshots,
+host evidence, hashes and all private disks in
+`build/logs/macos-priority-migration-20261016-S3Y5tR/`.
+
+Three failed 32 KiB read/write `MAP_SHARED` calls on fd48/63 occur near SQLite
+IOERR, without pathname or proof that navigation depends on them. Do not
+implement private-page substitution or change preferences. The
+[next diagnostic](FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md) records real
+URL-bar/native load-boundary results with bounded output and unchanged
+behavior. Unlike earlier kernel-only increments, this requires supported
+62-patch release/package/integration and new truthful image identity. Preserve
+the original 61-patch source/release/master/profile and use its master as
+integration source, never restamp or manually stage. Full fresh exact-commit
+qualification and every original limit remain required. No audit upgrade.
+
 ### 2026-10-16 follow-up: real priority/migration fatal
 
 Exact `36a291a24189ae35a267cb9c0180bff1f83fd5bc` passes unit/check,

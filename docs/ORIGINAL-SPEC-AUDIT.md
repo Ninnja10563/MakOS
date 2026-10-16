@@ -10,6 +10,21 @@ Last audit: 2026-10-16. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification: exact Mac/HVF
+`d762db55d5cf5c0992bf6592151bcf401e6b84b4` passes unit/check, image,
+all twelve runtime gates and original Firefox preflight. Paint36540ms,
+Ctrl-A5242ms, first-character101ms pass; first HTTPS navigation fails without
+target page-stop/TLS proof. Pixel check is not reached, no fatal is observed,
+no retry/later assertion/login. Evidence/private disks:
+`build/logs/macos-priority-migration-20261016-S3Y5tR/`; QEMU exited.
+The [bounded navigation diagnostic](FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md)
+requires a new supported release, not restamped old artifacts. It is not a
+browser fix or qualification. All Partial/Missing rows remain unchanged.
+Supported62-patch release, all-five-artifact integration and runtime-image
+preflight now pass in `build/logs/firefox-navigation-resume-20261016-GYJod4/`.
+New image `b5e45cf171c5bc44` preserves the source account/profile regions;
+fresh exact-commit Mac/HVF runtime qualification remains pending.
+
+Earlier qualification: exact Mac/HVF
 `36a291a24189ae35a267cb9c0180bff1f83fd5bc` passes unit/check, image,
 all twelve runtime gates and original Firefox preflight. First paint48336ms;
 Ctrl-A delivery then fails. Final raw records identify kernel fatal

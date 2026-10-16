@@ -13,6 +13,23 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Navigation diagnostics (2026-10-16): exact Mac/HVF `d762db55d5cf`
+passes all twelve gates, preflight and Firefox input latency (Ctrl-A5242ms,
+first-character101ms), then fails first HTTPS navigation. No final raw fatal
+is observed. See [bounded diagnostics and release contract](FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md).
+Patch0062 requires a new supported nondeveloper release, all-five-artifact
+audits and truthful 62-patch provenance, integrated into a new private output
+from the preserved old master. Preserve old source/release/image/profile;
+never restamp. All runtime assertions and thresholds remain unchanged.
+The supported62-patch release/integration now passes. Reuse the exact image
+`build/makos-firefox-navigation-iis0begx/makos-integrated-b5e45cf171c5bc44.img`
+after verifying image SHA-256
+`b5e45cf171c5bc44c211fc9b4dfb1d521237ce4ac86fadc362d0010206c47316`,
+sibling manifest SHA-256
+`9bde1add278f3ac0dc95f2f17d8dfb7a56e5c7e6cc6ca1a0bc18ee6a3be70e38`
+and unchanged runtime preflight. Full exact-commit Mac/HVF runtime qualification
+remains pending; do not rebuild a release already verified and preserved.
+
 Priority/migration repair (2026-10-16): exact Mac/HVF `36a291a24189`
 passes all twelve gates and original Firefox preflight, then real Firefox
 fails Ctrl-A delivery with final raw fatal `AArch64 timer migration retained

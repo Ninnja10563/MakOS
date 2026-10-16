@@ -35,7 +35,18 @@ browser, or installs a fake browser UI. It now cross-builds official Gecko when
 the isolated MakOS sysroot is present, then audits the resulting ELF files.
 See `ABI.md` and `required-abi.txt` for target runtime gates.
 
-Current qualification (2026-10-10): attached Mac/HVF evidence at `73da7fc65cbc`
+Current qualification (2026-10-16): exact Mac/HVF `d762db55d5cf` passes all
+pre-Firefox gates, original preflight, verified paint36540ms, Ctrl-A5242ms and
+first-character101ms. First HTTPS navigation then fails without target
+page-stop/TLS proof; pixel comparison is not reached. No final raw fatal,
+retry, later assertion or visible login. The
+[navigation diagnostic](../../docs/FIREFOX-NAVIGATION-DIAGNOSTICS-20261016.md)
+adds bounded actual URL-bar/native load results, without changing navigation
+policy or qualification limits. It requires a fresh supported release,
+truthful 62-patch provenance and new integrated clone; do not restamp the
+preserved 61-patch master. No browser pass or audit upgrade is claimed.
+
+Historical qualification (2026-10-10): attached Mac/HVF evidence at `73da7fc65cbc`
 passes all pre-Firefox commands, supported 61-patch release/integration and
 unchanged provenance preflight. Strict Firefox still fails on missing
 `MAKOS_JIT_POOL_OK`; one browser-document submission, eight blits and seven
@@ -59,11 +70,11 @@ claim generated-code execution or completed scanout. All strict pixel and
 interaction assertions remain mandatory. Build/package/image audits now
 reject libxul without either loaded emitter literal.
 
-The exact current 61-patch SHA-256 is
-`770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab`.
+The exact current 62-patch SHA-256 is
+`3bc2756c89e093968e99481bd390e78d0f8e6aabb8d141b52c65d6117d558326`.
 Preserve previous images/provenance, private account/profile data and release
 caches. Run the supported release wrapper with developer mode unset and
-normal package/integration again; old 59/60-patch outputs cannot be restamped
+normal package/integration again; old 59/60/61-patch outputs cannot be restamped
 or reused as qualification input. See [the evidence repair](../../docs/FIREFOX-RUNTIME-EVIDENCE-20261010.md)
 and [the sequential Mac protocol](../../docs/MACOS-HVF-TEST-AGENT-PROMPT.md).
 `test-runtime-evidence.py` adds host success/failure/negative-control coverage;

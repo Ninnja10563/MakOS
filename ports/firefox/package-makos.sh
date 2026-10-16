@@ -195,7 +195,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir -p "$artifact_snapshot" "$package_root" "$additions"
 for artifact in $STAMPED_ARTIFACTS; do
-    cp "$BIN/$artifact" "$artifact_snapshot/$artifact"
+    # Independent COW copies avoid another unstripped libxul allocation on
+    # APFS. Preserve exact source modes inside the outer private directory;
+    # never hardlink mutable release inputs or weaken the repeated audits.
+    "$ROOT/ports/firefox/copy-private.sh" -p "$BIN/$artifact" "$artifact_snapshot/$artifact"
 done
 python3 "$ROOT/scripts/firefox_provenance.py" verify-build-stamp \
     --source-dir "$ROOT/build/ports/firefox/source" \
@@ -245,7 +248,7 @@ cp "$FONT_LICENSE" "$DIST/fonts/LICENSE-MPLUS.txt"
 cp "$FIREFOX_LICENSE" "$DIST/licenses/LICENSE"
 cp "$FIREFOX_LICENSE_HTML" "$DIST/licenses/license.html"
 cp "$MAKOS_PREFS" "$DIST/defaults/pref/makos.js"
-cp -R "$DIST/." "$package_root/"
+"$ROOT/ports/firefox/copy-private.sh" -Rp "$DIST/." "$package_root/"
 if [ -n "$(find "$package_root" -type l -print -quit)" ]; then
     echo "Private Firefox package candidate contains a symlink" >&2
     exit 2

@@ -14,9 +14,9 @@ import tempfile
 import firefox_provenance as provenance
 
 
-EXPECTED_PATCH_COUNT = 61
+EXPECTED_PATCH_COUNT = 62
 EXPECTED_PATCH_SHA256 = (
-    "770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab"
+    "3bc2756c89e093968e99481bd390e78d0f8e6aabb8d141b52c65d6117d558326"
 )
 
 
@@ -414,11 +414,12 @@ def main() -> int:
         EXPECTED_PATCH_COUNT,
         EXPECTED_PATCH_SHA256,
     )
-    # Packaging and runtime-evidence patches both change release authority.
+    # Packaging, runtime-evidence and navigation patches change release authority.
     # Neither historical build nor runtime stamps may be grandfathered in.
     previous_identities = {
         59: "c922d619398e64b6a162046efde105bc19152a9d868e9a2254ffa701874cc974",
         60: "4f6a84b2ec7c198b5e15b0273fe6931286c2836404ec231056e951d76d46d8fe",
+        61: "770b7659493b6b6545c64e37243f41982ede10f007f0f03a197aa552e40b3aab",
     }
     patches = sorted((provenance.ROOT / "ports/firefox/patches").glob("*.patch"))
     for previous_count, previous_identity in previous_identities.items():
