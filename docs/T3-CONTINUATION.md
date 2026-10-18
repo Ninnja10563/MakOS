@@ -29,6 +29,28 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-18 transaction admission observation
+
+Exact8bfb335631b1b1c67dffbe9d2e089e0611098e66 passes all earlier Mac/HVF
+gates and66-patch preflight. Paint37602ms/Ctrl-A6845ms/first-character110ms
+pass; first navigation fails, no target page-stop/TLS or pixel comparison.
+All39 private disks/final raw/logs remain in
+`build/logs/macos-http-state-20261018-w2I2up/`. No captured fatal/retry/login;
+QEMU exited. Thirteen first-channel records reach actual setup/init/dispatch/
+read NS_OK; manager path/downstream completion remain unproven.
+See [transaction boundary](FIREFOX-TRANSACTION-BOUNDARY-20261018.md).
+Patch0067 adds bounded diagnostics only. Full66 source/release independently
+preserved in `build/logs/firefox-transaction-boundary-20261018-2xbLiH/`.
+Host regression28cases/30controls, unit/check453.09s and widget846.83s pass.
+Supported67 release passes exit0,1886.12s, all five audits and provenance.
+Supported private integration passes4154.13s and final preflight0.73s,
+both exit0. Reuse new image8b191c84c05f1999/manifest450434ab pinned in the
+Mac protocol from `build/makos-firefox-transaction-y4rak151/`; independent
+candidate/runtime-record retention passes. Fresh qualification pending.
+Source5baa/account/profile regions remain protected; never restamp66.
+User-authorized Qwen weights removal freed9.59GB; MakOS assets untouched.
+Keep T3 Code open. This supersedes historical pending instructions below.
+
 ### 2026-10-17 first-channel HTTP continuation state
 
 Exact `f666a8a5cb849427f6d89d9ef60375a5bcb82da0` passes all earlier Mac/HVF

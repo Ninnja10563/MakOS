@@ -6,10 +6,27 @@ externally supplied Mac results are explicitly labeled user-reported.
 tested required core exists; `Partial` means real implementation exists but
 spec breadth remains; `Missing` means no qualifying implementation.
 
-Last audit: 2026-10-17. Primary interactive target: AArch64 QEMU/HVF on Apple
+Last audit: 2026-10-18. Primary interactive target: AArch64 QEMU/HVF on Apple
 Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
+
+Exact8bfb335631b1b1c67dffbe9d2e089e0611098e66 passes earlier Mac/HVF gates
+and66-patch preflight; paint37602ms/Ctrl-A6845ms/first-character110ms pass,
+first navigation fails. Pixel comparison not reached. No captured fatal,
+retry or login; QEMU exits, all39 private disks/final raw/logs retained in
+`build/logs/macos-http-state-20261018-w2I2up/`.
+[Transaction diagnostics](FIREFOX-TRANSACTION-BOUNDARY-20261018.md) are bounded
+observation, not a browser fix. Host regression28cases/30controls,
+unit/check453.09s and widget846.83s pass. Supported67 release passes exit0,
+1886.12s, all five audits/provenance. Supported integration4154.13s and final
+preflight0.73s pass exit0. New image8b191c84c05f1999/manifest450434ab are pinned
+in the Mac protocol. Source/account/profile preservation and independent
+candidate retention pass; fresh guest qualification remains pending.
+All Partial/Missing rows remain; historical66 bytes cannot qualify67 source.
+
+Historical publication/qualification state follows; pending instructions
+are superseded by the current result above.
 
 Exact Mac/HVF `f666a8a5cb849427f6d89d9ef60375a5bcb82da0` passes all earlier
 gates/65-patch preflight, paint46312ms/Ctrl-A6391ms/first-character110ms, then

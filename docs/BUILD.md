@@ -13,7 +13,22 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current first-channel state observation (2026-10-17): exact Mac/HVF
+Current transaction observation (2026-10-18):8bfb335631b1 passes all earlier
+Mac/HVF gates/preflight, then navigation fails after37602/6845/110ms
+paint/Ctrl-A/first-character. Preserve all39 private disks and raw evidence in
+`build/logs/macos-http-state-20261018-w2I2up/`; no retry/login, QEMU exited.
+[Transaction diagnostics](FIREFOX-TRANSACTION-BOUNDARY-20261018.md) require
+new supported67 release/package/integration after preserved66 source/release.
+Host regression28cases/30controls, unit/check453.09s and widget846.83s pass;
+supported67 release passes exit0,1886.12s, all five audits and provenance.
+Supported private integration4154.13s and final preflight0.73s pass exit0.
+Reuse image8b191c84c05f1999/manifest450434ab pinned in the Mac protocol;
+source/account/profile preservation and candidate retention pass. Guest
+qualification remains pending. Never use historical66 bytes as67 or change
+profiles, network policy or gates. New regression:
+`python3 ports/firefox/test-runtime-transaction.py --source-dir build/ports/firefox/source`.
+
+Historical first-channel state observation (2026-10-17): exact Mac/HVF
 `f666a8a5cb84` passes all earlier gates/65-patch preflight and
 paint46312ms/Ctrl-A6391ms/first-character110ms, then fails first navigation.
 All39 private disks/raw evidence remain; no retry/login. Native connect traces

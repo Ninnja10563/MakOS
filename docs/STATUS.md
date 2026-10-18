@@ -1,8 +1,26 @@
 # Implementation status
 
-Last updated: 2026-10-17.
+Last updated: 2026-10-18.
 
 ## Current qualification update
+
+Exact8bfb335631b1b1c67dffbe9d2e089e0611098e66 passes all earlier Mac/HVF
+gates and66-patch preflight. Firefox paint37602ms/Ctrl-A6845ms/first-character110ms
+pass, then first navigation fails without target completion or pixel comparison.
+All39 private disks/final raw/logs remain in
+`build/logs/macos-http-state-20261018-w2I2up/`; QEMU exited, no retry/login.
+[Transaction-boundary observation](FIREFOX-TRANSACTION-BOUNDARY-20261018.md)
+adds bounded manager/transaction/DNS diagnostics. No behavioral fix established.
+Full66 source/release preserved before application. Host regression28cases/
+30controls, unit/check453.09s and widget846.83s pass. Supported67 release passes
+exit0,1886.12s, all five audits and provenance. Supported private integration
+passes4154.13s and final preflight0.73s, both exit0. New image8b191c84c05f1999/
+manifest450434ab are pinned in the Mac protocol; source/account/profile
+preservation and independent candidate retention pass. Guest qualification
+pending. Old66 bytes are not67 authority.
+All existing gates/compiler settings remain. Audit Partial/Missing unchanged.
+
+### Historical66 publication state (superseded by completed8bfb run above)
 
 Exact Mac/HVF `f666a8a5cb849427f6d89d9ef60375a5bcb82da0` passes all earlier
 gates and65-patch preflight, paint46312ms/Ctrl-A6391ms/first-character110ms,

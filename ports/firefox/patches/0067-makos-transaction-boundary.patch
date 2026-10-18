@@ -1,0 +1,422 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] net: observe first-channel transaction admission and DNS continuation
+
+Diagnostic only: preserve transaction policy, cache, DNS retries and all gates.
+Record actual API results, explicit pending/admission branches and process identity.
+Independent bounded32+one saturation attempts; one manager-selection record.
+No URI/hostname capture, profile changes, forced dispatch or network bypass.
+
+---
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+--- a/mfbt/MakOSRuntimeEvidence.h
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -148,6 +148,105 @@
+ }
+ // END MakOS HTTP boundary diagnostics
+ 
++// BEGIN MakOS transaction diagnostics
++// Scalars captured before potentially reentrant calls. No lifetime extension.
++template <class Getter>
++inline uint64_t CaptureTransactionChannel(Getter aGetter) {
++  const int savedErrno = errno;
++  const uint64_t channel = aGetter();
++  errno = savedErrno;
++  return channel;
++}
++
++// Private transport for the admitted transaction/manager records below.
++// arg0/arg1 meanings are stage-specific; NS_OK at entry is explicitly neutral.
++inline bool WriteTransactionRecord(const char* aStage, size_t aStageLength,
++                                   uint32_t aResult, bool aActualResult,
++                                   uint64_t aChannel, uint32_t aArg0,
++                                   uint32_t aArg1, bool aSaturated) {
++  if (aStageLength > 32) {
++    return false;
++  }
++  const int savedErrno = errno;
++  const uint32_t pid = static_cast<uint32_t>(getpid());
++  char record[256];
++  size_t length = 0;
++  auto append = [&](const char* text) {
++    while (*text) {
++      record[length++] = *text++;
++    }
++  };
++  auto hex = [&](uint64_t value, int highShift) {
++    for (int shift = highShift; shift >= 0; shift -= 4) {
++      record[length++] = "0123456789abcdef"[(value >> shift) & 15];
++    }
++  };
++  if (aSaturated) {
++    append("MAKOS_FIREFOX_TRANSACTION_SATURATED pid=0x");
++    hex(pid, 28);
++    append(" channel=0x");
++    hex(aChannel, 60);
++    append(" cap=32 further_records=omitted scope=diagnostic-only\n");
++  } else {
++    append("MAKOS_FIREFOX_TRANSACTION stage=");
++    for (size_t index = 0; index < aStageLength; ++index) {
++      record[length++] = aStage[index];
++    }
++    append(" pid=0x");
++    hex(pid, 28);
++    append(" channel=0x");
++    hex(aChannel, 60);
++    append(" result=0x");
++    hex(aResult, 28);
++    append(aActualResult ? " result_kind=actual" : " result_kind=neutral");
++    append(" arg0=0x");
++    hex(aArg0, 28);
++    append(" arg1=0x");
++    hex(aArg1, 28);
++    append(" scope=diagnostic-only\n");
++  }
++  const ssize_t written = write(STDERR_FILENO, record, length);
++  errno = savedErrno;
++  return !aSaturated && written == static_cast<ssize_t>(length);
++}
++
++// First-channel latch is process-local. Separate 32+1 attempt budget; no retry
++// or attempt refund after short/error writes. Existing diagnostic caps unchanged.
++inline bool WriteTransactionDiagnostic(const char* aStage, size_t aStageLength,
++                                       uint32_t aResult, bool aActualResult,
++                                       uint64_t aChannel, uint32_t aArg0,
++                                       uint32_t aArg1) {
++  if (aStageLength > 32 || !aChannel || aChannel != HttpStateChannel()) {
++    return false;
++  }
++  static Atomic<uint32_t> attempts(0);
++  uint32_t prior = attempts;
++  for (;;) {
++    if (prior >= 33) {
++      return false;
++    }
++    if (attempts.compareExchange(prior, prior + 1)) {
++      break;
++    }
++    prior = attempts;
++  }
++  return WriteTransactionRecord(aStage, aStageLength, aResult, aActualResult,
++                                aChannel, aArg0, aArg1, prior == 32);
++}
++
++// One manager-selection attempt per process, independent of channel admission.
++// Channel zero explicitly means startup configuration, not a target request.
++inline bool WriteTransactionManager(bool aRemote) {
++  static Atomic<bool> attempted(false);
++  if (attempted.exchange(true)) {
++    return false;
++  }
++  return aRemote
++             ? WriteTransactionRecord("manager-ipc", 11, 0, false, 0, 0, 0, false)
++             : WriteTransactionRecord("manager-local", 13, 0, false, 0, 0, 0, false);
++}
++// END MakOS transaction diagnostics
++
+ // Bounded load-path diagnostics, never page/TLS success proof. IDs come from
+ // real load/channel objects; zero means unavailable. Flags: bit0 top-content,
+ // bit1 HTTP, bit2 HTTPS, bit3 top-content known. No URI/user-input text.
+@@ -213,4 +312,26 @@
+ 
+ }  // namespace mozilla::makos
+ #endif  // XP_MAKOS
++
++// BEGIN MakOS transaction macros
++#ifdef XP_MAKOS
++#  define MAKOS_TX_CAPTURE(name, expression)                                  \
++    const uint64_t name = mozilla::makos::CaptureTransactionChannel([&]() {    \
++      auto* makosTransaction = (expression);                                 \
++      return makosTransaction ? makosTransaction->ChannelId() : uint64_t(0); \
++    })
++#  define MAKOS_TX_VALUE(name, expression) \
++    const uint32_t name = static_cast<uint32_t>(expression)
++#  define MAKOS_TX_TRACE(channel, stage, result, actual, arg0, arg1)          \
++    mozilla::makos::WriteTransactionDiagnostic(                              \
++        stage, sizeof(stage) - 1, static_cast<uint32_t>(result), actual,      \
++        channel, static_cast<uint32_t>(arg0), static_cast<uint32_t>(arg1))
++#  define MAKOS_TX_MANAGER(remote) mozilla::makos::WriteTransactionManager(remote)
++#else
++#  define MAKOS_TX_CAPTURE(name, expression) ((void)0)
++#  define MAKOS_TX_VALUE(name, expression) ((void)0)
++#  define MAKOS_TX_TRACE(channel, stage, result, actual, arg0, arg1) ((void)0)
++#  define MAKOS_TX_MANAGER(remote) ((void)0)
++#endif
++// END MakOS transaction macros
+ #endif  // mozilla_MakOSRuntimeEvidence_h
+diff --git a/netwerk/protocol/http/nsHttpConnectionMgr.cpp b/netwerk/protocol/http/nsHttpConnectionMgr.cpp
+--- a/netwerk/protocol/http/nsHttpConnectionMgr.cpp
++++ b/netwerk/protocol/http/nsHttpConnectionMgr.cpp
+@@ -5,6 +5,7 @@
+ 
+ // HttpLog.h should generally be included first
+ #include "HttpLog.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
+ 
+ // Log on level :5, instead of default :4.
+ #undef LOG
+@@ -1277,11 +1278,14 @@
+ // returns other NS_ERROR on hard failure conditions
+ nsresult nsHttpConnectionMgr::MakeNewConnection(
+     ConnectionEntry* ent, PendingTransactionInfo* pendingTransInfo) {
++  MAKOS_TX_CAPTURE(makosChannel, pendingTransInfo->Transaction());
++  MAKOS_TX_TRACE(makosChannel, "new-connection-enter", NS_OK, false, 0, 0);
+   LOG(("nsHttpConnectionMgr::MakeNewConnection %p ent=%p trans=%p", this, ent,
+        pendingTransInfo->Transaction()));
+   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+ 
+   if (ent->FindConnToClaim(pendingTransInfo)) {
++    MAKOS_TX_TRACE(makosChannel, "connection-claimed", NS_OK, false, 0, 0);
+     return NS_OK;
+   }
+ 
+@@ -1292,6 +1296,7 @@
+   // negotiation is known.
+   if (!(trans->Caps() & NS_HTTP_DISALLOW_SPDY) &&
+       (trans->Caps() & NS_HTTP_ALLOW_KEEPALIVE) && ent->RestrictConnections()) {
++    MAKOS_TX_TRACE(makosChannel, "connection-restricted", NS_OK, false, 0, 0);
+     LOG(
+         ("nsHttpConnectionMgr::MakeNewConnection [ci = %s] "
+          "Not Available Due to RestrictConnections()\n",
+@@ -1336,13 +1341,21 @@
+   }
+ 
+   if (AtActiveConnectionLimit(ent, trans->Caps())) {
++    MAKOS_TX_TRACE(makosChannel, "connection-limit", NS_OK, false,
++                   mNumActiveConns, mMaxConns);
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
++  MAKOS_TX_VALUE(makosActive, mNumActiveConns);
++  MAKOS_TX_VALUE(makosLimit, mMaxConns);
++  MAKOS_TX_TRACE(makosChannel, "dns-socket-create-call", NS_OK, false,
++                 makosActive, makosLimit);
+   nsresult rv = ent->CreateDnsAndConnectSocket(
+       trans, trans->Caps(), false, false,
+       trans->GetClassOfService().Flags() & nsIClassOfService::UrgentStart, true,
+       pendingTransInfo);
++  MAKOS_TX_TRACE(makosChannel, "dns-socket-create-return", rv, true,
++                 makosActive, makosLimit);
+   if (NS_FAILED(rv)) {
+     /* hard failure */
+     LOG(
+@@ -1369,6 +1382,9 @@
+   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+ 
+   nsHttpTransaction* trans = pendingTransInfo->Transaction();
++  MAKOS_TX_CAPTURE(makosChannel, trans);
++  MAKOS_TX_TRACE(makosChannel, "try-dispatch-enter", NS_OK, false,
++                 onlyReusedConnection, 0);
+ 
+   LOG(
+       ("nsHttpConnectionMgr::TryDispatchTransaction without conn "
+@@ -1521,6 +1537,7 @@
+       }
+     }
+     if (!runNow) {
++      MAKOS_TX_TRACE(makosChannel, "dispatch-paced", NS_OK, false, 0, 0);
+       LOG(("   blocked due to rate pacing trans=%p\n", trans));
+       return NS_ERROR_NOT_AVAILABLE;
+     }
+@@ -1546,12 +1563,14 @@
+   // This usually happens when the pref "network.dns.force_waiting_https_rr" is
+   // true or when echConfig is enabled.
+   if (trans->WaitingForHTTPSRR()) {
++    MAKOS_TX_TRACE(makosChannel, "dispatch-https-rr-wait", NS_OK, false, 0, 0);
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+   // step 4
+   if (!onlyReusedConnection) {
+     nsresult rv = MakeNewConnection(ent, pendingTransInfo);
++    MAKOS_TX_TRACE(makosChannel, "make-connection-return", rv, true, 0, 0);
+     if (NS_SUCCEEDED(rv)) {
+       // this function returns NOT_AVAILABLE for asynchronous connects
+       LOG(("   dispatched step 4 (async new conn) trans=%p\n", trans));
+@@ -1765,12 +1784,15 @@
+ 
+ nsresult nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction* trans) {
+   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
++  MAKOS_TX_CAPTURE(makosChannel, trans);
++  MAKOS_TX_TRACE(makosChannel, "process-enter", NS_OK, false, 0, 0);
+ 
+   // since "adds" and "cancels" are processed asynchronously and because
+   // various events might trigger an "add" directly on the socket thread,
+   // we must take care to avoid dispatching a transaction that has already
+   // been canceled (see bug 190001).
+   if (NS_FAILED(trans->Status())) {
++    MAKOS_TX_TRACE(makosChannel, "process-canceled", NS_OK, false, 0, 0);
+     LOG(("  transaction was canceled... dropping event!\n"));
+     return NS_OK;
+   }
+@@ -1834,6 +1856,7 @@
+ 
+     trans->SetConnection(nullptr);
+     rv = DispatchTransaction(ent, trans, conn);
++    MAKOS_TX_TRACE(makosChannel, "process-dispatch-return", rv, true, 0, 0);
+   } else if (isWildcard) {
+     // We have a HTTP/2 session to the proxy, create a new tunneled
+     // connection.
+@@ -1853,6 +1876,8 @@
+       bool atLimit = AtActiveConnectionLimit(ent, trans->Caps());
+       if (atLimit) {
+         rv = NS_ERROR_NOT_AVAILABLE;
++        MAKOS_TX_TRACE(makosChannel, "wildcard-connection-limit", NS_OK, false, 0,
++                       0);
+       } else {
+         RefPtr<nsHttpConnection> newTunnel;
+         connTCP->CreateTunnelStream(trans, getter_AddRefs(newTunnel));
+@@ -1861,11 +1886,13 @@
+         trans->SetConnection(nullptr);
+         newTunnel->SetInSpdyTunnel();
+         rv = DispatchTransaction(ent, trans, newTunnel);
++        MAKOS_TX_TRACE(makosChannel, "process-dispatch-return", rv, true, 0, 0);
+         // need to undo the bypass for transaction reset for proxy
+         trans->MakeNonRestartable();
+       }
+     } else {
+       rv = DispatchTransaction(ent, trans, connTCP);
++      MAKOS_TX_TRACE(makosChannel, "process-dispatch-return", rv, true, 0, 0);
+     }
+   } else {
+     if (!ent->AllowHttp2()) {
+@@ -1873,6 +1900,7 @@
+     }
+     pendingTransInfo = new PendingTransactionInfo(trans);
+     rv = TryDispatchTransaction(ent, false, pendingTransInfo);
++    MAKOS_TX_TRACE(makosChannel, "process-dispatch-return", rv, true, 0, 0);
+   }
+ 
+   if (NS_SUCCEEDED(rv)) {
+@@ -1886,6 +1914,7 @@
+     }
+ 
+     ent->InsertTransaction(pendingTransInfo);
++    MAKOS_TX_TRACE(makosChannel, "pending-insert-return", NS_OK, false, 0, 0);
+     return NS_OK;
+   }
+ 
+@@ -2158,10 +2187,13 @@
+ void nsHttpConnectionMgr::OnMsgNewTransaction(int32_t priority,
+                                               ARefBase* param) {
+   nsHttpTransaction* trans = static_cast<nsHttpTransaction*>(param);
++  MAKOS_TX_CAPTURE(makosChannel, trans);
++  MAKOS_TX_TRACE(makosChannel, "new-message", NS_OK, false, priority, 0);
+ 
+   LOG(("nsHttpConnectionMgr::OnMsgNewTransaction [trans=%p]\n", trans));
+   trans->SetPriority(priority);
+   nsresult rv = ProcessNewTransaction(trans);
++  MAKOS_TX_TRACE(makosChannel, "process-return", rv, true, priority, 0);
+   if (NS_FAILED(rv)) trans->Close(rv);  // for whatever its worth
+ }
+ 
+diff --git a/netwerk/protocol/http/nsHttpHandler.cpp b/netwerk/protocol/http/nsHttpHandler.cpp
+--- a/netwerk/protocol/http/nsHttpHandler.cpp
++++ b/netwerk/protocol/http/nsHttpHandler.cpp
+@@ -6,6 +6,7 @@
+ 
+ // HttpLog.h should generally be included first
+ #include "HttpLog.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
+ 
+ #include "prsystem.h"
+ 
+@@ -620,6 +621,7 @@
+   }
+ 
+   if (nsIOService::UseSocketProcess(true) && XRE_IsParentProcess()) {
++    MAKOS_TX_MANAGER(true);
+     mConnMgr = new HttpConnectionMgrParent();
+     RefPtr<nsHttpHandler> self = this;
+     auto task = [self]() {
+@@ -638,6 +640,7 @@
+     gIOService->CallOrWaitForSocketProcess(std::move(task));
+   } else {
+     MOZ_ASSERT(XRE_IsSocketProcess() || !nsIOService::UseSocketProcess());
++    MAKOS_TX_MANAGER(false);
+     mConnMgr = new nsHttpConnectionMgr();
+   }
+ 
+diff --git a/netwerk/protocol/http/DnsAndConnectSocket.cpp b/netwerk/protocol/http/DnsAndConnectSocket.cpp
+--- a/netwerk/protocol/http/DnsAndConnectSocket.cpp
++++ b/netwerk/protocol/http/DnsAndConnectSocket.cpp
+@@ -5,6 +5,7 @@
+ 
+ // HttpLog.h should generally be included first
+ #include "HttpLog.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
+ 
+ #include "ConnectionHandle.h"
+ #include "DnsAndConnectSocket.h"
+@@ -395,6 +396,9 @@
+ NS_IMETHODIMP
+ DnsAndConnectSocket::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
+                                       nsresult status) {
++  MAKOS_TX_CAPTURE(makosChannel,
++                    mTransaction ? mTransaction->QueryHttpTransaction() : nullptr);
++  MAKOS_TX_TRACE(makosChannel, "dns-callback", status, true, 0, 0);
+   LOG((
+       "DnsAndConnectSocket::OnLookupComplete: this=%p mState=%d status %" PRIx32
+       ".",
+@@ -414,6 +418,7 @@
+   RefPtr<DnsAndConnectSocket> deleteProtector(this);
+ 
+   if (!request || (!IsPrimary(request) && !IsBackup(request))) {
++    MAKOS_TX_TRACE(makosChannel, "dns-callback-unmatched", NS_OK, false, 0, 0);
+     return NS_OK;
+   }
+ 
+@@ -436,12 +441,14 @@
+   bool isPrimary = IsPrimary(request);
+   if (isPrimary) {
+     rv = mPrimaryTransport.OnLookupComplete(this, rec, status);
++    MAKOS_TX_TRACE(makosChannel, "dns-transport-return", rv, true, 1, 0);
+     if ((!mIsHttp3 && mPrimaryTransport.ConnectingOrRetry()) ||
+         (mIsHttp3 && mPrimaryTransport.Resolved())) {
+       SetupEvent(SetupEvents::RESOLVED_PRIMARY_EVENT);
+     }
+   } else {
+     rv = mBackupTransport.OnLookupComplete(this, rec, status);
++    MAKOS_TX_TRACE(makosChannel, "dns-transport-return", rv, true, 0, 0);
+   }
+ 
+   if (NS_FAILED(rv) || mIsHttp3) {
+@@ -1320,6 +1327,12 @@
+ 
+ nsresult DnsAndConnectSocket::TransportSetup::ResolveHost(
+     DnsAndConnectSocket* dnsAndSock) {
++  MAKOS_TX_CAPTURE(makosChannel, dnsAndSock->mTransaction
++                                      ? dnsAndSock->mTransaction->QueryHttpTransaction()
++                                      : nullptr);
++  MAKOS_TX_VALUE(makosBackup, mIsBackup);
++  MAKOS_TX_TRACE(makosChannel, "dns-resolve-enter", NS_OK, false, mDnsFlags,
++                 makosBackup);
+   MOZ_DIAGNOSTIC_ASSERT(!mSocketTransport);
+   MOZ_DIAGNOSTIC_ASSERT(!mStreamOut);
+   MOZ_DIAGNOSTIC_ASSERT(!mDNSRequest);
+@@ -1329,6 +1342,8 @@
+                                                          : ""));
+   nsCOMPtr<nsIDNSService> dns = GetOrInitDNSService();
+   if (!dns) {
++    MAKOS_TX_TRACE(makosChannel, "dns-service-missing", NS_OK, false, 0,
++                   makosBackup);
+     return NS_ERROR_FAILURE;
+   }
+ 
+@@ -1339,12 +1354,17 @@
+ 
+   nsresult rv = NS_OK;
+   do {
++    MAKOS_TX_VALUE(makosFlags, mDnsFlags);
++    MAKOS_TX_TRACE(makosChannel, "dns-submit-call", NS_OK, false, makosFlags,
++                   makosBackup);
+     rv = dns->AsyncResolveNative(
+         mHost, nsIDNSService::RESOLVE_TYPE_DEFAULT,
+         mDnsFlags | nsIDNSService::RESOLVE_WANT_RECORD_ON_ERROR, nullptr,
+         dnsAndSock, gSocketTransportService,
+         dnsAndSock->mConnInfo->GetOriginAttributes(),
+         getter_AddRefs(mDNSRequest));
++    MAKOS_TX_TRACE(makosChannel, "dns-submit-return", rv, true, makosFlags,
++                   makosBackup);
+   } while (NS_FAILED(rv) && ShouldRetryDNS());
+ 
+   if (NS_FAILED(rv)) {
