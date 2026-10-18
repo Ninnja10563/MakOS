@@ -339,6 +339,8 @@ pub struct TcpConnection {
     receive_sequence: u32,
     receive_window: u16,
     closed: bool,
+    // Orderly peer FIN only; RST and local close must not manufacture EOF.
+    peer_eof: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -351,6 +353,8 @@ pub struct Tcp6Connection {
     receive_sequence: u32,
     receive_window: u16,
     closed: bool,
+    // Orderly peer FIN only; RST and local close must not manufacture EOF.
+    peer_eof: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1038,6 +1042,7 @@ pub fn tcp_connect(remote_ip: [u8; 4], remote_port: u16, local_port: u16) -> Opt
             receive_sequence: result.receive_sequence,
             receive_window: result.receive_window,
             closed: false,
+            peer_eof: false,
         });
     }
     tcp_connect_on_owner(remote_ip, remote_port, local_port)
@@ -1094,6 +1099,7 @@ fn tcp_connect_on_owner(
             receive_sequence,
             receive_window: TCP_DEFAULT_RECEIVE_WINDOW,
             closed: false,
+            peer_eof: false,
         })
     })
 }
@@ -1188,6 +1194,7 @@ pub fn tcp_receive(connection: &mut TcpConnection, output: &mut [u8]) -> Option<
             )?;
             if segment.flags & 0x04 != 0 {
                 connection.closed = true;
+                connection.peer_eof = false;
                 return None;
             }
             if segment.sequence != connection.receive_sequence {
@@ -1213,6 +1220,7 @@ pub fn tcp_receive(connection: &mut TcpConnection, output: &mut [u8]) -> Option<
             connection.receive_sequence = connection.receive_sequence.wrapping_add(count as u32);
             if segment.flags & 0x01 != 0 {
                 connection.receive_sequence = connection.receive_sequence.wrapping_add(1);
+                connection.peer_eof = true;
                 connection.closed = true;
             }
             if count != 0 || connection.closed {
@@ -1258,11 +1266,16 @@ pub fn tcp_close(connection: &mut TcpConnection) {
         });
     }
     connection.transmit_sequence = connection.transmit_sequence.wrapping_add(1);
+    connection.peer_eof = false;
     connection.closed = true;
 }
 
 pub fn tcp_is_closed(connection: &TcpConnection) -> bool {
     connection.closed
+}
+
+pub fn tcp_peer_eof(connection: &TcpConnection) -> bool {
+    connection.peer_eof
 }
 
 pub fn tcp6_connect(
@@ -1292,6 +1305,7 @@ pub fn tcp6_connect(
             receive_sequence: result.receive_sequence,
             receive_window: result.receive_window,
             closed: false,
+            peer_eof: false,
         });
     }
     tcp6_connect_on_owner(remote_ip, remote_port, local_port)
@@ -1348,6 +1362,7 @@ fn tcp6_connect_on_owner(
             receive_sequence,
             receive_window: TCP_DEFAULT_RECEIVE_WINDOW,
             closed: false,
+            peer_eof: false,
         };
         if !TCP6_CONNECT_REPORTED.swap(true, Ordering::AcqRel) {
             crate::serial_println!(
@@ -1448,6 +1463,7 @@ pub fn tcp6_receive(connection: &mut Tcp6Connection, output: &mut [u8]) -> Optio
             )?;
             if segment.flags & 0x04 != 0 {
                 connection.closed = true;
+                connection.peer_eof = false;
                 return None;
             }
             if segment.sequence != connection.receive_sequence {
@@ -1473,6 +1489,7 @@ pub fn tcp6_receive(connection: &mut Tcp6Connection, output: &mut [u8]) -> Optio
             connection.receive_sequence = connection.receive_sequence.wrapping_add(count as u32);
             if segment.flags & 0x01 != 0 {
                 connection.receive_sequence = connection.receive_sequence.wrapping_add(1);
+                connection.peer_eof = true;
                 connection.closed = true;
             }
             if count != 0 || connection.closed {
@@ -1518,11 +1535,16 @@ pub fn tcp6_close(connection: &mut Tcp6Connection) {
         });
     }
     connection.transmit_sequence = connection.transmit_sequence.wrapping_add(1);
+    connection.peer_eof = false;
     connection.closed = true;
 }
 
 pub fn tcp6_is_closed(connection: &Tcp6Connection) -> bool {
     connection.closed
+}
+
+pub fn tcp6_peer_eof(connection: &Tcp6Connection) -> bool {
+    connection.peer_eof
 }
 
 pub fn tcp6_update_receive_window(connection: &mut Tcp6Connection, available: usize) -> bool {
@@ -1568,6 +1590,7 @@ pub fn tcp6_ingest(
     }
     if segment.flags & 0x04 != 0 {
         connection.closed = true;
+        connection.peer_eof = false;
         return Some(TcpIngress {
             length: 0,
             closed: true,
@@ -1621,6 +1644,10 @@ pub fn tcp6_ingest(
         .wrapping_add(segment.payload.len() as u32);
     if segment.flags & 0x01 != 0 {
         connection.receive_sequence = connection.receive_sequence.wrapping_add(1);
+        // FIN after RST/local close cannot turn that terminal state into EOF.
+        if !connection.closed {
+            connection.peer_eof = true;
+        }
         connection.closed = true;
     }
     connection.receive_window = output
@@ -1685,6 +1712,7 @@ pub fn tcp_ingest(
     }
     if segment.flags & 0x04 != 0 {
         connection.closed = true;
+        connection.peer_eof = false;
         return Some(TcpIngress {
             length: 0,
             closed: true,
@@ -1738,6 +1766,10 @@ pub fn tcp_ingest(
         .wrapping_add(segment.payload.len() as u32);
     if segment.flags & 0x01 != 0 {
         connection.receive_sequence = connection.receive_sequence.wrapping_add(1);
+        // FIN after RST/local close cannot turn that terminal state into EOF.
+        if !connection.closed {
+            connection.peer_eof = true;
+        }
         connection.closed = true;
     }
     connection.receive_window = output

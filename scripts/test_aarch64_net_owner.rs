@@ -128,7 +128,7 @@ mod aarch64_virtio_net {
                 remote_ip: ip, remote_mac: mac(seed), local_port: local,
                 remote_port: remote, transmit_sequence: 0x1000 + u32::from(seed),
                 receive_sequence: 0x2000 + u32::from(seed),
-                receive_window: 4096 + u16::from(seed), closed: false,
+                receive_window: 4096 + u16::from(seed), closed: false, peer_eof: false,
             })
         })
     }
@@ -140,7 +140,7 @@ mod aarch64_virtio_net {
                 remote_ip: ip, remote_mac: mac(seed), local_port: local,
                 remote_port: remote, transmit_sequence: 0x1000 + u32::from(seed),
                 receive_sequence: 0x2000 + u32::from(seed),
-                receive_window: 4096 + u16::from(seed), closed: false,
+                receive_window: 4096 + u16::from(seed), closed: false, peer_eof: false,
             })
         })
     }

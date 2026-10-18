@@ -11,6 +11,20 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+The [bounded peer-FIN EOF repair](TCP-PEER-FIN-20261018.md) passes production-body
+host regressions and development unit/check497.52s/image15.72s. Exact-commit
+guest qualification remains pending. No browser causality, full TCP semantics
+or audit upgrade is claimed. Historical failed qualification below is preserved.
+
+Exact92554836596589a89ceb39737d40e05ae35af35e completed: unit/check467.52s,
+image0.86s, twelve preliminary runtime commands and unchanged67-patch preflight
+exit0. Firefox exits2 at first navigation after39072/5905/110ms paint/Ctrl-A/
+character; pixel comparison not reached. All39 private disks/raw/logs retained
+in `build/logs/macos-rx-retention-20261018-2d7Wc5/`, with physical-tail limits
+recorded in manual review. No captured fatal/retry/login; all QEMU exited.
+RX repair has not fixed strict Firefox. No audit row is upgraded. Historical
+pending states below are superseded by this result.
+
 Exact6c4ec7e74be6a2579eb354071002a9647aaca88e passes unit/check450.50s,
 image0.79s, all twelve preliminary Mac/HVF runtime commands and unchanged
 67-patch preflight. Firefox first navigation fails, exit2, after

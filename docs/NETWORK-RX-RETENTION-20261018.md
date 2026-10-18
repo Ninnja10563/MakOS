@@ -1,6 +1,49 @@
 # Retain unrelated RX frames across synchronous protocol waits
 
-## Latest completed Mac/HVF qualification
+## Completed RX-repair Mac/HVF qualification
+
+Exact `92554836596589a89ceb39737d40e05ae35af35e` completed one fresh sequence
+on the same Apple M3/macOS26.6.2/QEMU11.0.3/HVF host. Evidence:
+`build/logs/macos-rx-retention-20261018-2d7Wc5/`, including `FINAL-REPORT.txt`,
+`MANUAL-REVIEW.txt`, full raw streams and exact per-command statuses/timings.
+Unit/check467.52s, image0.86s, all twelve preliminary runtime commands,
+image identity and unchanged67-patch/all-five-artifact preflight exit0.
+Real Firefox exits2, real153.99s, observer0, at first navigation:
+
+```text
+MAKOS_FIREFOX_FIRST_PAINT_OK process_start_to_verified_paint_ms=39072
+MAKOS_FIREFOX_SELECTION_LATENCY_OK raw=132 enqueue_to_widget_ms=5905 limit_ms=10000
+MAKOS_FIREFOX_INPUT_LATENCY_OK raw=104 enqueue_to_widget_ms=110 limit_ms=500
+AssertionError: Firefox navigation did not complete with real page pixels loaded=False changed=False tls_verified=False visual=not checked
+```
+
+Pixel comparison was not reached. No captured fatal/failure-detail, retry or
+visible login; all QEMU exited. All39 private boot/data/vars were retained and
+hashed after exit. The unchanged master/manifest and every runtime boot pre/post
+hash match. No browser rebuild, restamp, profile change or weaker gate occurred.
+Firefox harness69460/QEMU69468, session `build/makos-aarch64-test-ygm13jg5`,
+QMP inherited socketpairfd4. Final raw105896bytes endsLF after shutdown;
+SHA256 `31a2cdd7a9db65ab16ebbe7250d64e01fbbd717dfbf9bf036e1f6c078c0bd3d6`.
+Numeric QEMU exit status is unavailable; make2 is not QEMU status.
+
+Selfhost verifies20CLI/21processes, exact headers/graphs and three locked
+distinct-root status42 children, migrations23/drops0. Native/Python-role/
+Firefox-role migration counts3/1/3 all drop0; role fixtures are not browsers.
+Cursor reports7positions/0changed pixels/0GPU errors/timeouts. Dedicated
+SMP-load final record has all fields but lacks LF; production-role reap tail
+truncates after status42. Other boot/prompt tails also remain incomplete as
+documented in manual review. No fragments are reconstructed into proofs.
+
+Current channel0x1a records actual successful transaction setup/init/dispatch/
+AsyncRead and an after-cache-open state containing transaction/pump, not
+downstream completion. Only manager-local startup transaction diagnostic was
+captured; missing selected-channel records do not prove nonexecution. Native
+connect/DNS/background Mozilla TLS observations lack target-channel correlation.
+The RX repair did not resolve strict Firefox. Its original source/host contract
+finding remains separate from unestablished browser causality. All assertions,
+deadlines and audit Partial/Missing rows remain unchanged.
+
+## Previous completed Mac/HVF qualification
 
 Exact commit `6c4ec7e74be6a2579eb354071002a9647aaca88e` was qualified once
 on Apple M3/macOS 26.6.2 with QEMU 11.0.3/HVF. Full evidence remains in
@@ -169,9 +212,9 @@ copy at most1,514 packet bytes and at most120bytes of indices. CPU0/AP stacks
 remain1MiB. This limited emitted-code inspection is **not** a full callgraph,
 recursion or nested-interrupt stack bound.
 
-New exact-commit Mac/HVF qualification: **NOT RUN**. Follow publication with
-the full fresh unchanged protocol; host passes do not establish Firefox
-success. No audit row is upgraded.
+At publication, exact-commit Mac/HVF qualification was pending. It has since
+completed at92554836596589a89ceb39737d40e05ae35af35e with the failure above.
+Host passes do not establish Firefox success. No audit row is upgraded.
 
 ## Preserved browser input and qualification
 

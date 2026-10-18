@@ -118,6 +118,13 @@ impl Socket {
             port: self.remote_port,
         }
     }
+
+    fn peer_eof(&self) -> bool {
+        self.tcp
+            .is_some_and(|connection| crate::aarch64_virtio_net::tcp_peer_eof(&connection))
+            || self.tcp6
+                .is_some_and(|connection| crate::aarch64_virtio_net::tcp6_peer_eof(&connection))
+    }
 }
 
 fn valid_remote(address: IpAddress) -> bool {
@@ -627,6 +634,9 @@ pub fn receive_from(handle: u64, output: &mut [u8]) -> Option<(usize, Endpoint)>
                     );
                 }
                 Some((count, socket.remote_endpoint()))
+            } else if socket.peer_eof() {
+                // Deliver every buffered byte before persistent orderly EOF.
+                Some((0, socket.remote_endpoint()))
             } else {
                 // Blocking is implemented by the syscall scheduler. CPU0's
                 // timer bottom half pumps RX and wakes this handle; no task
@@ -1119,7 +1129,8 @@ pub fn poll_events(handle: u64, requested: u32) -> u32 {
         }
         let mut ready = requested & EPOLLOUT;
         if (u64::from(socket.kind) == SOCK_DGRAM && socket.udp_count != 0)
-            || (u64::from(socket.kind) == SOCK_STREAM && socket.tcp_offset < socket.tcp_length)
+            || (u64::from(socket.kind) == SOCK_STREAM
+                && (socket.tcp_offset < socket.tcp_length || socket.peer_eof()))
         {
             ready |= requested & EPOLLIN;
         }

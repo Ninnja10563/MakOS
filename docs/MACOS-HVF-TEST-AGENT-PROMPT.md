@@ -1,5 +1,30 @@
 # MakOS macOS/HVF milestone test-agent prompt
 
+## Current peer-FIN increment (2026-10-18 UTC)
+
+Read `docs/TCP-PEER-FIN-20261018.md`. The bounded TCP EOF repair passes host
+regressions, development unit/check497.52s and image15.72s. Final helper-only
+host-inventory portability recheck passes14.75s. Qualify the new exact published
+commit from scratch, not historical925548. Reuse the same67-patch image/manifest
+below; no Firefox rebuild, reintegration, restamp or profile change. All original
+commands, proofs, readiness conditions, deadlines and thresholds remain unchanged.
+Stop at first failure and preserve final raw/private disks; no retry or login.
+Peer-FIN behavior is not established as the browser failure's cause.
+
+## Latest completed RX-repair attempt
+
+Exact92554836596589a89ceb39737d40e05ae35af35e completed the unchanged sequence:
+unit/check467.52s, image0.86s, twelve preliminary runtime commands and unchanged
+67-patch preflight exit0. Firefox fails first navigation, exit2, after
+paint39072ms/Ctrl-A5905ms/first-character110ms. Pixel comparison not reached.
+All39 private disks/final raw/logs remain in
+`build/logs/macos-rx-retention-20261018-2d7Wc5/`; no captured fatal/retry/login,
+all QEMU exited. Read its manual review for incomplete physical serial tails;
+do not reconstruct them. RX repair has not resolved strict Firefox. Current
+image/manifest and every gate/readiness/threshold requirement below remain.
+Pending qualification statements below are historical, superseded by this
+result. A later implementation increment needs its own exact-commit sequence.
+
 ## Current RX retention increment (2026-10-18 UTC)
 
 Read `docs/NETWORK-RX-RETENTION-20261018.md`. Exact6c4ec7e74be6a2579eb354071002a9647aaca88e

@@ -4,6 +4,26 @@ Last updated: 2026-10-18.
 
 ## Current qualification update
 
+The bounded [TCP peer-FIN repair](TCP-PEER-FIN-20261018.md) is implemented
+after preserving the failed925548 qualification below. Production-source host
+regression passes54cases/29runtime mutations/4structural mutations; full
+unit/check497.52s and image15.72s exit0. A subsequent host-inventory portability
+adjustment passes focused14.75s; final exact-commit full qualification remains
+pending. Evidence: `build/logs/tcp-eof-repair-20261018-BPYVLX/`. Reuse unchanged
+67-patch master8b191c84c05f1999/manifest450434ab; no rebuild/restamp/profile edit.
+Peer-FIN causality in Firefox is unproved; all thresholds and audit rows remain.
+
+Latest completed attempt is now exact
+`92554836596589a89ceb39737d40e05ae35af35e`: unit/check467.52s, image0.86s,
+twelve preliminary runtime commands and unchanged67-patch preflight exit0.
+Firefox exits2 at first navigation after paint39072ms/Ctrl-A5905ms/character110ms;
+pixel comparison not reached. All39 private disks/final raw remain in
+`build/logs/macos-rx-retention-20261018-2d7Wc5/`; no captured fatal, retry or
+login, all QEMU exited. Read its manual review for incomplete serial-tail limits.
+The RX repair did not resolve strict Firefox. [Details](NETWORK-RX-RETENTION-20261018.md).
+All assertions/deadlines and audit rows remain unchanged. Prior pending states
+below are historical, superseded by this completed attempt.
+
 Latest complete Mac/HVF attempt: exact
 `6c4ec7e74be6a2579eb354071002a9647aaca88e`. Unit/check450.50s, image0.79s,
 all twelve preliminary runtime commands and unchanged67-patch preflight exit0.

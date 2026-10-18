@@ -29,6 +29,37 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-18 UTC bounded peer-FIN receive repair
+
+See [TCP peer-FIN](TCP-PEER-FIN-20261018.md). Preserved925548 failure remains
+unresolved browser evidence. Separate pinned source reproduction proves drained
+orderly FIN returns would-block rather than EOF. Reviewed repair tracks peer FIN
+separately from reset/local close, drains buffers first and reports masked readable
+EOF. Host regression54cases/29runtime mutations/4structural mutations, full
+unit/check497.52s and image15.72s pass. Final helper-only portable host inventory
+passes focused14.75s; fresh published-source full qualification remains pending.
+Evidence: `build/logs/tcp-eof-repair-20261018-BPYVLX/`; reviewed target storage
+unchanged, selected SVC frame grows32bytes, no full stack-bound claim. Preserve
+same67 master/manifest/accounts/profiles; no Firefox rebuild/restamp. All original
+gates and audit Partial/Missing rows remain. Keep T3 Code open.
+
+### 2026-10-18 UTC completed RX-repair qualification
+
+Exact92554836596589a89ceb39737d40e05ae35af35e: unit/check467.52s, image0.86s,
+all twelve preliminary runtime commands and unchanged67-patch preflight exit0.
+Strict Firefox fails first navigation, exit2, after paint39072ms/Ctrl-A5905ms/
+first-character110ms. Pixel comparison not reached; no captured fatal/retry/login.
+All39 private disks/final raw/logs remain in
+`build/logs/macos-rx-retention-20261018-2d7Wc5/`; all QEMU exited. Read its
+manual review for physical-tail capture limits; never reconstruct records.
+RX retention has not resolved Firefox. Current trace reaches transaction
+dispatch/read acceptance, not target-page completion; missing consumer-side
+diagnostics do not prove nonexecution. Source-supported orderly-TCP-FIN/EOF
+handling is under separate investigation, not established as browser cause.
+Preserve the same67 image/manifest, profiles, T3 Code and all evidence.
+All assertions/thresholds and audit Partial/Missing rows remain unchanged.
+This completed result supersedes historical pending qualification below.
+
 ### 2026-10-18 UTC completed I/O repair qualification and RX investigation
 
 Exact6c4ec7e74be6a2579eb354071002a9647aaca88e passes unit/check450.50s,

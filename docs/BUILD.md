@@ -13,7 +13,22 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current result: exact6c4ec7e passes unit/check450.50s, image0.79s, twelve
+Next increment: [peer-FIN EOF](TCP-PEER-FIN-20261018.md) adds a production-body
+regression to unit/check. Development suite497.52s/image15.72s pass; portable
+host-inventory helper focused recheck14.75s passes. Fresh exact-commit full
+Mac/HVF qualification remains pending. Reuse the same67-patch master; do not
+rebuild Firefox or restamp old binaries. No browser fix is established.
+
+Current completed result: exact92554836596589a89ceb39737d40e05ae35af35e passes
+unit/check467.52s, image0.86s, twelve preliminary runtime commands and unchanged
+67-patch preflight. Firefox fails first navigation after39072/5905/110ms paint/
+Ctrl-A/character, exit2, real153.99s. All39 private disks/raw/logs retained in
+`build/logs/macos-rx-retention-20261018-2d7Wc5/`; no retry/login, QEMU exited.
+Read manual review for incomplete physical tails; no fragments reconstructed.
+RX retention has not resolved Firefox. Original assertions/deadlines remain.
+Same67 image/manifest is preserved; no rebuild/restamp/profile edit.
+
+Previous result: exact6c4ec7e passes unit/check450.50s, image0.79s, twelve
 preliminary Mac/HVF runtime commands and unchanged67-patch preflight. Firefox
 fails first navigation, exit2, after paint36164ms/Ctrl-A5837ms/character107ms.
 Raw evidence and39 private disks remain in
