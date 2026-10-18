@@ -11,6 +11,14 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+Exact1d39533fe8f03794122ccd1527b27c12452a80f0 passes all preceding commands and
+unchanged67-patch preflight, then Firefox first navigation fails, exit2, after
+34334/6386/110ms paint/Ctrl-A/character. Evidence and39private disks:
+`build/logs/macos-tcp-eof-20261018-yXeqwu/`; see manual physical-tail limitations.
+No retry/login, QEMU exited. EOF repair has not fixed Firefox; no audit upgrade.
+Next release preservation blocked by low disk space, not a new guest failure.
+This supersedes historical pending qualification below.
+
 The [bounded peer-FIN EOF repair](TCP-PEER-FIN-20261018.md) passes production-body
 host regressions and development unit/check497.52s/image15.72s. Exact-commit
 guest qualification remains pending. No browser causality, full TCP semantics

@@ -29,6 +29,26 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-18 UTC completed peer-FIN qualification; storage prerequisite
+
+Exact1d39533fe8f03794122ccd1527b27c12452a80f0 passes unit/check490.35s,
+image1.17s, all twelve preliminary runtime commands and unchanged67-patch
+preflight. Firefox first navigation fails after paint34334ms/Ctrl-A6386ms/
+character110ms, exit2, real150.74s; target pixel comparison not reached.
+All39 private disks/final raw/logs/captures remain in
+`build/logs/macos-tcp-eof-20261018-yXeqwu/`. Read its FINAL-REPORT.txt and
+MANUAL-REVIEW.txt, including physical-tail limits. No retry/login/fatal reason;
+all QEMU exited. EOF repair did not resolve Firefox. Current channel1b reaches
+normal local transaction handling, existing connection claim and pending queue;
+claim kind and continuation remain unknown. Preserve same67 master/manifest,
+accounts/profiles and T3 Code. No production/test changes after this measured attempt.
+Next supported Firefox diagnostic release needs independent full source/release
+preservation first. Existing external guard >15GiB versus about6.6GiB free;
+do not lower it or delete protected MakOS assets. Qwen weights were already
+removed earlier; no new deletion/app suspension this increment. User assistance
+requested for at least9GiB additional free space. All thresholds/audit rows remain.
+Historical pending statements below are superseded by this completed attempt.
+
 ### 2026-10-18 UTC bounded peer-FIN receive repair
 
 See [TCP peer-FIN](TCP-PEER-FIN-20261018.md). Preserved925548 failure remains

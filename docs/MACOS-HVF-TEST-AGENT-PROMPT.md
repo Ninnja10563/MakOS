@@ -1,5 +1,18 @@
 # MakOS macOS/HVF milestone test-agent prompt
 
+## Completed peer-FIN attempt (2026-10-18 UTC)
+
+Exact1d39533fe8f03794122ccd1527b27c12452a80f0: unit/check490.35s, image1.17s,
+twelve preliminary runtimes and unchanged67-patch preflight exit0. Firefox exits2
+at first navigation after34334/6386/110ms paint/Ctrl-A/character; target pixel
+comparison not reached. All39 private disks/final raw/logs remain in
+`build/logs/macos-tcp-eof-20261018-yXeqwu/`; manual review records physical-tail
+limits. No captured fatal/retry/login; all QEMU exited. EOF repair did not resolve
+Firefox. No assertion/deadline/readiness threshold changed. Next release work is
+blocked by storage before independent full source/release preservation. Do not
+retry the unchanged failed commit or restamp the current67-patch image.
+Historical pending statements below are superseded by this completed result.
+
 ## Current peer-FIN increment (2026-10-18 UTC)
 
 Read `docs/TCP-PEER-FIN-20261018.md`. The bounded TCP EOF repair passes host

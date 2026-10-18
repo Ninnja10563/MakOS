@@ -13,6 +13,15 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Latest completed exact1d39533fe8f03794122ccd1527b27c12452a80f0 passes unit/check
+490.35s, image1.17s, twelve preliminary runtimes and unchanged67-patch preflight.
+Firefox first navigation fails after34334/6386/110ms paint/Ctrl-A/character.
+All39 private disks/raw/logs remain in `build/logs/macos-tcp-eof-20261018-yXeqwu/`;
+no retry/login, QEMU exited. [Details and capture limits](TCP-PEER-FIN-20261018.md).
+Further release preservation blocked by about6.6GiB free versus existing external
+guard >15GiB; no browser rebuild or guard reduction. Historical pending notes below
+do not supersede this completed result.
+
 Next increment: [peer-FIN EOF](TCP-PEER-FIN-20261018.md) adds a production-body
 regression to unit/check. Development suite497.52s/image15.72s pass; portable
 host-inventory helper focused recheck14.75s passes. Fresh exact-commit full

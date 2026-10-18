@@ -4,6 +4,16 @@ Last updated: 2026-10-18.
 
 ## Current qualification update
 
+Latest completed attempt: exact `1d39533fe8f03794122ccd1527b27c12452a80f0`.
+Unit/check490.35s, image1.17s, twelve preliminary runtimes and unchanged67-patch
+preflight exit0. Firefox fails first navigation after34334/6386/110ms paint/
+Ctrl-A/character, exit2; target pixel comparison not reached. All39 private disks,
+final raw and complete logs retained in `build/logs/macos-tcp-eof-20261018-yXeqwu/`.
+Read manual review for physical-tail capture limits. No captured fatal/retry/login;
+all QEMU exited. [EOF repair](TCP-PEER-FIN-20261018.md) has not resolved Firefox.
+Next release preservation is blocked: about6.6GiB free, existing guard >15GiB.
+No threshold weakened or protected asset deleted. Pending statements below are historical.
+
 The bounded [TCP peer-FIN repair](TCP-PEER-FIN-20261018.md) is implemented
 after preserving the failed925548 qualification below. Production-source host
 regression passes54cases/29runtime mutations/4structural mutations; full

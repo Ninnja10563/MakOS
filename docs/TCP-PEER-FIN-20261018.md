@@ -1,5 +1,28 @@
 # TCP peer-FIN receive contract
 
+## Completed peer-FIN repair qualification
+
+Exact `1d39533fe8f03794122ccd1527b27c12452a80f0` completed one fresh unchanged
+Mac/HVF sequence. Unit/check490.35s, image1.17s, twelve preliminary runtimes,
+image identity and unchanged67-patch/all-five-artifact preflight exit0. Firefox
+fails first navigation, exit2, real150.74s, after paint34334ms, Ctrl-A6386ms and
+first-character110ms. Target pixel comparison/TLS completion were not reached;
+no captured fatal reason. EOF repair did not resolve Firefox.
+
+Evidence: `build/logs/macos-tcp-eof-20261018-yXeqwu/`, including full report,
+manual review, final raw serial and all39 retained private disks. Every runtime
+boot pre/post hash matches the built hash below; preserved master/manifest and
+profiles remain unchanged. All QEMU exited; no retry or visible login. Manual
+review records incomplete focused-harness physical tails honestly. No fragments
+are reconstructed. All original thresholds and audit Partial/Missing rows remain.
+
+Current selected channel0x1b positively reaches local normal transaction handling,
+connection claim and pending insertion. Claim kind and downstream continuation
+remain unproved; no missing-dispatch diagnosis follows. Further release work is
+blocked by about6.6GiB free versus the existing external preservation guard >15GiB.
+No guard lowered, browser rebuild/restamp or extra deletion attempted. Earlier
+pending-qualification statements below are historical, superseded by this result.
+
 ## Failed qualification preserved first
 
 The RX-retention commit `92554836596589a89ceb39737d40e05ae35af35e` completed
