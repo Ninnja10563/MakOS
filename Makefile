@@ -261,6 +261,7 @@ unit:
 	python3 scripts/test_aarch64_interaction_trace.py
 	python3 scripts/test_aarch64_file_failure_trace.py
 	python3 scripts/test_aarch64_network_diagnostics.py
+	python3 scripts/test_aarch64_rx_retention.py
 	python3 scripts/test_aarch64_firefox_interaction.py
 	python3 scripts/test_aarch64_firefox_serial_log.py
 	python3 scripts/test_firefox_provenance.py
@@ -357,6 +358,7 @@ check:
 	python3 scripts/test_aarch64_interaction_trace.py
 	python3 scripts/test_aarch64_file_failure_trace.py
 	python3 scripts/test_aarch64_network_diagnostics.py
+	python3 scripts/test_aarch64_rx_retention.py
 	python3 scripts/test_aarch64_firefox_interaction.py
 	python3 scripts/test_aarch64_firefox_serial_log.py
 	python3 scripts/test_firefox_provenance.py

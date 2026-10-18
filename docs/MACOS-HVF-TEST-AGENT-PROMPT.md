@@ -1,6 +1,26 @@
 # MakOS macOS/HVF milestone test-agent prompt
 
-## Current kernel I/O admission repair (2026-10-18 UTC)
+## Current RX retention increment (2026-10-18 UTC)
+
+Read `docs/NETWORK-RX-RETENTION-20261018.md`. Exact6c4ec7e74be6a2579eb354071002a9647aaca88e
+passes all preliminary Mac/HVF commands and unchanged67-patch preflight, then
+strict Firefox fails first navigation after paint36164ms/Ctrl-A5837ms/first-
+character107ms. Pixel comparison not reached. No captured fatal, retry or login;
+all QEMU exited and39 private disks/final raw/logs remain in
+`build/logs/macos-transaction-boundary-20261018-eD66nH/`. Read its manual review
+for physical-tail capture limitations; never reconstruct passing records.
+
+Separate pinned host reproduction establishes unrelated RX frame loss in
+synchronous waits, not its occurrence in Firefox. Bounded repair regression
+passes40cases/7controls; full unit/check466.52s and image14.89s pass exit0.
+New exact-commit guest qualification is pending. Use the final published repair commit supplied by its handoff,
+not6c4ec7e, for fresh qualification. Reuse the exact67-patch image/manifest
+already pinned in step4; no browser rebuild, reintegration, restamp or profile
+change. Every command, readiness condition, assertion, deadline and first-
+failure stop below remains unchanged. Historical pending states below are
+superseded by the completed6c4ec7e attempt.
+
+## Historical kernel I/O admission repair (2026-10-18 UTC)
 
 Read `docs/IO-PROBE-ATOMICITY-20261018.md`. The pinned pre-fix host fixture
 reproduces a matching wake lost between an empty readiness probe and waiter

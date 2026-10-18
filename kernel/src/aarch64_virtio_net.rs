@@ -8,7 +8,7 @@ use core::sync::atomic::{
 };
 
 use crate::aarch64_net_wire::{
-    self as wire, FRAME_CAPACITY, TCP_PAYLOAD_MAX, TcpSegment, TcpSegmentV6, UdpPacket,
+    self as wire, FRAME_CAPACITY, TCP_PAYLOAD_MAX, TcpSegment, TcpSegmentV6,
 };
 
 const MMIO_BASE: u64 = 0x0a00_0000;
@@ -110,7 +110,64 @@ impl Queue {
     };
 }
 
-#[derive(Clone, Copy)]
+/// Frames consumed during a different protocol wait belong to the ordinary RX
+/// demultiplexer, not the waiter. Keep their bytes and arrival order until that
+/// demultiplexer runs, or a later waiter selects an exact match.
+/// This value deliberately is not Copy: only small slot indices move on removal.
+struct DeferredRx {
+    frames: [[u8; FRAME_CAPACITY]; QUEUE_SIZE as usize],
+    lengths: [usize; QUEUE_SIZE as usize],
+    order: [usize; QUEUE_SIZE as usize],
+    count: usize,
+}
+
+impl DeferredRx {
+    const EMPTY: Self = Self {
+        frames: [[0; FRAME_CAPACITY]; QUEUE_SIZE as usize],
+        lengths: [0; QUEUE_SIZE as usize],
+        order: [0; QUEUE_SIZE as usize],
+        count: 0,
+    };
+
+    fn full(&self) -> bool {
+        self.count == self.order.len()
+    }
+
+    fn push(&mut self, frame: &[u8]) {
+        assert!(!self.full() && !frame.is_empty() && frame.len() <= FRAME_CAPACITY);
+        let slot = self.lengths.iter().position(|length| *length == 0)
+            .expect("deferred RX free slot");
+        self.frames[slot][..frame.len()].copy_from_slice(frame);
+        self.lengths[slot] = frame.len();
+        self.order[self.count] = slot;
+        self.count += 1;
+    }
+
+    fn take_at(&mut self, position: usize, output: &mut [u8]) -> Option<usize> {
+        if position >= self.count {
+            return None;
+        }
+        let slot = self.order[position];
+        let length = self.lengths[slot];
+        if output.len() < length {
+            return None;
+        }
+        output[..length].copy_from_slice(&self.frames[slot][..length]);
+        self.order.copy_within(position + 1..self.count, position);
+        self.count -= 1;
+        self.lengths[slot] = 0;
+        Some(length)
+    }
+
+    fn matching(&self, predicate: impl Fn(&[u8]) -> bool) -> Option<usize> {
+        self.order[..self.count].iter().position(|slot| {
+            predicate(&self.frames[*slot][..self.lengths[*slot]])
+        })
+    }
+}
+
+// Initialization moves this state once before publishing it. Avoid implicit
+// copies of the deferred frame storage in normal packet service paths.
 struct State {
     ready: bool,
     base: u64,
@@ -131,6 +188,7 @@ struct State {
     identification: u16,
     dns_cache: [DnsCacheEntry; DNS_CACHE_ENTRIES],
     next_dns_cache: usize,
+    deferred_rx: DeferredRx,
 }
 
 impl State {
@@ -154,6 +212,7 @@ impl State {
         identification: 1,
         dns_cache: [DnsCacheEntry::EMPTY; DNS_CACHE_ENTRIES],
         next_dns_cache: 0,
+        deferred_rx: DeferredRx::EMPTY,
     };
 }
 
@@ -1590,14 +1649,19 @@ pub fn tcp6_ingest(
     })
 }
 
-/// Consume at most one completed virtio RX descriptor without waiting.
+/// Drain the oldest deferred frame before consuming another RX descriptor.
+/// A short output leaves the deferred frame intact rather than skipping it.
 pub fn poll_frame(output: &mut [u8]) -> Option<usize> {
     if crate::arch::cpu_index() != 0 {
         crate::fatal("AArch64 virtio-net RX poll attempted from non-owner CPU");
     }
     with_state(|state| {
         if state.ready {
-            poll_receive(state, output)
+            if state.deferred_rx.count != 0 {
+                state.deferred_rx.take_at(0, output)
+            } else {
+                poll_receive(state, output)
+            }
         } else {
             None
         }
@@ -1887,46 +1951,39 @@ fn configure_ipv6(state: &mut State) {
     if transmit_frame(state, &frame[..length]).is_none() {
         return;
     }
-    for _ in 0..IPV6_CONFIG_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        let Some(advertisement) = wire::parse_router_advertisement(&frame[..length]) else {
-            continue;
-        };
-        let mut address = advertisement.prefix;
-        address[8..].copy_from_slice(&state.ipv6_link_local[8..]);
-        if address == [0; 16]
-            || address[0] == 0xff
-            || advertisement.router_mac == [0; 6]
-            || advertisement.prefix_length != 64
-        {
-            continue;
-        }
-        state.ipv6 = address;
-        state.ipv6_prefix_length = advertisement.prefix_length;
-        state.ipv6_gateway = advertisement.router_ip;
-        state.ipv6_gateway_mac = advertisement.router_mac;
-        state.ipv6_ready = true;
+    let link_local = state.ipv6_link_local;
+    let Some(length) = wait_matching_frame(state, &mut frame, IPV6_CONFIG_SPINS, |bytes| {
+        wire::parse_router_advertisement(bytes).is_some_and(|advertisement| {
+            let mut address = advertisement.prefix;
+            address[8..].copy_from_slice(&link_local[8..]);
+            address != [0; 16]
+                && address[0] != 0xff
+                && advertisement.router_mac != [0; 6]
+                && advertisement.prefix_length == 64
+        })
+    }) else {
         return;
-    }
+    };
+    let Some(advertisement) = wire::parse_router_advertisement(&frame[..length]) else {
+        return;
+    };
+    let mut address = advertisement.prefix;
+    address[8..].copy_from_slice(&link_local[8..]);
+    state.ipv6 = address;
+    state.ipv6_prefix_length = advertisement.prefix_length;
+    state.ipv6_gateway = advertisement.router_ip;
+    state.ipv6_gateway_mac = advertisement.router_mac;
+    state.ipv6_ready = true;
 }
 
 fn wait_dhcp(state: &mut State, message_type: u8) -> Option<wire::DhcpReply> {
     let mut frame = [0; FRAME_CAPACITY];
-    for _ in 0..WAIT_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        if let Some(reply) = wire::parse_dhcp(&frame[..length], DHCP_TRANSACTION, state.mac)
-            && reply.message_type == message_type
-        {
-            return Some(reply);
-        }
-    }
-    None
+    let mac = state.mac;
+    let length = wait_matching_frame(state, &mut frame, WAIT_SPINS, |bytes| {
+        wire::parse_dhcp(bytes, DHCP_TRANSACTION, mac)
+            .is_some_and(|reply| reply.message_type == message_type)
+    })?;
+    wire::parse_dhcp(&frame[..length], DHCP_TRANSACTION, mac)
 }
 
 fn resolve_route(state: &mut State, remote_ip: [u8; 4]) -> Option<[u8; 6]> {
@@ -1969,33 +2026,23 @@ fn resolve_ndp(state: &mut State, target: [u8; 16]) -> Option<[u8; 6]> {
     let mut frame = [0u8; FRAME_CAPACITY];
     let length = wire::build_neighbor_solicitation(&mut frame, state.mac, state.ipv6, target)?;
     transmit_frame(state, &frame[..length])?;
-    for _ in 0..WAIT_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        if let Some(mac) = wire::parse_neighbor_advertisement(&frame[..length], state.ipv6, target)
-        {
-            return Some(mac);
-        }
-    }
-    None
+    let ipv6 = state.ipv6;
+    let length = wait_matching_frame(state, &mut frame, WAIT_SPINS, |bytes| {
+        wire::parse_neighbor_advertisement(bytes, ipv6, target).is_some()
+    })?;
+    wire::parse_neighbor_advertisement(&frame[..length], ipv6, target)
 }
 
 fn resolve_arp(state: &mut State, target: [u8; 4]) -> Option<[u8; 6]> {
     let mut frame = [0; FRAME_CAPACITY];
     let length = wire::build_arp_request(&mut frame, state.mac, state.ipv4, target)?;
     transmit_frame(state, &frame[..length])?;
-    for _ in 0..WAIT_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        if let Some(mac) = wire::parse_arp_reply(&frame[..length], state.mac, state.ipv4, target) {
-            return Some(mac);
-        }
-    }
-    None
+    let mac = state.mac;
+    let ipv4 = state.ipv4;
+    let length = wait_matching_frame(state, &mut frame, WAIT_SPINS, |bytes| {
+        wire::parse_arp_reply(bytes, mac, ipv4, target).is_some()
+    })?;
+    wire::parse_arp_reply(&frame[..length], mac, ipv4, target)
 }
 
 fn wait_udp(
@@ -2006,32 +2053,19 @@ fn wait_udp(
     output: &mut [u8],
 ) -> Option<usize> {
     let mut frame = [0; FRAME_CAPACITY];
-    for _ in 0..WAIT_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        let Some(UdpPacket {
-            source_ip,
-            destination_ip,
-            source_port,
-            destination_port,
-            payload,
-        }) = wire::parse_udp(&frame[..length])
-        else {
-            continue;
-        };
-        if source_ip == remote_ip
-            && destination_ip == state.ipv4
-            && source_port == remote_port
-            && destination_port == local_port
-            && payload.len() <= output.len()
-        {
-            output[..payload.len()].copy_from_slice(payload);
-            return Some(payload.len());
-        }
-    }
-    None
+    let ipv4 = state.ipv4;
+    let length = wait_matching_frame(state, &mut frame, WAIT_SPINS, |bytes| {
+        wire::parse_udp(bytes).is_some_and(|packet| {
+            packet.source_ip == remote_ip
+                && packet.destination_ip == ipv4
+                && packet.source_port == remote_port
+                && packet.destination_port == local_port
+                && packet.payload.len() <= output.len()
+        })
+    })?;
+    let packet = wire::parse_udp(&frame[..length])?;
+    output[..packet.payload.len()].copy_from_slice(packet.payload);
+    Some(packet.payload.len())
 }
 
 fn wait_tcp(
@@ -2041,23 +2075,16 @@ fn wait_tcp(
     local_port: u16,
 ) -> Option<OwnedTcpSegment> {
     let mut frame = [0; FRAME_CAPACITY];
-    for _ in 0..WAIT_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        let Some(segment) = wire::parse_tcp(&frame[..length]) else {
-            continue;
-        };
-        if segment.source_ip == remote_ip
-            && segment.destination_ip == state.ipv4
-            && segment.source_port == remote_port
-            && segment.destination_port == local_port
-        {
-            return OwnedTcpSegment::copy_from(segment);
-        }
-    }
-    None
+    let ipv4 = state.ipv4;
+    let length = wait_matching_frame(state, &mut frame, WAIT_SPINS, |bytes| {
+        wire::parse_tcp(bytes).is_some_and(|segment| {
+            segment.source_ip == remote_ip
+                && segment.destination_ip == ipv4
+                && segment.source_port == remote_port
+                && segment.destination_port == local_port
+        })
+    })?;
+    OwnedTcpSegment::copy_from(wire::parse_tcp(&frame[..length])?)
 }
 
 fn wait_tcp_v6(
@@ -2067,23 +2094,16 @@ fn wait_tcp_v6(
     local_port: u16,
 ) -> Option<OwnedTcpSegment> {
     let mut frame = [0; FRAME_CAPACITY];
-    for _ in 0..WAIT_SPINS {
-        let Some(length) = poll_receive(state, &mut frame) else {
-            core::hint::spin_loop();
-            continue;
-        };
-        let Some(segment) = wire::parse_tcp_v6(&frame[..length]) else {
-            continue;
-        };
-        if segment.source_ip == remote_ip
-            && segment.destination_ip == state.ipv6
-            && segment.source_port == remote_port
-            && segment.destination_port == local_port
-        {
-            return OwnedTcpSegment::copy_from_v6(segment);
-        }
-    }
-    None
+    let ipv6 = state.ipv6;
+    let length = wait_matching_frame(state, &mut frame, WAIT_SPINS, |bytes| {
+        wire::parse_tcp_v6(bytes).is_some_and(|segment| {
+            segment.source_ip == remote_ip
+                && segment.destination_ip == ipv6
+                && segment.source_port == remote_port
+                && segment.destination_port == local_port
+        })
+    })?;
+    OwnedTcpSegment::copy_from_v6(wire::parse_tcp_v6(&frame[..length])?)
 }
 
 struct OwnedTcpSegment {
@@ -2241,6 +2261,42 @@ fn transmit_frame(state: &mut State, frame: &[u8]) -> Option<()> {
             return Some(());
         }
         core::hint::spin_loop();
+    }
+    None
+}
+
+/// Called while the network state is exclusively owned (during boot setup or
+/// under its existing lock). Never call the socket demultiplexer under this lock:
+/// an AP waiting for CPU0 TX service may itself own the socket lock.
+fn wait_matching_frame(
+    state: &mut State,
+    output: &mut [u8; FRAME_CAPACITY],
+    spins: usize,
+    matches: impl Fn(&[u8]) -> bool,
+) -> Option<usize> {
+    if let Some(position) = state.deferred_rx.matching(&matches) {
+        return state.deferred_rx.take_at(position, output);
+    }
+    for _ in 0..spins {
+        // No free slot means no safe raw dequeue. Return an explicit bounded-
+        // resource failure, possibly before the spin limit. Runtime RX can drain
+        // after lock release; unpublished boot state cannot. DHCP/ARP setup may
+        // therefore fail at capacity. Retention does not guarantee progress.
+        if state.deferred_rx.full() {
+            return None;
+        }
+        let Some(length) = poll_receive(state, output) else {
+            core::hint::spin_loop();
+            continue;
+        };
+        if matches(&output[..length]) {
+            return Some(length);
+        }
+        // A zero-length malformed completion has no packet bytes to retain.
+        // Existing oversized/malformed descriptor handling is otherwise unchanged.
+        if length != 0 {
+            state.deferred_rx.push(&output[..length]);
+        }
     }
     None
 }

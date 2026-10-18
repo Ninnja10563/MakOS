@@ -29,6 +29,26 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-18 UTC completed I/O repair qualification and RX investigation
+
+Exact6c4ec7e74be6a2579eb354071002a9647aaca88e passes unit/check450.50s,
+image0.79s, all twelve preliminary Mac/HVF runtime commands and unchanged
+67-patch preflight. Strict Firefox fails first navigation after paint36164ms,
+Ctrl-A5837ms and first-character107ms; pixel comparison not reached. No fatal
+captured, retry or login; all QEMU exited. All39 private disks/final raw/logs
+remain in `build/logs/macos-transaction-boundary-20261018-eD66nH/`.
+Its `MANUAL-REVIEW.txt` records incomplete physical serial tails honestly.
+See [RX retention](NETWORK-RX-RETENTION-20261018.md): pinned original waits
+discard unrelated RX frames in nine host reproductions, with four controls.
+Bounded repair regression40cases/7controls, unit/check466.52s and image14.89s
+pass exit0. Emitted storage/frame costs reviewed; new exact-commit guest
+qualification pending. This is not established as Firefox's cause.
+Reuse the same verified67 image8b191c84c05f1999/manifest450434ab; no browser
+rebuild, reintegration, restamp or profile edit. Prior fixed artifacts were
+independently preserved in `build/logs/rx-wait-demux-20261018-Og8vSx/`.
+This supersedes pending-qualification wording below. Preserve T3 Code and all
+evidence; all thresholds and audit Partial/Missing rows remain unchanged.
+
 ### 2026-10-18 UTC I/O probe admission repair
 
 Parent diagnostic publication5958c2990e9d2fb86d90fac58f795a1a4703f1bb is

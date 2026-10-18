@@ -13,7 +13,21 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
-Current kernel increment: [I/O probe admission](IO-PROBE-ATOMICITY-20261018.md)
+Current result: exact6c4ec7e passes unit/check450.50s, image0.79s, twelve
+preliminary Mac/HVF runtime commands and unchanged67-patch preflight. Firefox
+fails first navigation, exit2, after paint36164ms/Ctrl-A5837ms/character107ms.
+Raw evidence and39 private disks remain in
+`build/logs/macos-transaction-boundary-20261018-eD66nH/`; no retry/login.
+See [RX retention](NETWORK-RX-RETENTION-20261018.md) for physical-tail limits,
+the separate source-proven packet loss and bounded repair. New regression
+`python3 scripts/test_aarch64_rx_retention.py` passes40cases/7controls and is
+added to both unit/check. Full unit/check466.52s and image14.89s pass exit0;
+new exact-commit guest qualification pending. Optimized storage/frame costs
+are recorded, not a full stack bound.
+Reuse the same67-patch image/manifest; no Firefox rebuild/restamp/profile edit.
+Older pending-qualification statements below describe publication history.
+
+Previous kernel increment: [I/O probe admission](IO-PROBE-ATOMICITY-20261018.md)
 reproduces the old scan-to-registration lost notification with pinned host
 code. Repair regression passes17cases/6negative controls, exit0, real3.94s:
 `python3 scripts/test_aarch64_io_probe_atomic.py`. Both unit/check include it;

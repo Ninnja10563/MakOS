@@ -2,6 +2,15 @@
 
 ## Status and scope
 
+Subsequent exact6c4ec7e Mac/HVF qualification completed once: all preliminary
+commands exit0, but real Firefox still fails first navigation after
+paint36164ms/Ctrl-A5837ms/first-character107ms. No retry or login; all QEMU
+exited. See [latest evidence and separate RX investigation](NETWORK-RX-RETENTION-20261018.md)
+and `build/logs/macos-transaction-boundary-20261018-eD66nH/` for retained raw
+records, capture limitations and39 private disks. The original race remains
+source/host-proven, not established as Firefox's cause. Pending wording below
+records the earlier publication state and is no longer current guest status.
+
 The pinned pre-fix reproduction and focused repair regression pass on the Mac
 host. The first full unit/check stopped at a fixed architecture-policy digest
 in the network diagnostic regression. After explicit baseline review, fresh

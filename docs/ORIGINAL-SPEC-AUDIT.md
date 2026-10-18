@@ -11,6 +11,20 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+Exact6c4ec7e74be6a2579eb354071002a9647aaca88e passes unit/check450.50s,
+image0.79s, all twelve preliminary Mac/HVF runtime commands and unchanged
+67-patch preflight. Firefox first navigation fails, exit2, after
+paint36164ms/Ctrl-A5837ms/first-character107ms. Pixel comparison not reached;
+no captured fatal, retry or login. All39 private disks/final raw/logs remain in
+`build/logs/macos-transaction-boundary-20261018-eD66nH/`, all QEMU exited.
+Physical-tail capture limitations are recorded, never reconstructed.
+[Separate RX loss](NETWORK-RX-RETENTION-20261018.md) is source/host-proven
+by four passing controls and nine exact expected contract failures. Repair
+regression40cases/7controls, unit/check466.52s and image14.89s pass exit0;
+new guest qualification pending. Emitted-code inspection is not a full stack
+bound. Firefox causality is unestablished; no audit row is upgraded. The
+following publication states are historical.
+
 [I/O probe admission](IO-PROBE-ATOMICITY-20261018.md) closes a source-supported
 probe-to-registration notification gap, reproduced by a pinned host fixture
 with three passing controls and two exact expected assertion failures.

@@ -4,6 +4,25 @@ Last updated: 2026-10-18.
 
 ## Current qualification update
 
+Latest complete Mac/HVF attempt: exact
+`6c4ec7e74be6a2579eb354071002a9647aaca88e`. Unit/check450.50s, image0.79s,
+all twelve preliminary runtime commands and unchanged67-patch preflight exit0.
+Real Firefox exits2 at first navigation after paint36164ms, Ctrl-A5837ms and
+first-character107ms. Pixel comparison not reached; no captured fatal, retry
+or login. All39 private disks/final raw/logs remain in
+`build/logs/macos-transaction-boundary-20261018-eD66nH/`; all QEMU exited.
+`MANUAL-REVIEW.txt` records physical-tail limitations; no fragments are joined.
+[RX retention](NETWORK-RX-RETENTION-20261018.md) separately reproduces unrelated
+frame loss in original synchronous waits: four controls pass and nine exact
+contract assertions fail as expected. Repair regression passes40cases/7controls,
+real6.18s; full unit/check466.52s and image14.89s pass exit0. Optimized frame/
+storage costs are recorded; no full stack bound claimed. New exact-commit guest
+qualification remains pending; occurrence in Firefox is not established.
+Reuse unchanged67 image8b191c84c05f1999.
+All assertions/deadlines and audit Partial/Missing rows remain unchanged.
+
+The publication states below are historical and superseded by this result.
+
 The [I/O probe admission repair](IO-PROBE-ATOMICITY-20261018.md) follows
 diagnostic publication5958c2990e9d2fb86d90fac58f795a1a4703f1bb. A pinned
 pre-fix host fixture reproduces the scan-to-registration lost notification;
