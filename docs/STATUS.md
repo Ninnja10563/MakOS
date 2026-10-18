@@ -4,6 +4,22 @@ Last updated: 2026-10-18.
 
 ## Current qualification update
 
+The [I/O probe admission repair](IO-PROBE-ATOMICITY-20261018.md) follows
+diagnostic publication5958c2990e9d2fb86d90fac58f795a1a4703f1bb. A pinned
+pre-fix host fixture reproduces the scan-to-registration lost notification;
+three controls pass, two exact contract assertions fail as required. Focused
+repair regression passes17cases/6negative controls, exit0, real3.94s.
+First full unit/check stopped at the historical whole-architecture diagnostic
+policy digest (exit2, real36.20s); failure preserved. Reviewed exact baseline
+retains every assertion and adds one negative control. Fresh unit/check passes
+(exit0, real458.43s), image build passes (exit0, real15.05s). New guest
+qualification not run. Evidence: `build/logs/io-probe-policy-20261018-Gocufi/`.
+This does not establish historical Firefox's cause. Reuse verified67 image
+8b191c84c05f1999 without browser rebuild/restamp/profile changes. All original
+assertions/deadlines remain; no audit row is upgraded.
+
+Latest completed guest qualification remains the preserved failure below.
+
 Exact8bfb335631b1b1c67dffbe9d2e089e0611098e66 passes all earlier Mac/HVF
 gates and66-patch preflight. Firefox paint37602ms/Ctrl-A6845ms/first-character110ms
 pass, then first navigation fails without target completion or pixel comparison.

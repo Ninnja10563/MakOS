@@ -1,5 +1,27 @@
 # MakOS macOS/HVF milestone test-agent prompt
 
+## Current kernel I/O admission repair (2026-10-18 UTC)
+
+Read `docs/IO-PROBE-ATOMICITY-20261018.md`. The pinned pre-fix host fixture
+reproduces a matching wake lost between an empty readiness probe and waiter
+registration: three controls pass and two exact contract assertions fail.
+The bounded repair arms a per-task notification latch before the operation
+and consumes it under the scheduler lock before blocking. Existing deadlines,
+syscall retry behavior and every qualification assertion remain unchanged.
+Focused host regression passes17cases/6negative controls. First full unit/check
+stopped at the historical whole-architecture diagnostic-erasure digest after
+the intentional I/O changes; its failure is preserved. Reviewed exact baseline
+retains all assertions and adds one negative control. Fresh full unit/check
+and image build pass, exit0, real458.43s/15.05s respectively. Fresh guest
+qualification not run. This does not establish
+the cause of historical Firefox navigation failure or a browser repair.
+
+Use the final exact kernel-repair commit supplied in the publication handoff,
+not intermediate diagnostic commit5958c2990e9d2fb86d90fac58f795a1a4703f1bb.
+Reuse the already verified67-patch image/manifest pinned in step4 below;
+no Firefox rebuild, reintegration, restamp or profile change. All runtime
+commands, readiness conditions, thresholds and first-failure stop remain.
+
 ## Current transaction-boundary contract (2026-10-18)
 
 Read `docs/FIREFOX-TRANSACTION-BOUNDARY-20261018.md` first. Exact Mac/HVF
@@ -74,12 +96,13 @@ Repository: https://github.com/Ninnja10563/MakOS.git
 Branch: main
 Previous exact Mac-tested baseline: fc9338bbef4cb45c1c6a5548ca0511917d3ef10e
 
-Use the exact full transaction-boundary commit supplied in the publication
+Use the exact full I/O-admission repair commit supplied in the publication
 handoff, including preceding kernel repairs and the supported 67-patch Firefox
 release. Do not invent a commit or qualify arbitrary main. If that exact
 commit is unavailable or measured current image/manifest identities below mismatch,
-stop before qualification. Read docs/FIREFOX-TRANSACTION-BOUNDARY-20261018.md first.
-This is a diagnostic increment, not a claim that Firefox is fixed.
+stop before qualification. Read docs/IO-PROBE-ATOMICITY-20261018.md and
+docs/FIREFOX-TRANSACTION-BOUNDARY-20261018.md first. The kernel admission
+repair and browser diagnostics do not constitute a Firefox qualification pass.
 
 Latest completed Mac/HVF qualification is8bfb335631b1b1c67dffbe9d2e089e0611098e66:
 earlier gates/preflight pass; paint37602ms/Ctrl-A6845ms/first-character110ms,
@@ -210,7 +233,8 @@ remote main to match, and record the exact tested commit.
    docs/FIREFOX-HTTP-CONTINUATIONS-20261017.md and
    docs/FIREFOX-NETWORK-BOUNDARY-20261017.md and
    docs/FIREFOX-HTTP-STATE-20261017.md and
-   docs/FIREFOX-TRANSACTION-BOUNDARY-20261018.md.
+   docs/FIREFOX-TRANSACTION-BOUNDARY-20261018.md and
+   docs/IO-PROBE-ATOMICITY-20261018.md.
    Also read docs/FIREFOX-FRESH-BASELINE.md if the preserved image is absent.
 2. Record `git status --short --branch`, local HEAD, origin/main, remote main,
    macOS version, Apple chip/model, QEMU version, accelerator, CPU count, load

@@ -11,6 +11,17 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+[I/O probe admission](IO-PROBE-ATOMICITY-20261018.md) closes a source-supported
+probe-to-registration notification gap, reproduced by a pinned host fixture
+with three passing controls and two exact expected assertion failures.
+Focused repair regression passes17cases/6negative controls, exit0, real3.94s.
+First full unit/check stopped at the historical whole-architecture diagnostic
+policy digest, exit2, real36.20s. Failure preserved. Reviewed exact baseline
+retains every assertion and adds one negative control. Fresh unit/check and
+image build pass, exit0, real458.43s/15.05s; new guest qualification not run. Host
+adapters do not prove real SMP/device progress or Firefox cause. All original
+assertions/deadlines and audit Partial/Missing rows remain unchanged.
+
 Exact8bfb335631b1b1c67dffbe9d2e089e0611098e66 passes earlier Mac/HVF gates
 and66-patch preflight; paint37602ms/Ctrl-A6845ms/first-character110ms pass,
 first navigation fails. Pixel comparison not reached. No captured fatal,

@@ -2848,6 +2848,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 let rights = unsafe {
                     core::slice::from_raw_parts_mut(rights_address as *mut u64, rights_capacity)
                 };
+                let source = vfs_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::vfs::read_result_with_rights(frame.registers[0], output, rights) {
                     Ok((count, rights_count)) => {
                         crate::aarch64_process::complete_io_wait();
@@ -2860,11 +2862,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                         if flags & MSG_DONTWAIT == 0
                             && !crate::vfs::is_nonblocking(frame.registers[0]).unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            vfs_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
                         }
@@ -2902,6 +2901,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 let rights = unsafe {
                     core::slice::from_raw_parts(rights_address as *const u64, rights_count)
                 };
+                let source = vfs_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::vfs::send_result_with_rights(frame.registers[0], input, rights) {
                     Ok(count) => {
                         crate::aarch64_process::complete_io_wait();
@@ -2914,11 +2915,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                         if flags & MSG_DONTWAIT == 0
                             && !crate::vfs::is_nonblocking(frame.registers[0]).unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            vfs_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
                         }
@@ -2972,6 +2970,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = 0;
             } else {
                 let output = unsafe { core::slice::from_raw_parts_mut(address as *mut u8, length) };
+                let source = vfs_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::vfs::read_result(frame.registers[0], output) {
                     Ok(count) => {
                         crate::aarch64_process::complete_io_wait();
@@ -2984,11 +2984,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                         if flags & MSG_DONTWAIT == 0
                             && !crate::vfs::is_nonblocking(frame.registers[0]).unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            vfs_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
                         }
@@ -3019,6 +3016,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = 0;
             } else {
                 let input = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
+                let source = vfs_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::vfs::write_result(frame.registers[0], input) {
                     Ok(count) => {
                         crate::aarch64_process::complete_io_wait();
@@ -3031,11 +3030,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                         if flags & MSG_DONTWAIT == 0
                             && !crate::vfs::is_nonblocking(frame.registers[0]).unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            vfs_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
                         }
@@ -3082,6 +3078,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = (-22i64) as u64;
             } else {
                 let mut lock = unsafe { (address as *const crate::vfs::FileLock).read_unaligned() };
+                let mut io_probe =
+                    crate::aarch64_process::begin_io_probe(makos_readiness::WaitSource::Any);
                 let result = if operation == 6 {
                     crate::vfs::get_file_lock(frame.registers[0], &mut lock)
                 } else {
@@ -3098,6 +3096,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                         frame.registers[0] = value;
                     }
                     Err(crate::vfs::DescriptorError::Again) if operation == 8 => {
+                        io_probe.handoff();
                         match crate::aarch64_process::block_current_for_io(-1, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
@@ -3119,6 +3118,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = (-22i64) as u64;
             } else {
                 let output = unsafe { core::slice::from_raw_parts_mut(address as *mut u8, length) };
+                let source = vfs_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::vfs::read_result(frame.registers[0], output) {
                     Ok(count) => {
                         crate::aarch64_process::complete_io_wait();
@@ -3130,11 +3131,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     Err(crate::vfs::DescriptorError::Again)
                         if !crate::vfs::is_nonblocking(frame.registers[0]).unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            vfs_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             crate::aarch64_process::IoBlockResult::TimedOut => {
                                 frame.registers[0] = 0
@@ -3163,6 +3161,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = (-22i64) as u64;
             } else {
                 let input = unsafe { core::slice::from_raw_parts(address as *const u8, length) };
+                let source = vfs_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::vfs::write_result(frame.registers[0], input) {
                     Ok(count) => {
                         crate::aarch64_process::complete_io_wait();
@@ -3174,11 +3174,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     Err(crate::vfs::DescriptorError::Again)
                         if !crate::vfs::is_nonblocking(frame.registers[0]).unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            vfs_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             crate::aarch64_process::IoBlockResult::TimedOut => {
                                 frame.registers[0] = (-11i64) as u64
@@ -3242,6 +3239,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = (-22i64) as u64;
             } else {
                 let output = unsafe { core::slice::from_raw_parts_mut(address as *mut u8, length) };
+                let source = network_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::aarch64_socket::receive_from(frame.registers[0], output) {
                     Some((count, source)) => {
                         crate::aarch64_process::complete_io_wait();
@@ -3250,6 +3249,7 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                                 write_socket_endpoint(source, source_address, source_length_address)
                             {
                                 frame.registers[0] = error as u64;
+                                drop(io_probe);
                                 finish_signal_delivery(frame);
                                 return;
                             }
@@ -3260,11 +3260,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                         && !crate::aarch64_socket::is_nonblocking(frame.registers[0])
                             .unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            network_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
                         }
@@ -3286,6 +3283,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 frame.registers[0] = (-22i64) as u64;
             } else {
                 let output = unsafe { core::slice::from_raw_parts_mut(address as *mut u8, length) };
+                let source = network_wait_source(frame.registers[0]);
+                let mut io_probe = crate::aarch64_process::begin_io_probe(source);
                 match crate::aarch64_socket::receive(frame.registers[0], output) {
                     Some(count) => {
                         crate::aarch64_process::complete_io_wait();
@@ -3294,11 +3293,8 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     None if !crate::aarch64_socket::is_nonblocking(frame.registers[0])
                         .unwrap_or(true) =>
                     {
-                        match crate::aarch64_process::block_current_for_io_on(
-                            -1,
-                            network_wait_source(frame.registers[0]),
-                            frame,
-                        ) {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io_on(-1, source, frame) {
                             crate::aarch64_process::IoBlockResult::Switched => return,
                             _ => frame.registers[0] = (-11i64) as u64,
                         }
@@ -3392,35 +3388,41 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                     wait_mask_present,
                 );
                 frame.registers[0] = (-22i64) as u64;
-            } else if let Err(error) =
-                crate::aarch64_tty::begin_wait_mask((wait_mask_present != 0).then_some(wait_mask))
-            {
-                frame.registers[0] = error.abi();
-            } else if crate::aarch64_tty::wait_interrupted() {
-                crate::aarch64_process::complete_io_wait();
-                frame.registers[0] = crate::aarch64_tty::Errno::Interrupted.abi();
             } else {
-                let ready = poll_descriptors(address, count);
-                if crate::aarch64_tty::wait_interrupted() {
+                let mut io_probe =
+                    crate::aarch64_process::begin_io_probe(makos_readiness::WaitSource::Any);
+                if let Err(error) =
+                    crate::aarch64_tty::begin_wait_mask((wait_mask_present != 0).then_some(wait_mask))
+                {
+                    frame.registers[0] = error.abi();
+                } else if crate::aarch64_tty::wait_interrupted() {
                     crate::aarch64_process::complete_io_wait();
                     frame.registers[0] = crate::aarch64_tty::Errno::Interrupted.abi();
-                } else if ready != 0 || timeout == 0 {
-                    crate::aarch64_process::complete_io_wait();
-                    crate::aarch64_tty::finish_wait_mask();
-                    frame.registers[0] = ready;
                 } else {
-                    match crate::aarch64_process::block_current_for_io(timeout, frame) {
-                        crate::aarch64_process::IoBlockResult::Switched => return,
-                        crate::aarch64_process::IoBlockResult::TimedOut => {
-                            crate::aarch64_tty::finish_wait_mask();
-                            frame.registers[0] = 0
-                        }
-                        crate::aarch64_process::IoBlockResult::Failed => {
-                            crate::aarch64_tty::finish_wait_mask();
-                            frame.registers[0] = (-11i64) as u64
+                    let ready = poll_descriptors(address, count);
+                    if crate::aarch64_tty::wait_interrupted() {
+                        crate::aarch64_process::complete_io_wait();
+                        frame.registers[0] = crate::aarch64_tty::Errno::Interrupted.abi();
+                    } else if ready != 0 || timeout == 0 {
+                        crate::aarch64_process::complete_io_wait();
+                        crate::aarch64_tty::finish_wait_mask();
+                        frame.registers[0] = ready;
+                    } else {
+                        io_probe.handoff();
+                        match crate::aarch64_process::block_current_for_io(timeout, frame) {
+                            crate::aarch64_process::IoBlockResult::Switched => return,
+                            crate::aarch64_process::IoBlockResult::TimedOut => {
+                                crate::aarch64_tty::finish_wait_mask();
+                                frame.registers[0] = 0
+                            }
+                            crate::aarch64_process::IoBlockResult::Failed => {
+                                crate::aarch64_tty::finish_wait_mask();
+                                frame.registers[0] = (-11i64) as u64
+                            }
                         }
                     }
                 }
+                drop(io_probe);
             }
             finish_signal_delivery(frame);
             return;
@@ -3440,40 +3442,48 @@ fn handle_svc(frame: &mut ExceptionFrame) {
                 || !user_range_writable(address, bytes)
             {
                 frame.registers[0] = (-22i64) as u64;
-            } else if let Err(error) =
-                crate::aarch64_tty::begin_wait_mask((wait_mask_present != 0).then_some(wait_mask))
-            {
-                frame.registers[0] = error.abi();
-            } else if crate::aarch64_tty::wait_interrupted() {
-                crate::aarch64_process::complete_io_wait();
-                frame.registers[0] = crate::aarch64_tty::Errno::Interrupted.abi();
             } else {
-                let output = unsafe {
-                    core::slice::from_raw_parts_mut(address as *mut makos_readiness::Event, maximum)
-                };
-                match crate::aarch64_epoll::collect(handle, output) {
-                    Ok(count) if count != 0 || timeout == 0 => {
-                        crate::aarch64_process::complete_io_wait();
-                        crate::aarch64_tty::finish_wait_mask();
-                        frame.registers[0] = count as u64;
-                    }
-                    Ok(_) => match crate::aarch64_process::block_current_for_io(timeout, frame) {
-                        crate::aarch64_process::IoBlockResult::Switched => return,
-                        crate::aarch64_process::IoBlockResult::TimedOut => {
+                let mut io_probe =
+                    crate::aarch64_process::begin_io_probe(makos_readiness::WaitSource::Any);
+                if let Err(error) =
+                    crate::aarch64_tty::begin_wait_mask((wait_mask_present != 0).then_some(wait_mask))
+                {
+                    frame.registers[0] = error.abi();
+                } else if crate::aarch64_tty::wait_interrupted() {
+                    crate::aarch64_process::complete_io_wait();
+                    frame.registers[0] = crate::aarch64_tty::Errno::Interrupted.abi();
+                } else {
+                    let output = unsafe {
+                        core::slice::from_raw_parts_mut(address as *mut makos_readiness::Event, maximum)
+                    };
+                    match crate::aarch64_epoll::collect(handle, output) {
+                        Ok(count) if count != 0 || timeout == 0 => {
+                            crate::aarch64_process::complete_io_wait();
                             crate::aarch64_tty::finish_wait_mask();
-                            frame.registers[0] = 0
+                            frame.registers[0] = count as u64;
                         }
-                        crate::aarch64_process::IoBlockResult::Failed => {
+                        Ok(_) => {
+                            io_probe.handoff();
+                            match crate::aarch64_process::block_current_for_io(timeout, frame) {
+                                crate::aarch64_process::IoBlockResult::Switched => return,
+                                crate::aarch64_process::IoBlockResult::TimedOut => {
+                                    crate::aarch64_tty::finish_wait_mask();
+                                    frame.registers[0] = 0
+                                }
+                                crate::aarch64_process::IoBlockResult::Failed => {
+                                    crate::aarch64_tty::finish_wait_mask();
+                                    frame.registers[0] = (-11i64) as u64
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            crate::aarch64_process::complete_io_wait();
                             crate::aarch64_tty::finish_wait_mask();
-                            frame.registers[0] = (-11i64) as u64
+                            frame.registers[0] = crate::aarch64_epoll::error_abi(error);
                         }
-                    },
-                    Err(error) => {
-                        crate::aarch64_process::complete_io_wait();
-                        crate::aarch64_tty::finish_wait_mask();
-                        frame.registers[0] = crate::aarch64_epoll::error_abi(error);
                     }
                 }
+                drop(io_probe);
             }
             finish_signal_delivery(frame);
             return;
@@ -5758,6 +5768,8 @@ fn pselect(frame: &mut ExceptionFrame) -> bool {
         frame.registers[0] = (-22i64) as u64;
         return false;
     }
+    let mut io_probe =
+        crate::aarch64_process::begin_io_probe(makos_readiness::WaitSource::Any);
     if let Err(error) =
         crate::aarch64_tty::begin_wait_mask((wait_mask_present != 0).then_some(wait_mask))
     {
@@ -5801,6 +5813,7 @@ fn pselect(frame: &mut ExceptionFrame) -> bool {
         frame.registers[0] = snapshot.count;
         return false;
     }
+    io_probe.handoff();
     match crate::aarch64_process::block_current_for_io(timeout, frame) {
         crate::aarch64_process::IoBlockResult::Switched => return true,
         crate::aarch64_process::IoBlockResult::TimedOut => {

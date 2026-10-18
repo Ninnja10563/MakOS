@@ -13,6 +13,17 @@ For a final image retaining an existing account and Firefox profile while
 refreshing Firefox, GNU nano, ncurses, and CPython, see
 `docs/INTEGRATED-DATA-IMAGE.md`.
 
+Current kernel increment: [I/O probe admission](IO-PROBE-ATOMICITY-20261018.md)
+reproduces the old scan-to-registration lost notification with pinned host
+code. Repair regression passes17cases/6negative controls, exit0, real3.94s:
+`python3 scripts/test_aarch64_io_probe_atomic.py`. Both unit/check include it;
+all existing tests and thresholds remain. First full unit/check stopped at the
+historical whole-architecture diagnostic policy digest, exit2, real36.20s;
+failure preserved. Reviewed exact baseline retains every assertion and adds
+one negative control. Fresh unit/check passes, exit0, real458.43s; image build
+passes, exit0, real15.05s. New guest qualification not run. Reuse the verified67-patch Firefox publication
+below for this kernel-only change; no rebuild/restamp or profile edit.
+
 Current transaction observation (2026-10-18):8bfb335631b1 passes all earlier
 Mac/HVF gates/preflight, then navigation fails after37602/6845/110ms
 paint/Ctrl-A/first-character. Preserve all39 private disks and raw evidence in

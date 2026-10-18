@@ -29,6 +29,27 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-18 UTC I/O probe admission repair
+
+Parent diagnostic publication5958c2990e9d2fb86d90fac58f795a1a4703f1bb is
+committed/pushed; the current bounded kernel repair is separate. See
+[I/O admission](IO-PROBE-ATOMICITY-20261018.md). Pinned original production
+registration/wake code reproduces a missed notification with three passing
+controls and two required assertion failures. Baseline source, kernel/boot/
+loader, fixed serial/captures and binaries are preserved under
+`build/logs/io-probe-atomicity-20261018-QFamvI/`. Applied per-task admission
+latch/guard keeps existing deadlines and SVC retry behavior. Focused host
+regression passes17cases/6controls, real3.94s, exit0. First full unit/check
+stopped at the historical whole-architecture diagnostic policy digest, exit2,
+real36.20s; failure preserved. Reviewed exact baseline retains every assertion
+and adds one negative control. Fresh unit/check passes, exit0, real458.43s;
+image build passes, exit0, real15.05s. Evidence:
+`build/logs/io-probe-policy-20261018-Gocufi/`. Fresh exact-commit guest
+qualification not run. Firefox cause remains
+unestablished. Reuse verified67 image8b191c84c05f1999/manifest450434ab; no
+browser rebuild/restamp/profile changes or weakened gate. Qualify only the
+final published repair commit, never borrow historical passes.
+
 ### 2026-10-18 transaction admission observation
 
 Exact8bfb335631b1b1c67dffbe9d2e089e0611098e66 passes all earlier Mac/HVF

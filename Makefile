@@ -252,6 +252,7 @@ unit:
 	cargo test -p makos-structured-log
 	cargo test -p makos-vm-space
 	python3 scripts/test_aarch64_io_wake.py
+	python3 scripts/test_aarch64_io_probe_atomic.py
 	python3 scripts/test_aarch64_madvise.py
 	python3 scripts/test_aarch64_scm_rights.py
 	python3 scripts/test_aarch64_typed_ipc.py
@@ -347,6 +348,7 @@ check:
 	cargo test -p makos-structured-log
 	cargo test -p makos-vm-space
 	python3 scripts/test_aarch64_io_wake.py
+	python3 scripts/test_aarch64_io_probe_atomic.py
 	python3 scripts/test_aarch64_madvise.py
 	python3 scripts/test_aarch64_scm_rights.py
 	python3 scripts/test_aarch64_typed_ipc.py

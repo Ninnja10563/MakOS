@@ -3,7 +3,7 @@
 
 No sockets, packets, guest or browser qualification. The real connect policy
 body is preserved byte-for-byte, not executed by the host network adapter.
-Fixed-parent erasure digests intentionally require review after policy edits.
+Fixed erasure digests intentionally require review after policy edits.
 """
 from pathlib import Path
 import hashlib
@@ -16,7 +16,12 @@ SOCKET = (ROOT / "kernel/src/aarch64_socket.rs").read_text()
 ARCH = (ROOT / "kernel/src/arch/aarch64.rs").read_text()
 PARENT = "f3cfdfea28311811aa54f4dcf02a169886466df2"
 SOCKET_SHA = "f7d5050d02ea293ca192fb00650a71cc77784321ba23572884d98de13fafd367"
-ARCH_SHA = "9b0cc57201d224a86569edaeb3e946fa6c3add7ca13df22c702419f452e1d860"
+# Historical architecture baseline at PARENT, before the reviewed I/O admission
+# repair. Socket policy remains pinned to that parent without changes.
+HISTORICAL_ARCH_SHA = "9b0cc57201d224a86569edaeb3e946fa6c3add7ca13df22c702419f452e1d860"
+# Exact whole-file baseline after diagnostic erasure; see
+# docs/IO-PROBE-ATOMICITY-20261018.md. Never derive this expectation at runtime.
+ARCH_SHA = "e60de711cc5d86631eb3d37dc5c485214a8b034232cc0106af5eb026fc115593"
 
 
 def block(source: str, signature: str) -> str:
@@ -110,6 +115,10 @@ assert "with_state(" not in DIAGNOSTIC and "unsafe" not in DIAGNOSTIC
 assert "crate::vfs" not in DIAGNOSTIC and "connect_address_untraced(" in DIAGNOSTIC
 assert digest(restored_socket(SOCKET.replace("return false;", "return true;", 1))) != SOCKET_SHA
 assert digest(restored_arch(ARCH.replace("if count > 32", "if count > 64", 1))) != ARCH_SHA
+changed_probe = ARCH.replace("begin_io_probe(makos_readiness::WaitSource::Any)",
+                             "begin_io_probe(makos_readiness::WaitSource::Descriptor(0))", 1)
+assert changed_probe != ARCH, "I/O admission negative control was not applied"
+assert digest(restored_arch(changed_probe)) != ARCH_SHA
 
 HOST = r'''
 use std::sync::{Mutex, atomic::{AtomicBool,AtomicU64,Ordering}};
@@ -258,9 +267,10 @@ with tempfile.TemporaryDirectory(prefix="makos-network-diagnostics-") as tempora
     reject("exit-identity", "trace, pid, tid, cpu, handle, address, remote_port, u8::from(connected)", "trace, pid, { let _captured_tid = tid; crate::aarch64_process::current_tid() }, cpu, handle, address, remote_port, u8::from(connected)", "snapshot", "missing field tid=73")
     reject("poll-count", "abi, count, timeout, wait_mask, wait_mask_present,", "abi, count + 1, timeout, wait_mask, wait_mask_present,", "denials", "missing field count=33")
 
-print("MAKOS_AARCH64_NETWORK_DIAGNOSTICS_HOST_OK cases=8 negative_controls=9 "
+print("MAKOS_AARCH64_NETWORK_DIAGNOSTICS_HOST_OK cases=8 negative_controls=10 "
       "logic=production-admission,wrapper,denials,connect-svc "
       "identity,serial,inner-network=host-adapters "
-      "policy=exact-parent-restoration parent=" + PARENT + " "
+      "socket_policy=exact-parent-restoration socket_parent=" + PARENT + " "
+      "arch_policy=exact-reviewed-io-admission-baseline arch_sha256=" + ARCH_SHA + " "
       "connect_cap=32 denial_caps=8,8 overflow=once-per-budget "
       "scope=diagnostic-regression-not-guest-or-browser-qualification")

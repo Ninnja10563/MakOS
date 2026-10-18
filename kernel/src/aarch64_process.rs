@@ -197,6 +197,8 @@ struct ContextSlot {
     io_wait: bool,
     io_source: makos_readiness::WaitSource,
     io_deadline: u64,
+    io_probe_source: Option<makos_readiness::WaitSource>,
+    io_probe_notified: bool,
     input_wait: bool,
     input_wait_handle: u64,
     name: [u8; 16],
@@ -222,6 +224,8 @@ impl ContextSlot {
         io_wait: false,
         io_source: makos_readiness::WaitSource::Any,
         io_deadline: 0,
+        io_probe_source: None,
+        io_probe_notified: false,
         input_wait: false,
         input_wait_handle: 0,
         name: [0; 16],
@@ -3254,6 +3258,62 @@ pub fn block_current_for_ipc(frame: &mut crate::arch::ExceptionFrame) -> bool {
     }
 }
 
+/// Own one pre-operation readiness observation. Never hold the scheduler lock
+/// while the caller touches VFS, sockets, epoll, TTY state, or user buffers.
+/// Drop addresses the entry TID, not whichever task a return frame names.
+/// Exactly one probe may be active per TID: callers finish/drop it or hand
+/// it to registration before beginning another probe for that task.
+#[must_use = "keep the probe alive through the operation, then drop it or hand it to registration"]
+pub(crate) struct IoProbeGuard {
+    tid: Option<u64>,
+}
+
+impl IoProbeGuard {
+    /// Transfer cleanup to block_current_for_io[_on] BEFORE it can publish
+    /// Blocked. A later Drop must not clear a probe armed by this same TID
+    /// after another CPU has already resumed it.
+    pub(crate) fn handoff(&mut self) {
+        self.tid = None;
+    }
+}
+
+impl Drop for IoProbeGuard {
+    fn drop(&mut self) {
+        let Some(tid) = self.tid.take() else {
+            return;
+        };
+        with_state(|state| {
+            if let Some(slot) = state.contexts.iter_mut().find(|slot| slot.pid == tid) {
+                slot.io_probe_source = None;
+                slot.io_probe_notified = false;
+            }
+        });
+    }
+}
+
+/// Arm before the operation that may find no progress. A matching producer
+/// marks the latch even while this task is Running. Separate fields preserve
+/// an existing syscall deadline across re-probes; no generation can wrap.
+pub(crate) fn begin_io_probe(source: makos_readiness::WaitSource) -> IoProbeGuard {
+    let tid = with_state(|state| {
+        let tid = state.table.current_pid_on(scheduler_cpu())?;
+        let slot = state.contexts.iter_mut().find(|slot| slot.pid == tid)?;
+        slot.io_probe_source = Some(source);
+        slot.io_probe_notified = false;
+        Some(tid)
+    });
+    IoProbeGuard { tid }
+}
+
+/// Called only under the same scheduler lock as wake_io_source, before
+/// Blocked publication. Missing/mismatched admission fails rather than
+/// silently restoring the scan-before-registration race.
+fn consume_io_probe(slot: &mut ContextSlot, source: makos_readiness::WaitSource) -> Option<bool> {
+    let observed_source = slot.io_probe_source.take();
+    let notified = core::mem::take(&mut slot.io_probe_notified);
+    (observed_source == Some(source)).then_some(notified)
+}
+
 /// Suspend current EL0 task until pipe readiness changes or timeout expires.
 /// Saved ELR points back at `svc`, making kernel retry original operation after
 /// wake without exposing an intermediate EAGAIN to blocking userspace.
@@ -3281,11 +3341,10 @@ pub(crate) fn block_current_for_io_on(
     // CPU0 retains the bounded in-syscall WFI path for its sole leader.
     let secondary_idle = secondary_scheduler_can_idle();
     if runtime_stats().runnable <= 1 && !secondary_idle {
-        // SVC entry keeps IRQs masked through publishing io_wait. A device or
-        // timer becoming pending in that window makes the following WFI exit
-        // immediately, so readiness cannot be lost between userspace's failed
-        // operation and this wait. AArch64 currently schedules one boot CPU;
-        // no remote CPU can race runnable count before IRQs are enabled.
+        // Consume the pre-operation notification under the scheduler lock,
+        // just as in the ordinary/AP path. This sole CPU0 task stays Running;
+        // the existing timer-driven WFI/retry handles notifications arriving
+        // after admission without changing the original relative deadline.
         let idle = with_state(|state| {
             let tid = state
                 .table
@@ -3295,6 +3354,8 @@ pub(crate) fn block_current_for_io_on(
                 .contexts
                 .iter()
                 .position(|slot| slot.pid == tid)
+                .ok_or(IoBlockResult::Failed)?;
+            let notified = consume_io_probe(&mut state.contexts[index], source)
                 .ok_or(IoBlockResult::Failed)?;
             if !state.contexts[index].io_wait {
                 state.contexts[index].io_wait = true;
@@ -3315,12 +3376,16 @@ pub(crate) fn block_current_for_io_on(
                 return Err(IoBlockResult::TimedOut);
             }
             state.contexts[index].context = captured;
-            Ok((tid, deadline))
+            Ok((tid, deadline, notified))
         });
-        let (tid, deadline) = match idle {
+        let (tid, deadline, notified) = match idle {
             Ok(value) => value,
             Err(result) => return result,
         };
+        if notified {
+            captured.restore(frame);
+            return IoBlockResult::Switched;
+        }
         if !IDLE_IO_REPORTED.swap(true, Ordering::AcqRel) {
             crate::serial_println!(
                 "MAKOS_AARCH64_IDLE_IO_OK tid={} scheduler=wfi last_runnable=1 deadline={} retry=svc busy_spin=0",
@@ -3349,6 +3414,8 @@ pub(crate) fn block_current_for_io_on(
             .iter()
             .position(|slot| slot.pid == tid)
             .ok_or(IoBlockResult::Failed)?;
+        let notified = consume_io_probe(&mut state.contexts[index], source)
+            .ok_or(IoBlockResult::Failed)?;
         if !state.contexts[index].io_wait {
             state.contexts[index].io_wait = true;
             state.contexts[index].io_source = source;
@@ -3368,6 +3435,11 @@ pub(crate) fn block_current_for_io_on(
             return Err(IoBlockResult::TimedOut);
         }
         state.contexts[index].context = captured;
+        if notified {
+            // Keep Running and preserve the initialized deadline. Re-execute
+            // the original SVC, so userspace never sees an artificial EAGAIN.
+            return Ok((tid, deadline, None, true));
+        }
         state.contexts[index].sleep_deadline = deadline;
         if state.table.block_current_on(scheduler_cpu()) != Some(tid) {
             state.contexts[index].io_wait = false;
@@ -3382,7 +3454,7 @@ pub(crate) fn block_current_for_io_on(
                 if state.contexts[index].role == ProcessRole::SmpProbe {
                     SMP_PROBE_IO_IDLE_MASK.fetch_or(1u64 << cpu, Ordering::AcqRel);
                 }
-                return Ok((tid, deadline, None));
+                return Ok((tid, deadline, None, false));
             }
             state.contexts[index].io_wait = false;
             state.contexts[index].io_source = makos_readiness::WaitSource::Any;
@@ -3398,10 +3470,14 @@ pub(crate) fn block_current_for_io_on(
             .find(|slot| slot.pid == next.pid)
             .map(|slot| slot.context)
             .ok_or(IoBlockResult::Failed)?;
-        Ok((tid, deadline, Some(context)))
+        Ok((tid, deadline, Some(context), false))
     });
     match switched {
-        Ok((tid, deadline, context)) => {
+        Ok((tid, deadline, context, retry)) => {
+            if retry {
+                captured.restore(frame);
+                return IoBlockResult::Switched;
+            }
             if !IO_BLOCK_REPORTED.swap(true, Ordering::AcqRel) {
                 crate::serial_println!(
                     "MAKOS_AARCH64_IO_BLOCK_OK tid={} deadline={} scheduler=blocked retry=svc",
@@ -3433,6 +3509,8 @@ pub(crate) fn complete_io_wait() {
         slot.io_source = makos_readiness::WaitSource::Any;
         slot.io_deadline = 0;
         slot.sleep_deadline = 0;
+        slot.io_probe_source = None;
+        slot.io_probe_notified = false;
     });
 }
 
@@ -3442,6 +3520,12 @@ pub(crate) fn wake_io_source(source: makos_readiness::WaitSource) -> usize {
     let count = with_state(|state| {
         let mut count = 0usize;
         for index in 0..state.contexts.len() {
+            if state.contexts[index]
+                .io_probe_source
+                .is_some_and(|probe| probe.woken_by(source))
+            {
+                state.contexts[index].io_probe_notified = true;
+            }
             if !state.contexts[index].io_wait || !state.contexts[index].io_source.woken_by(source) {
                 continue;
             }
@@ -4040,6 +4124,8 @@ pub fn clone_thread(
             io_wait: false,
             io_source: makos_readiness::WaitSource::Any,
             io_deadline: 0,
+            io_probe_source: None,
+            io_probe_notified: false,
             input_wait: false,
             input_wait_handle: 0,
             name: parent.name,
@@ -4130,6 +4216,8 @@ pub fn fork_process(frame: &crate::arch::ExceptionFrame) -> Option<u64> {
             io_wait: false,
             io_source: makos_readiness::WaitSource::Any,
             io_deadline: 0,
+            io_probe_source: None,
+            io_probe_notified: false,
             input_wait: false,
             input_wait_handle: 0,
             name: parent.name,
@@ -5200,6 +5288,8 @@ fn install_loaded_process(
             io_wait: false,
             io_source: makos_readiness::WaitSource::Any,
             io_deadline: 0,
+            io_probe_source: None,
+            io_probe_notified: false,
             input_wait: false,
             input_wait_handle: 0,
             name: [0; 16],
@@ -6336,6 +6426,8 @@ pub(crate) fn exec_current(
         state.contexts[index].io_wait = false;
         state.contexts[index].io_source = makos_readiness::WaitSource::Any;
         state.contexts[index].io_deadline = 0;
+        state.contexts[index].io_probe_source = None;
+        state.contexts[index].io_probe_notified = false;
         state.contexts[index].input_wait = false;
         state.contexts[index].input_wait_handle = 0;
         state.spawned_roots[index] = process.root;
