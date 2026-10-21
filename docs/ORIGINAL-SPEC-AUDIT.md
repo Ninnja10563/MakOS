@@ -11,6 +11,17 @@ Silicon. Original initial x86_64 target remains built/tested separately.
 
 Current qualification:
 
+October21: [connection continuation](FIREFOX-CONNECTION-CLAIM-20261021.md) is
+under development; pinned-source host checks pass16cases/7controls. Unit/check
+386.36s, widget887.13s and supported68 release2123.61s pass exit0, including all
+five ELF audits and provenance. Integration6000.77s/final preflight0.98s pass
+exit0; new image8d4e097da8deae9c/manifest164fd6da preserve source account/profile
+state. No new guest qualification or audit upgrade.
+Storage blocker resolved by user-authorized
+obsolete-test cleanup. `build/cleanup-20261021.json` lists removed older private
+clones; current masters and latest complete peer-FIN run remain. Historical
+statements about retained older disks are superseded by that inventory.
+
 Exact1d39533fe8f03794122ccd1527b27c12452a80f0 passes all preceding commands and
 unchanged67-patch preflight, then Firefox first navigation fails, exit2, after
 34334/6386/110ms paint/Ctrl-A/character. Evidence and39private disks:

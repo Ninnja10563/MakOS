@@ -1,5 +1,16 @@
 # Official Firefox source port foundation
 
+Current development (2026-10-21): [claimed-connection continuation](../../docs/FIREFOX-CONNECTION-CLAIM-20261021.md)
+adds historical claim identity across existing DNS/TLS callbacks and reclamation.
+Pinned-source host checks pass16cases/7controls. Unit/check386.36s, widget887.13s
+and supported68-patch release2123.61s pass exit0, including all five ELF audits
+and provenance. Integration6000.77s and final preflight0.98s pass exit0, publishing
+new image8d4e097da8deae9c/manifest164fd6da with preserved source account/profile
+state. No browser fix or guest qualification is claimed. Prior67 source/release
+is independently preserved; preserve all current
+masters/accounts/profiles. User-approved older test-clone deletion is recorded in
+`build/cleanup-20261021.json`, superseding historical retention statements below.
+
 This directory pins Mozilla Firefox ESR 140.13.0 source. ESR is chosen for a
 stable security-maintained base while MakOS develops a new platform port.
 Mozilla's official product metadata listed 140.13.0esr as current ESR when

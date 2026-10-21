@@ -29,6 +29,27 @@ Preserve existing files and changes.
 
 ## Current verified state
 
+### 2026-10-21 storage recovered; connection continuation in development
+
+User authorized obsolete MakOS cleanup:26GiB freed, approximately59GiB available
+before source preservation. See `build/cleanup-20261021.json` for deleted older
+runtime-private test clones; old retained-disk statements below are historical.
+Current masters/accounts/profiles and complete latest peer-FIN evidence remain.
+CandyWrapper stays open; unused apps, runaway headless preview and crash-looping
+Hermes gateway were stopped. No QEMU remains from that cleanup.
+
+[Connection continuation](FIREFOX-CONNECTION-CLAIM-20261021.md) adds bounded
+historical claim identity across DNS/TLS callbacks and connection reclamation.
+Complete current67 source/release independently preserved, all five hashes and
+both masters matched. Pinned-source host regression passes16cases/7controls.
+Unit/check386.36s, widget887.13s and supported68 release2123.61s pass exit0,
+including all five ELF audits and provenance. Integration6000.77s and final
+preflight0.98s pass exit0. New image8d4e097da8deae9c/manifest164fd6da are pinned
+in the Mac protocol; source/account/profile preservation and independent candidate
+retention pass. Guest qualification remains pending.
+No Firefox fix or audit upgrade. Continue this increment before remaining audit
+priorities; keep unchanged qualification limits and stop each failed sequence.
+
 ### 2026-10-18 UTC completed peer-FIN qualification; storage prerequisite
 
 Exact1d39533fe8f03794122ccd1527b27c12452a80f0 passes unit/check490.35s,

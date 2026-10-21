@@ -28,6 +28,7 @@ test -s "$port_dir/patches/0064-makos-channel-admission.patch"
 test -s "$port_dir/patches/0065-makos-http-continuations.patch"
 test -s "$port_dir/patches/0066-makos-http-boundary-state.patch"
 test -s "$port_dir/patches/0067-makos-transaction-boundary.patch"
+test -s "$port_dir/patches/0068-makos-connection-claim.patch"
 test -s "$port_dir/toolchain-probe.c"
 toolchain_status=$("$port_dir/toolchain-audit.sh")
 

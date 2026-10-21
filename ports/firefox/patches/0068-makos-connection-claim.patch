@@ -1,0 +1,392 @@
+From: MakOS Project <makos@localhost>
+Subject: [PATCH] net: trace claimed connection continuation without changing policy
+
+Record historical claim provenance, never transaction ownership. Trace DNS/TLS
+continuation through existing callbacks and connection reclamation. Preserve
+first-channel admission and the existing shared 32+1 transaction attempt cap.
+No URI capture, new references, retry, preference or qualification changes.
+
+---
+diff --git a/mfbt/MakOSRuntimeEvidence.h b/mfbt/MakOSRuntimeEvidence.h
+--- a/mfbt/MakOSRuntimeEvidence.h
++++ b/mfbt/MakOSRuntimeEvidence.h
+@@ -246,6 +246,41 @@
+              : WriteTransactionRecord("manager-local", 13, 0, false, 0, 0, 0, false);
+ }
+ // END MakOS transaction diagnostics
++
++// BEGIN MakOS connection claim diagnostics
++// Historical claim provenance, never transaction ownership. Socket-thread only
++// once bits belong to the object; captured copies survive reentrant callbacks.
++struct ConnectionClaim {
++  uint64_t channel = 0;
++  uint32_t token = 0;
++  uint32_t observed = 0;
++
++  bool Observe(uint32_t aBit) {
++    if (!channel || !aBit || (observed & aBit)) {
++      return false;
++    }
++    observed |= aBit;
++    return true;
++  }
++};
++
++inline ConnectionClaim NewConnectionClaim(uint64_t aChannel) {
++  if (!aChannel || aChannel != HttpStateChannel()) {
++    return {};
++  }
++  static Atomic<uint32_t> claims(0);
++  uint32_t prior = claims;
++  for (;;) {
++    if (prior >= 32) {
++      return {};
++    }
++    if (claims.compareExchange(prior, prior + 1)) {
++      return {aChannel, prior + 1, 0};
++    }
++    prior = claims;
++  }
++}
++// END MakOS connection claim diagnostics
+ 
+ // Bounded load-path diagnostics, never page/TLS success proof. IDs come from
+ // real load/channel objects; zero means unavailable. Flags: bit0 top-content,
+@@ -334,4 +369,44 @@
+ #  define MAKOS_TX_MANAGER(remote) ((void)0)
+ #endif
+ // END MakOS transaction macros
++
++// BEGIN MakOS connection claim macros
++#ifdef XP_MAKOS
++#  define MAKOS_CONN_CAPTURE(name, object) \
++    const auto name = (object)->mMakOSClaim
++#  define MAKOS_CONN_TRACE(claim, stage, result, actual, state) \
++    MAKOS_TX_TRACE((claim).channel, stage, result, actual, (claim).token, state)
++#  define MAKOS_CONN_CLAIM(object, aChannel, stage)                        \
++    do {                                                                 \
++      auto* makosObject = (object);                                       \
++      const auto makosClaim = mozilla::makos::NewConnectionClaim(aChannel); \
++      if (makosClaim.channel) {                                           \
++        makosObject->mMakOSClaim = makosClaim;                              \
++        MAKOS_CONN_TRACE(makosClaim, stage, 0, false,                       \
++                         makosObject->MakOSClaimState());                 \
++      }                                                                  \
++    } while (0)
++#  define MAKOS_CONN_TRANSFER(object, claim)       \
++    do {                                          \
++      if ((claim).channel) {                      \
++        (object)->mMakOSClaim = (claim);           \
++      }                                           \
++    } while (0)
++#  define MAKOS_CONN_ONCE(object, bit, stage, result, actual)    \
++    do {                                                       \
++      auto* makosObject = (object);                             \
++      if (makosObject->mMakOSClaim.Observe(bit)) {               \
++        MAKOS_CONN_CAPTURE(makosClaim, makosObject);             \
++        MAKOS_CONN_TRACE(makosClaim, stage, result, actual,      \
++                         makosObject->MakOSClaimState());       \
++      }                                                        \
++    } while (0)
++#else
++#  define MAKOS_CONN_CAPTURE(name, object) ((void)0)
++#  define MAKOS_CONN_TRACE(claim, stage, result, actual, state) ((void)0)
++#  define MAKOS_CONN_CLAIM(object, channel, stage) ((void)0)
++#  define MAKOS_CONN_TRANSFER(object, claim) ((void)0)
++#  define MAKOS_CONN_ONCE(object, bit, stage, result, actual) ((void)0)
++#endif
++// END MakOS connection claim macros
+ #endif  // mozilla_MakOSRuntimeEvidence_h
+diff --git a/netwerk/protocol/http/DnsAndConnectSocket.cpp b/netwerk/protocol/http/DnsAndConnectSocket.cpp
+--- a/netwerk/protocol/http/DnsAndConnectSocket.cpp
++++ b/netwerk/protocol/http/DnsAndConnectSocket.cpp
+@@ -344,6 +344,9 @@
+ }
+ 
+ void DnsAndConnectSocket::Abandon() {
++  MAKOS_CONN_CAPTURE(makosClaim, this);
++  MAKOS_CONN_TRACE(makosClaim, "claim-dns-abandon", NS_OK, false,
++                   MakOSClaimState());
+   LOG(("DnsAndConnectSocket::Abandon [this=%p ent=%s] %p %p %p %p", this,
+        mConnInfo->Origin(), mPrimaryTransport.mSocketTransport.get(),
+        mBackupTransport.mSocketTransport.get(),
+@@ -396,6 +399,9 @@
+ NS_IMETHODIMP
+ DnsAndConnectSocket::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
+                                       nsresult status) {
++  MAKOS_CONN_CAPTURE(makosClaim, this);
++  MAKOS_CONN_TRACE(makosClaim, "claim-dns-callback", status, true,
++                   MakOSClaimState());
+   MAKOS_TX_CAPTURE(makosChannel,
+                     mTransaction ? mTransaction->QueryHttpTransaction() : nullptr);
+   MAKOS_TX_TRACE(makosChannel, "dns-callback", status, true, 0, 0);
+@@ -481,6 +487,9 @@
+ // method for nsIAsyncOutputStreamCallback
+ NS_IMETHODIMP
+ DnsAndConnectSocket::OnOutputStreamReady(nsIAsyncOutputStream* out) {
++  MAKOS_CONN_CAPTURE(makosClaim, this);
++  MAKOS_CONN_TRACE(makosClaim, "claim-output-ready", NS_OK, false,
++                   MakOSClaimState());
+   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+   MOZ_DIAGNOSTIC_ASSERT(mPrimaryTransport.mSocketTransport ||
+                         mBackupTransport.mSocketTransport);
+@@ -531,6 +540,8 @@
+   }
+ 
+   nsresult socketStatus = out->StreamStatus();
++  MAKOS_CONN_TRACE(makosClaim, "claim-stream-status", socketStatus, true,
++                   isPrimary);
+   if (StaticPrefs::network_http_retry_with_another_half_open() &&
+       NS_FAILED(socketStatus) && socketStatus != NS_BASE_STREAM_WOULD_BLOCK) {
+     if (isPrimary) {
+@@ -567,6 +578,8 @@
+ }
+ 
+ nsresult DnsAndConnectSocket::SetupConn(bool isPrimary, nsresult status) {
++  MAKOS_CONN_CAPTURE(makosClaim, this);
++  MAKOS_CONN_TRACE(makosClaim, "claim-setup-enter", status, false, isPrimary);
+   // assign the new socket to the http connection
+ 
+   RefPtr<ConnectionEntry> ent =
+@@ -587,6 +600,15 @@
+     rv = mBackupTransport.SetupConn(mTransaction, ent, status, mCaps,
+                                     getter_AddRefs(conn));
+   }
++
++  MAKOS_CONN_TRACE(makosClaim, "claim-setup-return", rv, true, isPrimary);
++  // BEGIN MakOS connection claim transfer
++#ifdef XP_MAKOS
++  if (conn) {
++    MAKOS_CONN_TRANSFER(conn.get(), makosClaim);
++  }
++#endif
++  // END MakOS connection claim transfer
+ 
+   nsCOMPtr<nsIInterfaceRequestor> callbacks;
+   mTransaction->GetSecurityCallbacks(getter_AddRefs(callbacks));
+@@ -873,6 +895,9 @@
+ }
+ 
+ void DnsAndConnectSocket::Unclaim() {
++  MAKOS_CONN_CAPTURE(makosClaim, this);
++  MAKOS_CONN_TRACE(makosClaim, "claim-dns-unclaim", NS_OK, false,
++                   MakOSClaimState());
+   MOZ_ASSERT(!mSpeculative && !mFreeToUse);
+   // We will keep the backup-timer running. Most probably this halfOpen will
+   // be used by a transaction from which this transaction took the halfOpen.
+diff --git a/netwerk/protocol/http/DnsAndConnectSocket.h b/netwerk/protocol/http/DnsAndConnectSocket.h
+--- a/netwerk/protocol/http/DnsAndConnectSocket.h
++++ b/netwerk/protocol/http/DnsAndConnectSocket.h
+@@ -7,6 +7,7 @@
+ #define DnsAndConnectSocket_h__
+ 
+ #include "mozilla/TimeStamp.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
+ #include "mozilla/UniquePtr.h"
+ #include "nsAHttpConnection.h"
+ #include "nsHttpConnection.h"
+@@ -73,6 +74,19 @@
+   bool AcceptsTransaction(nsHttpTransaction* trans);
+   bool Claim();
+   void Unclaim();
++
++  // BEGIN MakOS connection claim fields
++#ifdef XP_MAKOS
++  mozilla::makos::ConnectionClaim mMakOSClaim;
++  uint32_t MakOSClaimState() const {
++    return static_cast<uint32_t>(mState) |
++           (static_cast<uint32_t>(mPrimaryTransport.mState) << 4) |
++           (static_cast<uint32_t>(mBackupTransport.mState) << 8) |
++           (uint32_t(mSpeculative) << 12) | (uint32_t(mFreeToUse) << 13) |
++           (uint32_t(mHasConnected) << 14);
++  }
++#endif
++  // END MakOS connection claim fields
+ 
+  private:
+   // This performs checks that the DnsAndConnectSocket has been properly cleand
+diff --git a/netwerk/protocol/http/HttpConnectionBase.h b/netwerk/protocol/http/HttpConnectionBase.h
+--- a/netwerk/protocol/http/HttpConnectionBase.h
++++ b/netwerk/protocol/http/HttpConnectionBase.h
+@@ -13,6 +13,7 @@
+ #include "nsProxyRelease.h"
+ #include "prinrval.h"
+ #include "mozilla/Mutex.h"
++#include "mozilla/MakOSRuntimeEvidence.h"
+ #include "ARefBase.h"
+ #include "TimingStruct.h"
+ #include "HttpTrafficAnalyzer.h"
+@@ -67,6 +68,16 @@
+   NS_INLINE_DECL_STATIC_IID(HTTPCONNECTIONBASE_IID)
+ 
+   HttpConnectionBase();
++
++  // BEGIN MakOS connection claim fields
++#ifdef XP_MAKOS
++  mozilla::makos::ConnectionClaim mMakOSClaim;
++  uint32_t MakOSClaimState() const {
++    return static_cast<uint32_t>(mConnectionState) |
++           (static_cast<uint32_t>(mExperienceState) << 8);
++  }
++#endif
++  // END MakOS connection claim fields
+ 
+   // Activate causes the given transaction to be processed on this
+   // connection.  It fails if there is already an existing transaction unless
+diff --git a/netwerk/protocol/http/PendingTransactionInfo.cpp b/netwerk/protocol/http/PendingTransactionInfo.cpp
+--- a/netwerk/protocol/http/PendingTransactionInfo.cpp
++++ b/netwerk/protocol/http/PendingTransactionInfo.cpp
+@@ -44,6 +44,7 @@
+ }
+ 
+ bool PendingTransactionInfo::IsAlreadyClaimedInitializingConn() {
++  MAKOS_TX_CAPTURE(makosChannel, mTransaction.get());
+   LOG(
+       ("PendingTransactionInfo::IsAlreadyClaimedInitializingConn "
+        "[trans=%p, halfOpen=%p, activeConn=%p]\n",
+@@ -63,6 +64,7 @@
+          "[trans=%p, dnsAndSock=%p]\n",
+          mTransaction.get(), dnsAndSock.get()));
+     if (dnsAndSock) {
++      MAKOS_TX_TRACE(makosChannel, "pending-dns-live", NS_OK, false, 0, 0);
+       alreadyDnsAndSockOrWaitingForTLS = true;
+     } else {
+       // If we have not found the halfOpen socket, remove the pointer.
+@@ -86,6 +88,7 @@
+         ((activeConn->Transaction() &&
+           activeConn->Transaction()->IsNullTransaction()) ||
+          (!activeConn->Transaction() && activeConn->CanReuse()))) {
++      MAKOS_TX_TRACE(makosChannel, "pending-tls-live", NS_OK, false, 0, 0);
+       alreadyDnsAndSockOrWaitingForTLS = true;
+     } else {
+       // If we have not found the connection, remove the pointer.
+@@ -108,6 +111,8 @@
+     DnsAndConnectSocket* sock) {
+   mDnsAndSock =
+       do_GetWeakReference(static_cast<nsISupportsWeakReference*>(sock));
++  MAKOS_TX_CAPTURE(makosChannel, mTransaction.get());
++  MAKOS_CONN_CLAIM(sock, makosChannel, "claim-dns");
+ }
+ 
+ bool PendingTransactionInfo::TryClaimingActiveConn(HttpConnectionBase* conn) {
+@@ -117,6 +122,8 @@
+   if (nullTrans && nullTrans->Claim()) {
+     mActiveConn =
+         do_GetWeakReference(static_cast<nsISupportsWeakReference*>(conn));
++    MAKOS_TX_CAPTURE(makosChannel, mTransaction.get());
++    MAKOS_CONN_CLAIM(conn, makosChannel, "claim-tls");
+     nsCOMPtr<nsITLSSocketControl> tlsSocketControl;
+     conn->GetTLSSocketControl(getter_AddRefs(tlsSocketControl));
+     if (tlsSocketControl) {
+@@ -130,6 +137,8 @@
+ void PendingTransactionInfo::AddDnsAndConnectSocket(DnsAndConnectSocket* sock) {
+   mDnsAndSock =
+       do_GetWeakReference(static_cast<nsISupportsWeakReference*>(sock));
++  MAKOS_TX_CAPTURE(makosChannel, mTransaction.get());
++  MAKOS_CONN_CLAIM(sock, makosChannel, "claim-new-dns");
+ }
+ 
+ }  // namespace net
+diff --git a/netwerk/protocol/http/nsHttpConnection.cpp b/netwerk/protocol/http/nsHttpConnection.cpp
+--- a/netwerk/protocol/http/nsHttpConnection.cpp
++++ b/netwerk/protocol/http/nsHttpConnection.cpp
+@@ -696,6 +696,7 @@
+ }
+ 
+ void nsHttpConnection::Close(nsresult reason, bool aIsShutdown) {
++  MAKOS_CONN_ONCE(this, 4, "claim-close", reason, false);
+   LOG(("nsHttpConnection::Close [this=%p reason=%" PRIx32
+        " mExperienceState=%x]\n",
+        this, static_cast<uint32_t>(reason),
+@@ -1489,6 +1490,7 @@
+ 
+ void nsHttpConnection::CloseTransaction(nsAHttpTransaction* trans,
+                                         nsresult reason, bool aIsShutdown) {
++  MAKOS_CONN_ONCE(this, 8, "claim-close-transaction", reason, false);
+   LOG(("nsHttpConnection::CloseTransaction[this=%p trans=%p reason=%" PRIx32
+        "]\n",
+        this, trans, static_cast<uint32_t>(reason)));
+@@ -1609,6 +1611,7 @@
+ }
+ 
+ nsresult nsHttpConnection::OnSocketWritable() {
++  MAKOS_CONN_ONCE(this, 1, "claim-writable", NS_OK, false);
+   LOG(("nsHttpConnection::OnSocketWritable [this=%p] host=%s\n", this,
+        mConnInfo->Origin()));
+ 
+@@ -1667,6 +1670,7 @@
+              mTlsHandshaker->TlsHandshakeComplitionPending())) {
+           // The handshake is not done and we cannot write 0RTT data or nss has
+           // already finished 0RTT data.
++          MAKOS_CONN_ONCE(this, 16, "claim-write-npn-wait", NS_OK, false);
+           mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
+         } else if (!mTransaction) {
+           rv = NS_ERROR_FAILURE;
+@@ -1800,6 +1804,7 @@
+ }
+ 
+ nsresult nsHttpConnection::OnSocketReadable() {
++  MAKOS_CONN_ONCE(this, 2, "claim-readable", NS_OK, false);
+   LOG(("nsHttpConnection::OnSocketReadable [this=%p]\n", this));
+ 
+   PRIntervalTime now = PR_IntervalNow();
+@@ -1834,6 +1839,7 @@
+ 
+   do {
+     if (!TunnelSetupInProgress() && !mTlsHandshaker->EnsureNPNComplete()) {
++      MAKOS_CONN_ONCE(this, 32, "claim-read-npn-wait", NS_OK, false);
+       // Unless we are setting up a tunnel via CONNECT, prevent reading
+       // from the socket until the results of NPN
+       // negotiation are known (which is determined from the write path).
+@@ -2427,6 +2433,7 @@
+ }
+ 
+ void nsHttpConnection::HandshakeDoneInternal() {
++  MAKOS_CONN_ONCE(this, 64, "claim-handshake-callback", NS_OK, false);
+   LOG(("nsHttpConnection::HandshakeDoneInternal [this=%p]\n", this));
+   if (mTlsHandshaker->NPNComplete()) {
+     return;
+diff --git a/netwerk/protocol/http/nsHttpConnectionMgr.cpp b/netwerk/protocol/http/nsHttpConnectionMgr.cpp
+--- a/netwerk/protocol/http/nsHttpConnectionMgr.cpp
++++ b/netwerk/protocol/http/nsHttpConnectionMgr.cpp
+@@ -1024,8 +1024,11 @@
+         pendingTransInfo->IsAlreadyClaimedInitializingConn();
+ 
+     // The transaction could be closed after calling TryDispatchTransaction
++    MAKOS_TX_CAPTURE(makosPendingChannel, pendingTransInfo->Transaction());
+     rv = TryDispatchTransaction(ent, alreadyDnsAndConnectSocketOrWaitingForTLS,
+                                 pendingTransInfo);
++    MAKOS_TX_TRACE(makosPendingChannel, "pending-dispatch-return", rv, true,
++                   alreadyDnsAndConnectSocketOrWaitingForTLS, 0);
+     if (NS_SUCCEEDED(rv) || (rv != NS_ERROR_NOT_AVAILABLE) ||
+         pendingTransInfo->Transaction()->Closed()) {
+       if (NS_SUCCEEDED(rv)) {
+@@ -1654,6 +1657,10 @@
+ nsresult nsHttpConnectionMgr::DispatchTransaction(ConnectionEntry* ent,
+                                                   nsHttpTransaction* trans,
+                                                   HttpConnectionBase* conn) {
++  MAKOS_TX_CAPTURE(makosDispatchChannel, trans);
++  MAKOS_CONN_CAPTURE(makosClaim, conn);
++  MAKOS_TX_TRACE(makosDispatchChannel, "dispatch-on-connection", NS_OK, false,
++                 makosClaim.token, makosClaim.channel == makosDispatchChannel);
+   uint32_t caps = trans->Caps();
+   int32_t priority = trans->Priority();
+   nsresult rv;
+@@ -2504,6 +2511,9 @@
+ }
+ 
+ void nsHttpConnectionMgr::OnMsgReclaimConnection(HttpConnectionBase* conn) {
++  MAKOS_CONN_CAPTURE(makosClaim, conn);
++  MAKOS_CONN_TRACE(makosClaim, "claim-reclaim-enter", NS_OK, false,
++                   conn->MakOSClaimState());
+   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+ 
+   //
+@@ -2601,6 +2611,7 @@
+   }
+ 
+   OnMsgProcessPendingQ(0, ci);
++  MAKOS_CONN_TRACE(makosClaim, "claim-reclaim-pending-return", NS_OK, false, 0);
+ }
+ 
+ void nsHttpConnectionMgr::OnMsgCompleteUpgrade(int32_t, ARefBase* param) {

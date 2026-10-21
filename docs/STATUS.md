@@ -1,6 +1,21 @@
 # Implementation status
 
-Last updated: 2026-10-18.
+Last updated: 2026-10-21.
+
+## Connection continuation in development
+
+[Claimed-connection diagnostics](FIREFOX-CONNECTION-CLAIM-20261021.md) add
+historical channel/token observations across existing DNS/TLS callbacks and
+reclamation. Host checks pass16cases/7controls with complete pinned-file policy
+erasure. Unit/check386.36s, widget887.13s and supported68 release2123.61s pass
+exit0, including all five ELF audits and provenance. Supported integration6000.77s
+and final preflight0.98s pass exit0; new image8d4e097da8deae9c and manifest164fd6da
+preserve source metadata/account/profile state. Guest qualification remains
+pending. This is not a browser fix. Prior67 source/release and both masters
+were independently preserved and verified. User-authorized obsolete-test cleanup
+freed26GiB; `build/cleanup-20261021.json` supersedes old retained-private-disk
+statements. Current master/account/profile and latest complete failure remain.
+No original-spec audit row is upgraded.
 
 ## Current qualification update
 

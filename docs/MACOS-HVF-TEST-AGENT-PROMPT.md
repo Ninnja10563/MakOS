@@ -1,5 +1,50 @@
 # MakOS macOS/HVF milestone test-agent prompt
 
+## Current connection-continuation increment (2026-10-21)
+
+Read `docs/FIREFOX-CONNECTION-CLAIM-20261021.md`. Patch0068 traces historical
+claimed-connection identity across DNS/TLS continuation without changing policy.
+Pinned-source host regression passes16cases/7controls. Unit/check386.36s,
+widget887.13s and supported68 release2123.61s pass exit0, including all five
+ELF audits and provenance. Supported integration6000.77s and final unchanged
+preflight0.98s pass exit0. Fresh qualification remains pending;
+do not launch the failed67
+image again or restamp it. The new series is68patches, SHA-256
+`561b3ec9adefecd4d3b0e4fe298be06a96c31042f426b01b2a1cfced80fb46df`.
+Release markers must report 68 patches with exact ordered series identity above.
+Preflight must validate pinned source, 68-patch series and all five artifact
+hashes. Require the measured new image/manifest below and exact published commit.
+Add `python3 ports/firefox/test-runtime-connection.py --source-dir build/ports/firefox/source`
+after the transaction host check in the release sequence below. Every runtime
+command, readiness condition, assertion, timeout and first-failure stop remains.
+Historical67 publication below is retained evidence, not68 runtime authority.
+Current source/release and latest complete failure are preserved. User-approved
+October21 cleanup removed older test clones; `build/cleanup-20261021.json`
+supersedes historical claims that every old private disk remains available.
+
+Current68 publication overrides every historical image/series instruction below:
+
+```sh
+INTEGRATED_IMAGE=build/makos-firefox-connection-gjp2lha0/makos-integrated-8d4e097da8deae9c.img
+shasum -a 256 "$INTEGRATED_IMAGE"
+python3 scripts/verify_firefox_runtime_image.py "$INTEGRATED_IMAGE"
+```
+
+Require image SHA-256
+`8d4e097da8deae9cdba03662a8343af42c5f0ba5d6006daf4d7001d1f5a9616f`
+and sibling manifest SHA-256
+`164fd6dad1fa4889e9d1d29daa1074291b0690d386f438c042aa9679ab930e20`.
+Source master/manifest, metadata and account/profile preservation pass.
+Independent candidate and runtime-record copies remain retained in
+`build/logs/firefox-connection-20261021-79phshi0/`. Reuse this exact new
+publication; no redundant rebuild, restamp, profile edit or old-image substitution.
+Use the exact published connection-continuation commit supplied in chat, with
+clean HEAD/main/origin/main/remote-main equality. Run the complete step3 sequence,
+then the image hash/preflight above, then the unchanged step5 Firefox command.
+All readiness conditions, assertions, deadlines and first-failure stop remain.
+Only a strict Firefox pass permits step6 visible login. The historical entries
+below do not authorize retrying their failed commits or borrowing their passes.
+
 ## Completed peer-FIN attempt (2026-10-18 UTC)
 
 Exact1d39533fe8f03794122ccd1527b27c12452a80f0: unit/check490.35s, image1.17s,

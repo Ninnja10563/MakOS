@@ -1,5 +1,16 @@
 # Build and test
 
+Current development (2026-10-21): read
+[claimed-connection continuation](FIREFOX-CONNECTION-CLAIM-20261021.md).
+Patch0068 has pinned-source host evidence16cases/7controls. Unit/check386.36s,
+widget887.13s and supported68 release2123.61s pass exit0, including all five
+ELF audits and provenance. Integration6000.77s and final preflight0.98s pass exit0.
+Use new68 image8d4e097da8deae9c/manifest164fd6da pinned in the Mac protocol for
+fresh strict qualification; old67 bytes cannot be restamped. The existing
+Mac toolchain, Python roles, release path and every runtime bound remain.
+User-approved cleanup inventory is `build/cleanup-20261021.json`; current
+masters and latest failure remain, older private test clones listed there do not.
+
 ## Supported host path
 
 Apple Silicon macOS uses native ARM QEMU to emulate full-featured x86_64 MakOS

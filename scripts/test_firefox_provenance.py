@@ -14,9 +14,9 @@ import tempfile
 import firefox_provenance as provenance
 
 
-EXPECTED_PATCH_COUNT = 67
+EXPECTED_PATCH_COUNT = 68
 EXPECTED_PATCH_SHA256 = (
-    "c870df920805a85a37f829aea92fb7e51786a0b57d317e95e65aa0dce09fea71"
+    "561b3ec9adefecd4d3b0e4fe298be06a96c31042f426b01b2a1cfced80fb46df"
 )
 
 
@@ -425,6 +425,7 @@ def main() -> int:
         64: "117c028eda1c76c6c001b7fed6a6fc320e280e810e9f01e4c0d36917efa080b7",
         65: "465b7e7a990c1421241629bb32f1bcb08c0fa57b0aa733a6a1b90f1105d4c83c",
         66: "b57023ccff08bcf379f8085a1a6492e8a5fff5fc7aa5b8a60f4a879696584efe",
+        67: "c870df920805a85a37f829aea92fb7e51786a0b57d317e95e65aa0dce09fea71",
     }
     patches = sorted((provenance.ROOT / "ports/firefox/patches").glob("*.patch"))
     for previous_count, previous_identity in previous_identities.items():
